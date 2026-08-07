@@ -2,6 +2,7 @@ import type { Sql, TransactionSql } from 'postgres';
 import type { Announcement, AnnouncementInput } from './types.js';
 import { newAnnouncementId, makeSlug } from './ids.js';
 import { validateAnnouncement } from './validate.js';
+import { enqueueDeliveries } from './outbox.js';
 
 export function rowToAnnouncement(r: Record<string, unknown>): Announcement {
   return {
@@ -59,4 +60,46 @@ export async function reviseDraft(sql: Sql, id: string, input: AnnouncementInput
 export async function getLatest(sql: Sql, id: string): Promise<Announcement | undefined> {
   const rows = await sql`select * from announcements where id = ${id} order by revision desc limit 1`;
   return rows[0] ? rowToAnnouncement(rows[0]) : undefined;
+}
+
+export class FourEyesError extends Error {
+  constructor() { super('critical announcements require confirmation by a different publisher'); }
+}
+
+async function performPublish(tx: TransactionSql, a: Announcement, confirmer: string): Promise<Announcement> {
+  const [row] = await tx`update announcements
+    set status = 'published', published_at = now(), publish_confirmed_by = ${confirmer}
+    where id = ${a.id} and revision = ${a.revision} returning *`;
+  const published = rowToAnnouncement(row);
+  await enqueueDeliveries(tx, published, 'publish');
+  await tx`insert into audit_log (actor, action, target, detail)
+    values (${confirmer}, 'publish_confirmed', ${a.id}, ${JSON.stringify({ revision: a.revision })})`;
+  return published;
+}
+
+export async function requestPublish(sql: Sql, id: string, actor: string): Promise<Announcement> {
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'draft') throw new Error(`cannot request publish from status ${a.status}`);
+    if (a.severity !== 'critical') return performPublish(tx, a, actor);
+    const [row] = await tx`update announcements
+      set status = 'publish_requested', publish_requested_by = ${actor}
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'publish_requested', ${id}, ${JSON.stringify({ revision: a.revision })})`;
+    return rowToAnnouncement(row);
+  });
+}
+
+export async function confirmPublish(sql: Sql, id: string, actor: string): Promise<Announcement> {
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'publish_requested') throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
+    if (a.severity === 'critical' && a.publishRequestedBy === actor) throw new FourEyesError();
+    return performPublish(tx, a, actor);
+  });
 }
