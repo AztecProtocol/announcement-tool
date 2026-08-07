@@ -1,5 +1,6 @@
 import postgres from 'postgres';
 import { runFanoutOnce } from './fanout.js';
+import { evaluateChannelHealth } from '../core/health.js';
 import type { ChannelAdapter } from '../adapters/types.js';
 import { makeWebhookAdapter } from '../adapters/webhook.js';
 
@@ -12,6 +13,8 @@ setInterval(async () => {
   try {
     const { delivered, failed } = await runFanoutOnce(sql, adapters);
     if (delivered || failed) console.log(`fanout: delivered=${delivered} failed=${failed}`);
+    const issues = await evaluateChannelHealth(sql);
+    for (const i of issues) console.warn(`HEALTH ${i.kind} [${i.channel}] ${i.announcementId}: ${i.detail}`);
   } catch (err) {
     console.error('fanout tick error:', err);
   }
