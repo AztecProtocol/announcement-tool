@@ -5,7 +5,6 @@ export const TEST_DB_URL =
   process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 
 let migrated = false;
-let cachedSql: Sql | undefined;
 
 export async function testSql(): Promise<Sql> {
   if (!migrated) { await migrate(TEST_DB_URL); migrated = true; }

@@ -7,7 +7,7 @@ import type { AnnouncementInput } from '../src/core/types.js';
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
 beforeEach(async () => { await resetDb(sql); });
-afterAll(async () => { /* do not close, shared connection */ });
+afterAll(async () => { await sql.end(); });
 
 const input: AnnouncementInput = {
   type: 'upgrade', networks: ['mainnet'], audiences: ['operators'], severity: 'critical',
