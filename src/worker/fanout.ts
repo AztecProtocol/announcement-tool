@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres';
 import type { ChannelAdapter } from '../adapters/types.js';
 import { rowToAnnouncement } from '../core/announcements.js';
+import type { DeliveryKind } from '../core/types.js';
 
 export const BACKOFF_MINUTES = [2, 5, 10, 20, 30];
 export const MAX_ATTEMPTS = 5;
@@ -28,10 +29,20 @@ export async function runFanoutOnce(
     for (const row of due) {
       const annRows = await tx`select * from announcements
         where id = ${row.announcement_id} and revision = ${row.revision}`;
+      if (!annRows[0]) {
+        // Poison row: the announcement was deleted out from under this ledger entry.
+        // Mark it exhausted (not delivered) so it stops heading every future batch —
+        // without this it throws below and stalls the whole pipeline forever.
+        await tx`update delivery_ledger
+          set status = 'exhausted', last_error = ${'announcement missing'}
+          where announcement_id = ${row.announcement_id} and revision = ${row.revision}
+            and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
+        continue;
+      }
       const a = rowToAnnouncement(annRows[0]);
       const attempts = (row.attempts as number) + 1;
       try {
-        await adapters[row.channel as string].deliver(a, row.target as string, row.kind as never);
+        await adapters[row.channel as string].deliver(a, row.target as string, row.kind as DeliveryKind);
         await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now()
           where announcement_id = ${row.announcement_id} and revision = ${row.revision}
             and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
@@ -39,6 +50,8 @@ export async function runFanoutOnce(
       } catch (err) {
         const exhausted = attempts >= MAX_ATTEMPTS;
         const backoff = BACKOFF_MINUTES[Math.min(attempts - 1, BACKOFF_MINUTES.length - 1)];
+        // health.ts's exhausted-window relies on next_attempt_at being written here on
+        // exhaustion and then staying frozen (nothing updates it again after this row exhausts).
         await tx`update delivery_ledger
           set status = ${exhausted ? 'exhausted' : 'failed'}, attempts = ${attempts},
               last_error = ${String(err).slice(0, 500)},

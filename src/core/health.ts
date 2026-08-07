@@ -10,6 +10,9 @@ export interface HealthIssue {
 export async function evaluateChannelHealth(sql: Sql, sinceHours = 24): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = [];
 
+  // This window works because next_attempt_at is set to roughly (exhaustion time + final
+  // backoff) by fanout.ts when a row exhausts, and is never touched again afterward — so
+  // it stays a static, comparable timestamp for "was this exhausted recently."
   const exhausted = await sql`select announcement_id, channel, target, last_error from delivery_ledger
     where status = 'exhausted' and next_attempt_at > now() - make_interval(hours => ${sinceHours})`;
   for (const r of exhausted) {

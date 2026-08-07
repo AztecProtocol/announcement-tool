@@ -44,6 +44,12 @@ describe('assertDeliverableUrl', () => {
     expect(() => assertDeliverableUrl('https://ops.example.com/h')).not.toThrow();
     expect(() => assertDeliverableUrl('http://127.0.0.1/h', true)).not.toThrow();
   });
+
+  it('blocks 0.0.0.0 and IPv4-mapped IPv6 private/loopback addresses', () => {
+    for (const bad of ['https://0.0.0.0/h', 'https://[::ffff:127.0.0.1]/h']) {
+      expect(() => assertDeliverableUrl(bad)).toThrow();
+    }
+  });
 });
 
 describe('makeWebhookAdapter', () => {
@@ -76,6 +82,18 @@ describe('makeWebhookAdapter', () => {
     await verifySubscription(sql, sub.id);
     const adapter = makeWebhookAdapter(sql, { allowPrivateHosts: true });
     await expect(adapter.deliver(ann, sub.id, 'publish')).rejects.toThrow(/500/);
+    server.close();
+  });
+
+  it('rejects on a redirect response instead of following it (SSRF via 302)', async () => {
+    const { server, url } = await listen((_req, res) => {
+      res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' });
+      res.end();
+    });
+    const sub = await createSubscription(sql, { channel: 'webhook', endpoint: url });
+    await verifySubscription(sql, sub.id);
+    const adapter = makeWebhookAdapter(sql, { allowPrivateHosts: true });
+    await expect(adapter.deliver(ann, sub.id, 'publish')).rejects.toThrow();
     server.close();
   });
 });

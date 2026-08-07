@@ -17,7 +17,7 @@ const DEFAULTS: SubscriptionFilters = {
   audiences: ['operators'],
 };
 
-function rowToSub(r: Record<string, unknown>): Subscription {
+export function rowToSub(r: Record<string, unknown>): Subscription {
   return {
     id: r.id as string, channel: r.channel as 'email' | 'webhook', endpoint: r.endpoint as string,
     verified: r.verified as boolean, secret: (r.secret as string | null) ?? undefined,

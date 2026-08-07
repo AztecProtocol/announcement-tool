@@ -12,14 +12,33 @@ const PRIVATE_HOST = [
   /^localhost$/i, /\.local$/i,
   /^127\./, /^10\./, /^192\.168\./, /^169\.254\./,
   /^172\.(1[6-9]|2\d|3[01])\./,
+  /^0\.0\.0\.0$/,
   /^::1$/, /^\[::1\]$/,
+  // IPv4-mapped IPv6, textual dotted-quad form (e.g. ::ffff:127.0.0.1), bracketed or not
+  /^\[?::ffff:127\./i, /^\[?::ffff:10\./i, /^\[?::ffff:192\.168\./i, /^\[?::ffff:169\.254\./i,
+  /^\[?::ffff:172\.(1[6-9]|2\d|3[01])\./i,
 ];
+
+const IPV4_MAPPED_HEX = /^\[?::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]?$/i;
+
+/** Recover the embedded IPv4 address from an IPv4-mapped IPv6 hostname in the compressed
+ * hex-group form Node's URL parser normalizes to (e.g. ::ffff:127.0.0.1 -> [::ffff:7f00:1]).
+ * Returns undefined if the hostname isn't in that form. */
+function extractMappedIpv4Hex(hostname: string): string | undefined {
+  const hex = IPV4_MAPPED_HEX.exec(hostname);
+  if (!hex) return undefined;
+  const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16);
+  return [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff].join('.');
+}
 
 export function assertDeliverableUrl(url: string, allowPrivateHosts = false): void {
   const u = new URL(url);
   if (allowPrivateHosts) return;
   if (u.protocol !== 'https:') throw new Error(`webhook url must be https: ${url}`);
-  if (PRIVATE_HOST.some(re => re.test(u.hostname))) throw new Error(`webhook url host not allowed: ${u.hostname}`);
+  const mappedIpv4 = extractMappedIpv4Hex(u.hostname);
+  const blocked = PRIVATE_HOST.some(re => re.test(u.hostname))
+    || (mappedIpv4 !== undefined && PRIVATE_HOST.some(re => re.test(mappedIpv4)));
+  if (blocked) throw new Error(`webhook url host not allowed: ${u.hostname}`);
 }
 
 export function makeWebhookAdapter(
@@ -55,6 +74,7 @@ export function makeWebhookAdapter(
           'x-announce-signature': `v1=${signPayload(sub.secret, ts, body)}`,
         },
         body,
+        redirect: 'error',
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) throw new Error(`webhook delivery failed: HTTP ${res.status}`);

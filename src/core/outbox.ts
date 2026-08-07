@@ -1,6 +1,6 @@
 import type { TransactionSql } from 'postgres';
 import type { Announcement, AnnouncementType, DeliveryKind, DeliveryTarget, Network } from './types.js';
-import { matchesSubscription, type Subscription } from './subscriptions.js';
+import { matchesSubscription, rowToSub } from './subscriptions.js';
 
 export interface ChannelSetting {
   key: string; channel: 'discord' | 'telegram' | 'signal';
@@ -33,15 +33,7 @@ export async function enqueueDeliveries(tx: TransactionSql, a: Announcement, kin
 
   const subs = await tx`select * from subscriptions where verified = true`;
   for (const row of subs) {
-    const s: Subscription = {
-      id: row.id as string, channel: row.channel as 'email' | 'webhook', endpoint: row.endpoint as string,
-      verified: true, secret: (row.secret as string | null) ?? undefined,
-      filters: {
-        networks: row.filter_networks as never, types: row.filter_types as never,
-        severities: row.filter_severities as never, audiences: row.filter_audiences as never,
-      },
-      unsubscribeToken: row.unsubscribe_token as string,
-    };
+    const s = rowToSub(row);
     if (matchesSubscription(a, s)) targets.push({ channel: s.channel, target: s.id });
   }
 
