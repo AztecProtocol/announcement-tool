@@ -71,15 +71,16 @@ describe('runFanoutOnce', () => {
   });
 
   it('an orphaned ledger row (announcement deleted) is marked exhausted and does not block the batch', async () => {
-    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target)
-      values ('ann_missing', 1, 'publish', 'webhook', 'sub_orphan')`;
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, next_attempt_at)
+      values ('ann_missing', 1, 'publish', 'webhook', 'sub_orphan', now() - interval '2 days')`;
     const calls: string[] = [];
     const res = await runFanoutOnce(sql, { webhook: okAdapter(calls) });
     expect(res).toEqual({ delivered: 1, failed: 0 });
     expect(calls).toEqual(['ann_w:sub_1']);
-    const [orphan] = await sql`select status, attempts, last_error from delivery_ledger where target = 'sub_orphan'`;
+    const [orphan] = await sql`select status, last_error, next_attempt_at > now() - interval '1 minute' as stamped from delivery_ledger where target = 'sub_orphan'`;
     expect(orphan.status).toBe('exhausted');
     expect(orphan.last_error).toBe('announcement missing');
+    expect(orphan.stamped).toBe(true); // health.ts's exhausted window needs a fresh timestamp
     const [good] = await sql`select status from delivery_ledger where target = 'sub_1'`;
     expect(good.status).toBe('delivered');
   });

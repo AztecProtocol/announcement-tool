@@ -33,8 +33,10 @@ export async function runFanoutOnce(
         // Poison row: the announcement was deleted out from under this ledger entry.
         // Mark it exhausted (not delivered) so it stops heading every future batch —
         // without this it throws below and stalls the whole pipeline forever.
+        // next_attempt_at is stamped here for the same reason as the catch branch below:
+        // health.ts's exhausted-window compares against it.
         await tx`update delivery_ledger
-          set status = 'exhausted', last_error = ${'announcement missing'}
+          set status = 'exhausted', last_error = ${'announcement missing'}, next_attempt_at = now()
           where announcement_id = ${row.announcement_id} and revision = ${row.revision}
             and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
         continue;
