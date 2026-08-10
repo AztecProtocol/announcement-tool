@@ -6,7 +6,12 @@
     "migrate": "tsx src/db/migrate-cli.ts",
     "worker": "tsx src/worker/main.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "setup:channel": "tsx scripts/setup-channel.ts",
+    "test:send": "tsx scripts/send-test-announcement.ts",
+    "test:subscriber": "tsx scripts/add-email-subscriber.ts",
+    "test:status": "tsx scripts/status.ts",
+    "test:reset": "tsx scripts/reset-test-data.ts"
   },
   "dependencies": {
     "postgres": "^3.4.9",
