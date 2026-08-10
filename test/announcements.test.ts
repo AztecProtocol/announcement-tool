@@ -3,6 +3,7 @@ import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { createDraft, reviseDraft, getLatest } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
+import { renderPlain, renderMarkdown } from '../src/core/render.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
@@ -38,5 +39,52 @@ describe('announcement lifecycle', () => {
 
   it('rejects invalid input', async () => {
     await expect(createDraft(sql, { ...input, networks: [] }, 'yev@aztec.foundation')).rejects.toThrow();
+  });
+});
+
+describe('jsonb columns store real arrays, not double-encoded strings', () => {
+  const inputWithData: AnnouncementInput = {
+    type: 'upgrade', networks: ['mainnet'], audiences: ['operators'], severity: 'critical',
+    title: 'Upgrade to v5.1.0', bodyMd: 'Do it.',
+    actionsRequired: [{ action: 'Update your node', deadline: '2026-09-01T00:00:00Z', applies_to: ['sequencers'] }],
+    links: [{ label: 'GitHub release', url: 'https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0' }],
+  };
+
+  it('round-trips actionsRequired and links as real jsonb arrays', async () => {
+    const created = await createDraft(sql, inputWithData, 'yev@aztec.foundation');
+    const a = await getLatest(sql, created.id);
+    expect(a).toBeDefined();
+
+    expect(Array.isArray(a!.actionsRequired)).toBe(true);
+    expect(Array.isArray(a!.links)).toBe(true);
+    expect(a!.actionsRequired[0].action).toBe('Update your node');
+    expect(a!.links[0].url).toBe('https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0');
+
+    const [typeCheck] = await sql`
+      select jsonb_typeof(actions_required) as ar_type, jsonb_typeof(links) as links_type
+      from announcements where id = ${created.id} order by revision desc limit 1`;
+    expect(typeCheck.ar_type).toBe('array');
+    expect(typeCheck.links_type).toBe('array');
+  });
+
+  it('renders an announcement read back from the database without throwing', async () => {
+    const created = await createDraft(sql, inputWithData, 'yev@aztec.foundation');
+    const a = await getLatest(sql, created.id);
+    expect(a).toBeDefined();
+
+    expect(() => renderPlain(a!, 'publish')).not.toThrow();
+    expect(() => renderMarkdown(a!, 'publish')).not.toThrow();
+
+    const plain = renderPlain(a!, 'publish');
+    const md = renderMarkdown(a!, 'publish');
+    expect(plain).toContain('Update your node');
+    expect(md).toContain('Update your node');
+  });
+
+  it('stores audit_log detail as real jsonb, not a string', async () => {
+    const created = await createDraft(sql, inputWithData, 'yev@aztec.foundation');
+    const [row] = await sql`
+      select jsonb_typeof(detail) as detail_type from audit_log where target = ${created.id} limit 1`;
+    expect(row.detail_type).toBe('object');
   });
 });

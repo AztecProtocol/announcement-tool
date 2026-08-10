@@ -1,8 +1,15 @@
-import type { Sql, TransactionSql } from 'postgres';
+import type { Sql, TransactionSql, JSONValue } from 'postgres';
 import type { Announcement, AnnouncementInput } from './types.js';
 import { newAnnouncementId, makeSlug } from './ids.js';
 import { validateAnnouncement } from './validate.js';
 import { enqueueDeliveries } from './outbox.js';
+
+// `sql.json()` wants postgres's structural JSONValue type, which readonly array/interface
+// shapes (like ActionRequired[]/Link[]) don't satisfy nominally even though they're valid
+// JSON at runtime. This cast documents that gap instead of silently widening to `any`.
+function asJson<T>(value: T): JSONValue {
+  return value as unknown as JSONValue;
+}
 
 export function rowToAnnouncement(r: Record<string, unknown>): Announcement {
   return {
@@ -33,11 +40,11 @@ async function insertRevision(
      actions_required, links, status, supersedes, expires_at, created_by)
     values (${id}, ${revision}, ${slug}, ${input.type}, ${input.networks}, ${input.audiences},
             ${input.severity}, ${input.title}, ${input.bodyMd},
-            ${JSON.stringify(input.actionsRequired)}, ${JSON.stringify(input.links)},
+            ${tx.json(asJson(input.actionsRequired))}, ${tx.json(asJson(input.links))},
             ${status}, ${input.supersedes ?? null}, ${input.expiresAt ?? null}, ${actor})
     returning *`;
   await tx`insert into audit_log (actor, action, target, detail)
-    values (${actor}, ${auditAction}, ${id}, ${JSON.stringify({ revision })})`;
+    values (${actor}, ${auditAction}, ${id}, ${tx.json({ revision })})`;
   return rowToAnnouncement(row);
 }
 
@@ -73,7 +80,7 @@ async function performPublish(tx: TransactionSql, a: Announcement, confirmer: st
   const published = rowToAnnouncement(row);
   await enqueueDeliveries(tx, published, 'publish');
   await tx`insert into audit_log (actor, action, target, detail)
-    values (${confirmer}, 'publish_confirmed', ${a.id}, ${JSON.stringify({ revision: a.revision })})`;
+    values (${confirmer}, 'publish_confirmed', ${a.id}, ${tx.json({ revision: a.revision })})`;
   return published;
 }
 
@@ -88,7 +95,7 @@ export async function requestPublish(sql: Sql, id: string, actor: string): Promi
       set status = 'publish_requested', publish_requested_by = ${actor}
       where id = ${id} and revision = ${a.revision} returning *`;
     await tx`insert into audit_log (actor, action, target, detail)
-      values (${actor}, 'publish_requested', ${id}, ${JSON.stringify({ revision: a.revision })})`;
+      values (${actor}, 'publish_requested', ${id}, ${tx.json({ revision: a.revision })})`;
     return rowToAnnouncement(row);
   });
 }
