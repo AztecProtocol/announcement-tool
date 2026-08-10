@@ -23,7 +23,7 @@ export function makeEmailAdapter(
       await sender.send({
         to: sub.endpoint,
         subject,
-        text: text.replace('{{UNSUBSCRIBE}}', unsubscribeUrl),
+        text: text.replaceAll('{{UNSUBSCRIBE}}', unsubscribeUrl),
         headers: {
           'List-Unsubscribe': `<${unsubscribeUrl}>`,
           'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',

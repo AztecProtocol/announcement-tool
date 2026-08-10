@@ -3,7 +3,7 @@ import type { EmailSender } from '../adapters/esp.js';
 import { evaluateChannelHealth, type HealthIssue } from './health.js';
 
 export function alertKey(issue: HealthIssue): string {
-  return `${issue.kind}:${issue.channel}:${issue.announcementId}`;
+  return `${issue.kind}:${issue.channel}:${issue.target}:${issue.announcementId}:${issue.revision}`;
 }
 
 /**

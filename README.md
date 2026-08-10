@@ -146,7 +146,7 @@ insert into channel_settings (key, channel, config) values
 - `username` (optional) — overrides the webhook's default display name.
 - `networks` / `types` — used by the fan-out matcher to decide whether an announcement routes to this destination; not read by the adapter itself.
 - **Env vars:** none — the webhook URL carries its own auth.
-- **Failure mode:** any non-2xx response from Discord throws and is retried under the standard backoff; a missing `webhook_url` fails immediately (non-retryable in effect, since it will fail identically on every attempt) and shows up as `exhausted` in channel health.
+- **Failure mode:** any non-2xx response from Discord throws and is retried under the standard backoff; a missing `webhook_url` fails the same way and is retried through all five backoff steps, failing identically each time before showing up as `exhausted` in channel health.
 
 ### Telegram
 

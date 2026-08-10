@@ -8,7 +8,6 @@ let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
 beforeEach(async () => {
   await resetDb(sql);
-  await sql`delete from alert_state`;
   await sql`insert into announcements (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by, published_at)
     values ('ann_A', 1, 's', 'upgrade', '{mainnet}', '{operators}', 'critical', 'T', 'b', 'published', 'a@x', now())`;
   await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, attempts, last_error, next_attempt_at)
@@ -66,6 +65,29 @@ describe('dispatchHealthAlerts', () => {
     const [{ c }] = await sql`select count(*)::int as c from alert_state`;
     expect(c).toBe(0);
     if (saved !== undefined) process.env.ALERT_EMAIL_TO = saved;
+  });
+
+  it('reports two distinct issues for two targets on the same channel, not a collision', async () => {
+    // Same announcement, same channel (discord), two different per-topic targets both
+    // exhausted — must not collapse into a single alert_state key / single reported issue.
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, attempts, last_error, next_attempt_at)
+      values ('ann_A', 1, 'publish', 'discord', 'discord:mainnet-updates', 'exhausted', 5, 'webhook gone', now())`;
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, attempts, last_error, next_attempt_at)
+      values ('ann_A', 1, 'publish', 'discord', 'discord:testnet-updates', 'exhausted', 5, 'webhook gone too', now())`;
+
+    const { sender, sent } = recorder();
+    const issues = await dispatchHealthAlerts(sql, sender, { to: 'ops@aztec.foundation' });
+
+    const discordIssues = issues.filter(i => i.channel === 'discord');
+    expect(discordIssues).toHaveLength(2);
+    expect(new Set(discordIssues.map(alertKey)).size).toBe(2);
+
+    const rows = await sql`select key from alert_state where key like 'exhausted:discord:%'`;
+    expect(rows).toHaveLength(2);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain('discord:mainnet-updates');
+    expect(sent[0].text).toContain('discord:testnet-updates');
   });
 
   it('does not swallow a failing sender', async () => {

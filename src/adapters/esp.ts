@@ -18,7 +18,8 @@ async function postJson(
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => '');
+    const rawDetail = await res.text().catch(() => '');
+    const detail = rawDetail.length > 200 ? `${rawDetail.slice(0, 200)}…` : rawDetail;
     throw new Error(`${label} send failed: HTTP ${res.status} ${detail}`.trim());
   }
 }

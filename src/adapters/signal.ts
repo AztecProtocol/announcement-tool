@@ -8,6 +8,9 @@ import { renderPlain } from '../core/render.js';
  * (bbernhard/signal-cli-rest-api) holding a registered number. It is the least
  * reliable channel by design — errors carry the API body so channel-health
  * alerting surfaces registration/protocol breakage instead of silent loss.
+ * Note: that pass-through error body may include the account phone number —
+ * it reaches delivery_ledger.last_error and channel-health alert emails, so
+ * operators reading logs should not be surprised to see it there.
  */
 export function makeSignalAdapter(
   sql: Sql,
