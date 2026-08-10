@@ -6,3 +6,12 @@ services:
       POSTGRES_PASSWORD: announce
       POSTGRES_DB: announce
     ports: ["5499:5432"]
+  signal:
+    image: bbernhard/signal-cli-rest-api:latest
+    environment:
+      MODE: native
+    ports: ["8080:8080"]
+    volumes: ["signal-data:/home/.local/share/signal-cli"]
+
+volumes:
+  signal-data:
