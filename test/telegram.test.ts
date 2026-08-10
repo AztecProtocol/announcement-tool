@@ -76,4 +76,41 @@ describe('telegram adapter', () => {
     await expect(makeTelegramAdapter(sql, { botToken: 'T' }).deliver(ann, 'telegram:broken', 'publish'))
       .rejects.toThrow(/chat_id/);
   });
+
+  it('throws on unknown target (missing settings row)', async () => {
+    await expect(makeTelegramAdapter(sql, { botToken: 'T' }).deliver(ann, 'telegram:nope', 'publish'))
+      .rejects.toThrow(/telegram:nope/);
+  });
+
+  it('never leaks bot token in HTTP 200 ok:false error', async () => {
+    const { server, base } = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, description: 'auth failed' }));
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:main', 'telegram', ${sql.json({ chat_id: '@test' })})`;
+    try {
+      await makeTelegramAdapter(sql, { apiBase: base, botToken: 'SUPERSECRETTOKEN' }).deliver(ann, 'telegram:main', 'publish');
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(String(err)).not.toContain('SUPERSECRETTOKEN');
+    }
+    server.close();
+  });
+
+  it('never leaks bot token in HTTP error', async () => {
+    const { server, base } = await listen((_req, res) => {
+      res.writeHead(500);
+      res.end();
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:main', 'telegram', ${sql.json({ chat_id: '@test' })})`;
+    try {
+      await makeTelegramAdapter(sql, { apiBase: base, botToken: 'SUPERSECRETTOKEN' }).deliver(ann, 'telegram:main', 'publish');
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(String(err)).not.toContain('SUPERSECRETTOKEN');
+    }
+    server.close();
+  });
 });
