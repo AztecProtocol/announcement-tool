@@ -72,4 +72,20 @@ describe('dispatchHealthAlerts', () => {
     const failing: EmailSender = { name: 'boom', async send() { throw new Error('ESP down'); } };
     await expect(dispatchHealthAlerts(sql, failing, { to: 'ops@aztec.foundation' })).rejects.toThrow(/ESP down/);
   });
+
+  it('leaves the row un-notified after a failed send, so it is retried later', async () => {
+    const failing: EmailSender = { name: 'boom', async send() { throw new Error('ESP down'); } };
+    await expect(dispatchHealthAlerts(sql, failing, { to: 'ops@aztec.foundation' })).rejects.toThrow(/ESP down/);
+
+    const rows = await sql`select key, notified_at from alert_state`;
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every(r => r.notified_at === null)).toBe(true);
+
+    const { sender, sent } = recorder();
+    const retried = await dispatchHealthAlerts(sql, sender, { to: 'ops@aztec.foundation' });
+    expect(retried.length).toBeGreaterThan(0);
+    expect(sent).toHaveLength(1);
+    const rowsAfter = await sql`select key, notified_at from alert_state`;
+    expect(rowsAfter.every(r => r.notified_at !== null)).toBe(true);
+  });
 });
