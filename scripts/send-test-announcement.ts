@@ -77,9 +77,15 @@ async function main(): Promise<void> {
 
     console.log(`\nPublishing a ${input.severity} ${input.type} announcement…`);
     const draft = await createDraft(sql, input, 'tester-one@aztec.foundation');
-    await requestPublish(sql, draft.id, 'tester-one@aztec.foundation');
-    const published = await confirmPublish(sql, draft.id, 'tester-two@aztec.foundation');
-    console.log(`✓ Published ${published.id} (four-eyes: requested by tester-one, confirmed by tester-two)`);
+    const requested = await requestPublish(sql, draft.id, 'tester-one@aztec.foundation');
+    // Four-eyes applies to critical only: a critical announcement waits for a second
+    // publisher; recommended/info publish immediately on request.
+    const published = requested.status === 'publish_requested'
+      ? await confirmPublish(sql, draft.id, 'tester-two@aztec.foundation')
+      : requested;
+    console.log(requested.status === 'publish_requested'
+      ? `✓ Published ${published.id} (four-eyes: requested by tester-one, confirmed by tester-two)`
+      : `✓ Published ${published.id} (${input.severity} severity — no second confirmation needed, by design)`);
     console.log(`  Public page would be: /a/${published.slug}`);
 
     const queued = await sql`select channel, target from delivery_ledger
