@@ -4,6 +4,7 @@ import { testSql, resetDb } from './helpers.js';
 import { createDraft, reviseDraft, getLatest } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 import { renderPlain, renderMarkdown } from '../src/core/render.js';
+import { makeSlug } from '../src/core/ids.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
@@ -94,5 +95,17 @@ describe('jsonb columns store real arrays, not double-encoded strings', () => {
     const c = await createDraft(sql, input, 'yev@aztec.foundation');
     expect(b.slug).toBe(`${a.slug}-2`);
     expect(c.slug).toBe(`${a.slug}-3`);
+  });
+
+  it('gives up loudly once all 20 slug candidates are taken', async () => {
+    const base = makeSlug(new Date(), input.type, input.title);
+    const candidates = [base, ...Array.from({ length: 19 }, (_, i) => `${base}-${i + 2}`)];
+    for (const [i, slug] of candidates.entries()) {
+      await sql`insert into announcements
+        (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by)
+        values (${`ann_seed_${i}`}, 1, ${slug}, ${input.type}, ${input.networks}, ${input.audiences},
+                ${input.severity}, ${input.title}, ${input.bodyMd}, 'draft', 'a@x')`;
+    }
+    await expect(createDraft(sql, input, 'yev@aztec.foundation')).rejects.toThrow(/free slug/);
   });
 });

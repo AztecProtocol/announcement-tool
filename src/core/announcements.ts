@@ -53,12 +53,13 @@ export async function createDraft(sql: Sql, input: AnnouncementInput, actor: str
   const id = newAnnouncementId();
   const base = makeSlug(new Date(), input.type, input.title);
   return sql.begin(async tx => {
-    let slug = base;
-    for (let i = 2; i <= 20; i++) {
-      const taken = await tx`select 1 from announcements where slug = ${slug} limit 1`;
-      if (!taken[0]) break;
-      slug = `${base}-${i}`;
+    let slug: string | undefined;
+    for (let i = 1; i <= 20; i++) {
+      const candidate = i === 1 ? base : `${base}-${i}`;
+      const taken = await tx`select 1 from announcements where slug = ${candidate} limit 1`;
+      if (!taken[0]) { slug = candidate; break; }
     }
+    if (!slug) throw new Error(`could not find a free slug for "${base}" after 20 attempts`);
     return insertRevision(tx, id, 1, slug, input, 'draft', actor, 'draft_created');
   });
 }

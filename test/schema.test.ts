@@ -30,4 +30,17 @@ describe('schema', () => {
     expect(rows.length).toBe(2);
     expect(Number(rows[1].seq)).toBeGreaterThan(Number(rows[0].seq));
   });
+
+  it('rejects a duplicate revision-1 slug across different announcements, but allows the same slug on a later revision', async () => {
+    await sql`insert into announcements (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by)
+      values ('ann_dup1', 1, 'dup-slug', 'upgrade', '{mainnet}', '{operators}', 'critical', 't', 'b', 'draft', 'a@x')`;
+    await expect(sql`insert into announcements (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by)
+      values ('ann_dup2', 1, 'dup-slug', 'upgrade', '{mainnet}', '{operators}', 'critical', 't', 'b', 'draft', 'a@x')`)
+      .rejects.toThrow(/duplicate key/);
+    // A revision 2 row of the SAME announcement sharing the same slug is fine —
+    // the unique index only applies where revision = 1.
+    await expect(sql`insert into announcements (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by)
+      values ('ann_dup1', 2, 'dup-slug', 'upgrade', '{mainnet}', '{operators}', 'critical', 't', 'b', 'draft', 'a@x')`)
+      .resolves.toBeDefined();
+  });
 });
