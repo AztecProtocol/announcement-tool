@@ -98,4 +98,39 @@ describe('email double-opt-in', () => {
     expect(row.filter_severities).toEqual(['critical']);
     expect(row.verified).toBe(false);
   });
+
+  // Regression test for the same select-then-insert race documented above, but this
+  // one actually exercises the catch(23505) path directly (mirroring
+  // webhook-flow.test.ts's equivalent test), rather than only covering the
+  // fallback logic via a pre-created row. startEmailSubscription's
+  // `createSubscriptionImpl` override first calls the real createSubscription (so
+  // the row genuinely gets created — simulating the concurrent winner committing
+  // first) and then throws a Postgres-shaped 23505 error, so startEmailSubscription's
+  // own insert branch truly hits the catch block, re-selects the row, and falls
+  // through to updateExistingAndNotify — proving that exact code path never throws
+  // and sends exactly one confirmation email to the pre-existing row's token.
+  it('does not throw when the insert loses the unique-violation race (23505 catch path)', async () => {
+    const { sender, sent } = recorder();
+
+    let realSub: { id: string; verifyToken: string } | undefined;
+    const raceCreate: typeof createSubscription = async (sql2, input2) => {
+      const sub = await createSubscription(sql2, input2);
+      realSub = sub;
+      throw Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+    };
+
+    const res = await startEmailSubscription(sql, sender, {
+      email: 'race2@example.com', filters: { severities: ['critical'] },
+      createSubscriptionImpl: raceCreate,
+    });
+
+    expect(res).toBe('confirmation_sent');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe('race2@example.com');
+    expect(sent[0].text).toContain(`/confirm/${realSub!.verifyToken}`);
+    const [row] = await sql`select id, filter_severities, verified from subscriptions where endpoint = 'race2@example.com'`;
+    expect(row.id).toBe(realSub!.id);
+    expect(row.filter_severities).toEqual(['critical']);
+    expect(row.verified).toBe(false);
+  });
 });

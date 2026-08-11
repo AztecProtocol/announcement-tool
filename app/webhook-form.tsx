@@ -8,7 +8,7 @@ const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
 const SEVERITIES: Severity[] = ['critical', 'recommended', 'info'];
 const AUDIENCES: Audience[] = ['operators', 'ecosystem'];
 
-type Result = { secretOnce?: string; verified: boolean; error?: string };
+type Result = { secretOnce?: string; unsubscribeUrl?: string; verified: boolean; error?: string };
 
 async function action(_prev: Result | undefined, formData: FormData): Promise<Result> {
   return subscribeWebhook(formData);
@@ -43,8 +43,9 @@ export default function WebhookForm() {
           {result.error && <p>Error: {result.error}</p>}
           {result.secretOnce && (
             <>
-              <p>Store this now — it is shown only once.</p>
+              <p>Save both — shown only once. Store the secret to verify deliveries, and keep the unsubscribe link to stop or rotate this webhook later.</p>
               <pre>{result.secretOnce}</pre>
+              {result.unsubscribeUrl && <pre>{result.unsubscribeUrl}</pre>}
             </>
           )}
         </div>

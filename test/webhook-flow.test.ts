@@ -33,6 +33,7 @@ describe('registerWebhook', () => {
 
     expect(res.verified).toBe(true);
     expect(res.secretOnce).toMatch(/^whsec_/);
+    expect(res.unsubscribeUrl).toMatch(/^https:\/\/announce\.aztec\.foundation\/u\/[0-9a-f]{32}$/);
     const payload = JSON.parse(seen!.body);
     expect(payload.kind).toBe('test');
     expect(payload.event_id).toMatch(/^whtest_sub_/);
@@ -59,6 +60,7 @@ describe('registerWebhook', () => {
     const again = await registerWebhook(sql, { url, filters: { severities: ['critical'] }, allowPrivateHosts: true });
     server.close();
     expect(again.secretOnce).toBeUndefined();
+    expect(again.unsubscribeUrl).toBeUndefined();
     expect(again.verified).toBe(true);
     const [row] = await sql`select secret, filter_severities from subscriptions where endpoint = ${url}`;
     expect(`whsec_${''}`.length).toBeGreaterThan(0); // structure guard

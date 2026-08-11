@@ -17,12 +17,13 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
   const { preset, error } = await searchParams;
   const criticalsOnly = preset === 'criticals';
 
-  // Default: everything except the "info" type/severity, both audiences.
+  // Default: both networks, upgrade + governance types (info unchecked),
+  // critical + recommended severities (info unchecked), operators only.
   // Criticals-only preset: mainnet + critical only, both types, operators only.
   const isNetworkChecked = (v: Network) => (criticalsOnly ? v === 'mainnet' : true);
-  const isTypeChecked = () => true; // both presets keep all types checked
+  const isTypeChecked = (v: AnnouncementType) => (criticalsOnly ? true : v !== 'info');
   const isSeverityChecked = (v: Severity) => (criticalsOnly ? v === 'critical' : v !== 'info');
-  const isAudienceChecked = (v: Audience) => (criticalsOnly ? v === 'operators' : true);
+  const isAudienceChecked = (v: Audience) => v === 'operators';
 
   return (
     <>
@@ -52,7 +53,7 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
           <label htmlFor="email">Email address</label>
           <input id="email" type="email" name="email" placeholder="you@example.com" required />
           <fieldset><legend>Networks</legend>{NETWORKS.map(v => box('networks', v, isNetworkChecked(v)))}</fieldset>
-          <fieldset><legend>Types</legend>{TYPES.map(v => box('types', v, isTypeChecked()))}</fieldset>
+          <fieldset><legend>Types</legend>{TYPES.map(v => box('types', v, isTypeChecked(v)))}</fieldset>
           <fieldset><legend>Severities</legend>{SEVERITIES.map(v => box('severities', v, isSeverityChecked(v)))}</fieldset>
           <fieldset><legend>Audience</legend>{AUDIENCES.map(v => box('audiences', v, isAudienceChecked(v)))}</fieldset>
           <button type="submit">Subscribe by email</button>

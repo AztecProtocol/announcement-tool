@@ -9,7 +9,7 @@ export async function listPublished(sql: Sql, limit = 50): Promise<Announcement[
       select distinct on (id) * from announcements order by id, revision desc
     ) latest
     where latest.status = 'published'
-    order by latest.published_at desc
+    order by latest.published_at desc, latest.id desc
     limit ${limit}`;
   return rows.map(rowToAnnouncement);
 }

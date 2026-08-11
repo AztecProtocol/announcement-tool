@@ -6,6 +6,10 @@ function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505';
 }
 
+function base(baseUrl?: string): string {
+  return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+}
+
 function emptyFilterError(f?: Partial<SubscriptionFilters>): string | undefined {
   if (!f) return undefined;
   for (const [k, v] of Object.entries(f)) {
@@ -18,13 +22,13 @@ export async function registerWebhook(
   sql: Sql,
   input: {
     url: string; filters?: Partial<SubscriptionFilters>;
-    fetchImpl?: typeof fetch; allowPrivateHosts?: boolean; timeoutMs?: number;
+    fetchImpl?: typeof fetch; allowPrivateHosts?: boolean; timeoutMs?: number; baseUrl?: string;
     // Injectable in place of the real createSubscription — used by tests to
     // simulate the concurrent-insert race (create the row, then throw 23505)
     // without fighting ESM module mocking.
     createSubscriptionImpl?: typeof createSubscription;
   },
-): Promise<{ secretOnce?: string; verified: boolean; error?: string }> {
+): Promise<{ secretOnce?: string; unsubscribeUrl?: string; verified: boolean; error?: string }> {
   try {
     assertDeliverableUrl(input.url, input.allowPrivateHosts);
   } catch (err) {
@@ -38,7 +42,7 @@ export async function registerWebhook(
 
   const existing = await sql`select id, secret from subscriptions
     where channel = 'webhook' and endpoint = ${input.url}`;
-  let subId: string, secret: string, secretOnce: string | undefined;
+  let subId: string, secret: string, secretOnce: string | undefined, unsubscribeUrl: string | undefined;
   if (existing[0]) {
     subId = existing[0].id as string;
     secret = existing[0].secret as string;
@@ -48,6 +52,7 @@ export async function registerWebhook(
     try {
       const sub: Subscription = await doCreate(sql, { channel: 'webhook', endpoint: input.url, filters: input.filters });
       subId = sub.id; secret = sub.secret!; secretOnce = sub.secret;
+      unsubscribeUrl = `${base(input.baseUrl)}/u/${sub.unsubscribeToken}`;
     } catch (err) {
       // Concurrent registration for the same (channel, endpoint) lost the race to
       // another request between our select and our insert. Fall through to the
@@ -84,17 +89,17 @@ export async function registerWebhook(
       redirect: 'error',
       signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
     });
-    if (!res.ok) return { secretOnce, verified: false, error: `endpoint answered HTTP ${res.status}` };
+    if (!res.ok) return { secretOnce, unsubscribeUrl, verified: false, error: `endpoint answered HTTP ${res.status}` };
   } catch (err) {
-    return { secretOnce, verified: false, error: String(err instanceof Error ? err.message : err).slice(0, 200) };
+    return { secretOnce, unsubscribeUrl, verified: false, error: String(err instanceof Error ? err.message : err).slice(0, 200) };
   }
   await verifySubscription(sql, subId);
-  return { secretOnce, verified: true };
+  return { secretOnce, unsubscribeUrl, verified: true };
 }
 
 async function applyFilters(
   sql: Sql, subId: string, f?: Partial<SubscriptionFilters>,
-): Promise<{ secretOnce?: string; verified: boolean; error?: string } | undefined> {
+): Promise<{ secretOnce?: string; unsubscribeUrl?: string; verified: boolean; error?: string } | undefined> {
   if (!f) return undefined;
   for (const [k, v] of Object.entries(f)) {
     if (Array.isArray(v) && v.length === 0) return { verified: false, error: `filter ${k} must not be empty` };

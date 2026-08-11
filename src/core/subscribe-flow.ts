@@ -37,17 +37,31 @@ function isUniqueViolation(err: unknown): boolean {
  * Handles the case where a row for this email already exists: update filters,
  * and either notify (verified) or (re-)send the confirmation link (unverified).
  * Shared by the initial existing-row check and the concurrent-insert fallback below.
+ *
+ * `attempt` bounds the row-vanished-mid-catch retry to a single hop back into
+ * startEmailSubscription: if the row is gone even on that retry (e.g. a second
+ * concurrent unsubscribe/delete), we give up waiting for an existing row and
+ * fall through to a final create attempt instead of recursing indefinitely.
  */
 async function updateExistingAndNotify(
   sql: Sql, sender: EmailSender,
-  input: { email: string; filters?: Partial<SubscriptionFilters>; baseUrl?: string },
+  input: { email: string; filters?: Partial<SubscriptionFilters>; baseUrl?: string; createSubscriptionImpl?: typeof createSubscription },
+  attempt = 0,
 ): Promise<'confirmation_sent' | 'updated'> {
   const existing = await sql`select id, verified, verify_token from subscriptions
     where channel = 'email' and endpoint = ${input.email}`;
   if (!existing[0]) {
-    // Row vanished between the caller's insert-conflict and this re-select
-    // (e.g. concurrent unsubscribe/delete). Treat as a fresh signup.
-    return startEmailSubscription(sql, sender, input);
+    if (attempt === 0) {
+      // Row vanished between the caller's insert-conflict and this re-select
+      // (e.g. concurrent unsubscribe/delete). Retry once via the normal entry
+      // point, which will either find a row created since or create a fresh one.
+      return startEmailSubscription(sql, sender, input, attempt + 1);
+    }
+    // Vanished again on the retry: stop chasing the row and create fresh.
+    const doCreate = input.createSubscriptionImpl ?? createSubscription;
+    const sub = await doCreate(sql, { channel: 'email', endpoint: input.email, filters: input.filters });
+    await sendConfirmation(sender, input.email, sub.verifyToken, input.baseUrl);
+    return 'confirmation_sent';
   }
   await updateFilters(sql, existing[0].id as string, input.filters);
   if (existing[0].verified) {
@@ -64,15 +78,23 @@ async function updateExistingAndNotify(
 
 export async function startEmailSubscription(
   sql: Sql, sender: EmailSender,
-  input: { email: string; filters?: Partial<SubscriptionFilters>; baseUrl?: string },
+  input: {
+    email: string; filters?: Partial<SubscriptionFilters>; baseUrl?: string;
+    // Injectable in place of the real createSubscription — used by tests to
+    // simulate the concurrent-insert race (create the row, then throw 23505)
+    // without fighting ESM module mocking.
+    createSubscriptionImpl?: typeof createSubscription;
+  },
+  attempt = 0,
 ): Promise<'confirmation_sent' | 'updated'> {
+  const doCreate = input.createSubscriptionImpl ?? createSubscription;
   const existing = await sql`select id, verified, verify_token from subscriptions
     where channel = 'email' and endpoint = ${input.email}`;
   if (existing[0]) {
-    return updateExistingAndNotify(sql, sender, input);
+    return updateExistingAndNotify(sql, sender, input, attempt);
   }
   try {
-    const sub = await createSubscription(sql, { channel: 'email', endpoint: input.email, filters: input.filters });
+    const sub = await doCreate(sql, { channel: 'email', endpoint: input.email, filters: input.filters });
     await sendConfirmation(sender, input.email, sub.verifyToken, input.baseUrl);
     return 'confirmation_sent';
   } catch (err) {
@@ -81,7 +103,7 @@ export async function startEmailSubscription(
     // already-exists handling rather than letting the unique-violation propagate
     // — startEmailSubscription must never throw for "already exists".
     if (!isUniqueViolation(err)) throw err;
-    return updateExistingAndNotify(sql, sender, input);
+    return updateExistingAndNotify(sql, sender, input, attempt);
   }
 }
 

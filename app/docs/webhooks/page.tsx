@@ -90,7 +90,7 @@ if (signature !== expected) {
       </p>
 
       <div className="notice">
-        <p>Keep the secret private — anyone with it can forge signed payloads to your endpoint. To rotate it, unsubscribe and re-register; there is no in-place secret rotation.</p>
+        <p>Keep the secret private — anyone with it can forge signed payloads to your endpoint. Registration also returns a one-time unsubscribe link — save it. To rotate the secret, open that unsubscribe link to remove the registration, then re-register; there is no in-place secret rotation.</p>
       </div>
     </>
   );
