@@ -87,3 +87,22 @@ describe('markdown handling per channel', () => {
       .toBe('see the docs: https://docs.example.com now');
   });
 });
+
+describe('renderEmail html part', () => {
+  it('returns an HTML body with bold title, converted markdown, and the unsubscribe placeholder', () => {
+    const { html } = renderEmail({ ...a, bodyMd: 'A **bold** word and 1 < 2.' }, 'publish');
+    expect(html).toContain('<h1');
+    expect(html).toContain('Upgrade to v5.1.0 by 2026-08-20 14:00 UTC');
+    expect(html).toContain('A <b>bold</b> word and 1 &lt; 2.');
+    expect(html).toContain('{{UNSUBSCRIBE}}');
+    expect(html).toContain('/a/2026-08-upgrade-v5-1-0');
+  });
+
+  it('lists actions with an escaped deadline and audience', () => {
+    const { html } = renderEmail(a, 'publish');
+    expect(html).toContain('<strong>Action required:</strong>');
+    expect(html).toContain('Upgrade node to v5.1.0');
+    expect(html).toContain('<strong>2026-08-20T14:00:00Z</strong>');
+    expect(html).toContain('(sequencer, prover)');
+  });
+});

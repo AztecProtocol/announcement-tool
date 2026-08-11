@@ -37,6 +37,9 @@ describe('email adapter', () => {
     expect(m.subject).toBe('[MAINNET] [CRITICAL] [UPGRADE] Upgrade to v5.1.0');
     expect(m.text).toContain(`https://announce.example/u/${sub.unsubscribeToken}`);
     expect(m.text).not.toContain('{{UNSUBSCRIBE}}');
+    expect(m.html).toContain(`https://announce.example/u/${sub.unsubscribeToken}`);
+    expect(m.html).not.toContain('{{UNSUBSCRIBE}}');
+    expect(m.html).toContain('<h1');
     expect(m.headers?.['List-Unsubscribe']).toBe(`<https://announce.example/u/${sub.unsubscribeToken}>`);
     expect(m.headers?.['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
   });

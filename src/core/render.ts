@@ -46,15 +46,22 @@ export function stripMarkdown(md: string): string {
 }
 
 /**
- * Convert our supported markdown to Telegram HTML. Pair-wise regexes only:
+ * Convert our supported markdown to inline HTML. Pair-wise regexes only:
  * an unmatched ** or backtick stays literal, so emitted tags always balance
- * and Telegram can never reject the message for a malformed entity.
+ * (Telegram would reject a malformed entity; email clients render it wrong).
  */
-function mdToTelegramHtml(md: string): string {
+function mdInlineHtml(md: string): string {
   return escapeHtml(md)
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
     .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
+}
+
+/** Markdown body → HTML paragraphs (blank line = new paragraph). */
+function mdBlocksHtml(md: string): string {
+  return md.split(/\n{2,}/)
+    .map(p => `<p style="margin:0 0 12px">${mdInlineHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .join('\n');
 }
 
 export function renderPlain(a: Announcement, kind: DeliveryKind): string {
@@ -82,7 +89,7 @@ export function renderTelegramHtml(a: Announcement, kind: DeliveryKind): string 
     '',
     `<b>${escapeHtml(a.title)}</b>`,
     '',
-    mdToTelegramHtml(a.bodyMd),
+    mdInlineHtml(a.bodyMd),
     ...(a.actionsRequired.length ? ['', ...actionLines(a, '- ').map(escapeHtml)] : []),
     ...(a.links.length ? ['', ...a.links.map(l => `<a href="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>`)] : []),
     '',
@@ -104,9 +111,38 @@ export function renderMarkdown(a: Announcement, kind: DeliveryKind): string {
   ].join('\n');
 }
 
-export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: string; text: string } {
+export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: string; text: string; html: string } {
+  const actions = a.actionsRequired.length
+    ? `<p style="margin:0 0 4px"><strong>Action required:</strong></p>`
+      + `<ul style="margin:0 0 12px;padding-left:20px">`
+      + a.actionsRequired.map(act => {
+          const parts = [escapeHtml(act.action)];
+          if (act.deadline) parts.push(`by <strong>${escapeHtml(act.deadline)}</strong>`);
+          if (act.applies_to.length) parts.push(`(${escapeHtml(act.applies_to.join(', '))})`);
+          return `<li style="margin:0 0 4px">${parts.join(' ')}</li>`;
+        }).join('')
+      + `</ul>`
+    : '';
+  const links = a.links.length
+    ? `<p style="margin:0 0 12px">${a.links.map(l => `<a href="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>`).join(' · ')}</p>`
+    : '';
+  // Inline styles + fixed light colors on purpose: email clients ignore <style>
+  // blocks unpredictably and handle dark mode themselves.
+  const html = [
+    `<div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1c2130;max-width:600px;margin:0 auto;padding:16px">`,
+    `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em;color:#6b7280;margin:0 0 12px">${escapeHtml(`${kindPrefix(kind)}${tagLine(a)}`)}</p>`,
+    `<h1 style="font-size:19px;line-height:1.35;margin:0 0 12px">${escapeHtml(a.title)}</h1>`,
+    mdBlocksHtml(a.bodyMd),
+    actions,
+    links,
+    `<p style="margin:0 0 12px"><a href="${canonicalUrl(a)}">View this announcement</a></p>`,
+    `<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`,
+    `<p style="font-size:12px;color:#6b7280;margin:0">You receive this because you subscribed to Aztec release announcements. <a href="{{UNSUBSCRIBE}}" style="color:#6b7280">Manage preferences or unsubscribe</a></p>`,
+    `</div>`,
+  ].join('\n');
   return {
     subject: `${kindPrefix(kind)}${tagLine(a)} ${a.title}`,
     text: `${renderPlain(a, kind)}\n\n—\nYou receive this because you subscribed to Aztec release announcements.\nManage preferences or unsubscribe: {{UNSUBSCRIBE}}\n`,
+    html,
   };
 }

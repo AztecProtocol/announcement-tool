@@ -19,11 +19,12 @@ export function makeEmailAdapter(
         .replace(/\/+$/, '');
       const unsubscribeUrl = `${base}/u/${sub.unsubscribeToken}`;
 
-      const { subject, text } = renderEmail(a, kind);
+      const { subject, text, html } = renderEmail(a, kind);
       await sender.send({
         to: sub.endpoint,
         subject,
         text: text.replaceAll('{{UNSUBSCRIBE}}', unsubscribeUrl),
+        html: html.replaceAll('{{UNSUBSCRIBE}}', unsubscribeUrl),
         headers: {
           'List-Unsubscribe': `<${unsubscribeUrl}>`,
           'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',

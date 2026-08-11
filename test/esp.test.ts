@@ -12,7 +12,7 @@ function listen(handler: Parameters<typeof createServer>[1]): Promise<{ server: 
   });
 }
 
-const msg = { to: 'ops@example.com', subject: 'S', text: 'B', headers: { 'List-Unsubscribe': '<https://x/u>' } };
+const msg = { to: 'ops@example.com', subject: 'S', text: 'B', html: '<p>B</p>', headers: { 'List-Unsubscribe': '<https://x/u>' } };
 const savedEnv = { ...process.env };
 afterEach(() => { process.env = { ...savedEnv }; });
 
@@ -31,6 +31,7 @@ describe('resend sender', () => {
     const p = JSON.parse(body);
     expect(p.to).toEqual(['ops@example.com']);
     expect(p.text).toBe('B');
+    expect(p.html).toBe('<p>B</p>');
     expect(p.headers['List-Unsubscribe']).toBe('<https://x/u>');
   });
 
@@ -63,6 +64,7 @@ describe('brevo sender', () => {
     expect(p.sender).toEqual({ email: 'no-reply@announce.example', name: 'Aztec' });
     expect(p.to).toEqual([{ email: 'ops@example.com' }]);
     expect(p.textContent).toBe('B');
+    expect(p.htmlContent).toBe('<p>B</p>');
   });
 });
 

@@ -1,5 +1,5 @@
 export interface EmailMessage {
-  to: string; subject: string; text: string; headers?: Record<string, string>;
+  to: string; subject: string; text: string; html?: string; headers?: Record<string, string>;
 }
 export interface EmailSender {
   name: string;
@@ -36,7 +36,7 @@ export function makeResendSender(opts: HttpOpts = {}): EmailSender {
       const from = opts.from ?? process.env.EMAIL_FROM;
       if (!from) throw new Error('EMAIL_FROM is not set');
       await postJson(doFetch, `${apiBase}/emails`, { authorization: `Bearer ${key}` },
-        { from, to: [msg.to], subject: msg.subject, text: msg.text, ...(msg.headers ? { headers: msg.headers } : {}) },
+        { from, to: [msg.to], subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), ...(msg.headers ? { headers: msg.headers } : {}) },
         timeoutMs, 'resend');
     },
   };
@@ -59,6 +59,7 @@ export function makeBrevoSender(opts: HttpOpts & { fromName?: string } = {}): Em
           sender: { email: from, ...(name ? { name } : {}) },
           to: [{ email: msg.to }],
           subject: msg.subject, textContent: msg.text,
+          ...(msg.html ? { htmlContent: msg.html } : {}),
           ...(msg.headers ? { headers: msg.headers } : {}),
         },
         timeoutMs, 'brevo');
