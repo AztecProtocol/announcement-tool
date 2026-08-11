@@ -87,4 +87,12 @@ describe('jsonb columns store real arrays, not double-encoded strings', () => {
       select jsonb_typeof(detail) as detail_type from audit_log where target = ${created.id} limit 1`;
     expect(row.detail_type).toBe('object');
   });
+
+  it('same-title drafts in the same month get distinct slugs', async () => {
+    const a = await createDraft(sql, input, 'yev@aztec.foundation');
+    const b = await createDraft(sql, input, 'yev@aztec.foundation');
+    const c = await createDraft(sql, input, 'yev@aztec.foundation');
+    expect(b.slug).toBe(`${a.slug}-2`);
+    expect(c.slug).toBe(`${a.slug}-3`);
+  });
 });

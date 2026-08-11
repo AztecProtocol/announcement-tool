@@ -33,6 +33,9 @@ export async function createSubscription(
   sql: Sql,
   input: { channel: 'email' | 'webhook'; endpoint: string; filters?: Partial<SubscriptionFilters> },
 ): Promise<Subscription> {
+  for (const [k, v] of Object.entries(input.filters ?? {})) {
+    if (Array.isArray(v) && v.length === 0) throw new Error(`filter ${k} must not be empty`);
+  }
   const f = { ...DEFAULTS, ...input.filters };
   const id = newSubscriptionId();
   const secret = input.channel === 'webhook' ? newSecret() : null;

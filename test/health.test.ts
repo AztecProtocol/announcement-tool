@@ -53,4 +53,13 @@ describe('evaluateChannelHealth', () => {
     const staleIssues = await evaluateChannelHealth(sql);
     expect(staleIssues.some(i => i.kind === 'no_delivery' && i.channel === 'telegram')).toBe(true);
   });
+
+  it('no_delivery detail names the silent target', async () => {
+    await sql`update announcements set published_at = now() - interval '2 hours' where id = 'ann_h'`;
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status)
+      values ('ann_h', 1, 'publish', 'discord', 'discord:mainnet-updates', 'failed')`;
+    const issues = await evaluateChannelHealth(sql);
+    const silent = issues.find(i => i.kind === 'no_delivery');
+    expect(silent?.detail).toBe('no successful delivery on discord (discord:mainnet-updates) yet');
+  });
 });

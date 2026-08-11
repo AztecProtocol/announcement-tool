@@ -43,4 +43,10 @@ describe('subscriptions', () => {
     // announcement targeting BOTH networks still reaches a mainnet-only subscriber
     expect(matchesSubscription({ ...annCritMain, networks: ['mainnet', 'testnet'] }, s)).toBe(true);
   });
+
+  it('rejects empty filter arrays', async () => {
+    await expect(createSubscription(sql, {
+      channel: 'email', endpoint: 'empty@example.com', filters: { severities: [] },
+    })).rejects.toThrow(/severities.*empty/);
+  });
 });

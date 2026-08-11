@@ -42,7 +42,7 @@ export async function evaluateChannelHealth(sql: Sql, sinceHours = 24): Promise<
     issues.push({
       kind: 'no_delivery', channel: r.channel as string, target: r.target as string,
       announcementId: r.announcement_id as string, revision: r.revision as number,
-      detail: `no successful delivery on ${r.channel} yet`,
+      detail: `no successful delivery on ${r.channel} (${r.target}) yet`,
     });
   }
   return issues;
