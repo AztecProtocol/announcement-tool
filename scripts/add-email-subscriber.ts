@@ -8,6 +8,8 @@
  * marks the address verified directly so the email channel can be tested now.
  */
 import postgres from 'postgres';
+import { loadEnv } from '../src/env.js';
+loadEnv();
 import { createSubscription, verifySubscription } from '../src/core/subscriptions.js';
 
 const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';

@@ -9,6 +9,8 @@
  * then drains the delivery queue once and prints what each channel did.
  */
 import postgres from 'postgres';
+import { loadEnv } from '../src/env.js';
+loadEnv();
 import { createDraft, requestPublish, confirmPublish } from '../src/core/announcements.js';
 import { runFanoutOnce } from '../src/worker/fanout.js';
 import { senderFromEnv } from '../src/adapters/esp.js';

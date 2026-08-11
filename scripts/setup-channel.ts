@@ -7,6 +7,8 @@
  * Safe to re-run: re-answering for the same key overwrites that row.
  */
 import postgres from 'postgres';
+import { loadEnv } from '../src/env.js';
+loadEnv();
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 

@@ -6,6 +6,8 @@
  *   npm run test:reset -- --all   # also clear destinations and subscribers
  */
 import postgres from 'postgres';
+import { loadEnv } from '../src/env.js';
+loadEnv();
 
 const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const all = process.argv.includes('--all');

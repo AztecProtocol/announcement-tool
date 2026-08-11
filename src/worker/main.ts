@@ -1,4 +1,6 @@
 import postgres from 'postgres';
+import { loadEnv } from '../env.js';
+loadEnv();
 import { runFanoutOnce } from './fanout.js';
 import { dispatchHealthAlerts } from '../core/alerts.js';
 import type { ChannelAdapter } from '../adapters/types.js';
