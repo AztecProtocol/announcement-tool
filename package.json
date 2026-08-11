@@ -5,6 +5,9 @@
   "scripts": {
     "migrate": "tsx src/db/migrate-cli.ts",
     "worker": "tsx src/worker/main.ts",
+    "web": "next dev",
+    "web:build": "next build",
+    "web:start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "setup:channel": "tsx scripts/setup-channel.ts",
@@ -14,12 +17,16 @@
     "test:reset": "tsx scripts/reset-test-data.ts"
   },
   "dependencies": {
+    "next": "^16.2.12",
     "postgres": "^3.4.9",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "ulid": "^3.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@types/react": "19.2.18",
     "tsx": "^4.23.10",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
