@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { createSubscription, verifySubscription, getSubscription, matchesSubscription } from '../src/core/subscriptions.js';
+import { createSubscription, verifySubscription, getSubscription, matchesSubscription, getSubscriptionByVerifyToken } from '../src/core/subscriptions.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
@@ -48,5 +48,13 @@ describe('subscriptions', () => {
     await expect(createSubscription(sql, {
       channel: 'email', endpoint: 'empty@example.com', filters: { severities: [] },
     })).rejects.toThrow(/severities.*empty/);
+  });
+
+  it('every subscription carries a unique verify token, findable by it', async () => {
+    const s = await createSubscription(sql, { channel: 'email', endpoint: 'vt@example.com' });
+    expect(s.verifyToken).toMatch(/^[0-9a-f]{32}$/);
+    const found = await getSubscriptionByVerifyToken(sql, s.verifyToken);
+    expect(found?.id).toBe(s.id);
+    expect(await getSubscriptionByVerifyToken(sql, 'f'.repeat(32))).toBeUndefined();
   });
 });

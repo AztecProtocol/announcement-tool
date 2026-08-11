@@ -7,7 +7,7 @@ export interface SubscriptionFilters {
 }
 export interface Subscription {
   id: string; channel: 'email' | 'webhook'; endpoint: string; verified: boolean;
-  secret?: string; filters: SubscriptionFilters; unsubscribeToken: string;
+  secret?: string; filters: SubscriptionFilters; unsubscribeToken: string; verifyToken: string;
 }
 
 const DEFAULTS: SubscriptionFilters = {
@@ -26,6 +26,7 @@ export function rowToSub(r: Record<string, unknown>): Subscription {
       severities: r.filter_severities as Severity[], audiences: r.filter_audiences as Audience[],
     },
     unsubscribeToken: r.unsubscribe_token as string,
+    verifyToken: r.verify_token as string,
   };
 }
 
@@ -39,11 +40,12 @@ export async function createSubscription(
   const f = { ...DEFAULTS, ...input.filters };
   const id = newSubscriptionId();
   const secret = input.channel === 'webhook' ? newSecret() : null;
-  const token = newToken();
+  const unsubscribeToken = newToken();
+  const verifyToken = newToken();
   const [row] = await sql`insert into subscriptions
-    (id, channel, endpoint, secret, filter_networks, filter_types, filter_severities, filter_audiences, unsubscribe_token)
+    (id, channel, endpoint, secret, filter_networks, filter_types, filter_severities, filter_audiences, unsubscribe_token, verify_token)
     values (${id}, ${input.channel}, ${input.endpoint}, ${secret},
-            ${f.networks}, ${f.types}, ${f.severities}, ${f.audiences}, ${token})
+            ${f.networks}, ${f.types}, ${f.severities}, ${f.audiences}, ${unsubscribeToken}, ${verifyToken})
     returning *`;
   return rowToSub(row);
 }
@@ -54,6 +56,11 @@ export async function verifySubscription(sql: Sql, id: string): Promise<void> {
 
 export async function getSubscription(sql: Sql, id: string): Promise<Subscription | undefined> {
   const rows = await sql`select * from subscriptions where id = ${id}`;
+  return rows[0] ? rowToSub(rows[0]) : undefined;
+}
+
+export async function getSubscriptionByVerifyToken(sql: Sql, token: string): Promise<Subscription | undefined> {
+  const rows = await sql`select * from subscriptions where verify_token = ${token}`;
   return rows[0] ? rowToSub(rows[0]) : undefined;
 }
 
