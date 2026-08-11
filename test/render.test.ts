@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown } from '../src/core/render.js';
+import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml } from '../src/core/render.js';
 import type { Announcement } from '../src/core/types.js';
 
 const a: Announcement = {
@@ -104,5 +104,12 @@ describe('renderEmail html part', () => {
     expect(html).toContain('Upgrade node to v5.1.0');
     expect(html).toContain('<strong>2026-08-20T14:00:00Z</strong>');
     expect(html).toContain('(sequencer, prover)');
+  });
+});
+
+describe('renderBodyHtml', () => {
+  it('renders markdown paragraphs with escaped entities', () => {
+    const html = renderBodyHtml('One **bold**.\n\nTwo < three.');
+    expect(html).toBe('<p style="margin:0 0 12px">One <b>bold</b>.</p>\n<p style="margin:0 0 12px">Two &lt; three.</p>');
   });
 });

@@ -58,7 +58,7 @@ function mdInlineHtml(md: string): string {
 }
 
 /** Markdown body → HTML paragraphs (blank line = new paragraph). */
-function mdBlocksHtml(md: string): string {
+export function renderBodyHtml(md: string): string {
   return md.split(/\n{2,}/)
     .map(p => `<p style="margin:0 0 12px">${mdInlineHtml(p).replace(/\n/g, '<br>')}</p>`)
     .join('\n');
@@ -132,7 +132,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
     `<div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1c2130;max-width:600px;margin:0 auto;padding:16px">`,
     `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em;color:#6b7280;margin:0 0 12px">${escapeHtml(`${kindPrefix(kind)}${tagLine(a)}`)}</p>`,
     `<h1 style="font-size:19px;line-height:1.35;margin:0 0 12px">${escapeHtml(a.title)}</h1>`,
-    mdBlocksHtml(a.bodyMd),
+    renderBodyHtml(a.bodyMd),
     actions,
     links,
     `<p style="margin:0 0 12px"><a href="${canonicalUrl(a)}">View this announcement</a></p>`,
