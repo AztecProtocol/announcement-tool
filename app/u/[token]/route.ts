@@ -1,5 +1,8 @@
 import { getDb } from '../../../src/web/db.js';
 import { unsubscribeByToken } from '../../../src/core/tokens-flow.js';
+import {
+  isValidToken, renderConfirmPage, renderInvalidTokenPage, isOneClickBody,
+} from '../../../src/web/unsubscribe-html.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,33 +12,34 @@ export const dynamic = 'force-dynamic';
 // (src/adapters/email.ts unsubscribeUrl). Next.js App Router forbids a
 // page.tsx and route.ts coexisting in the same segment, so both verbs are
 // implemented here instead of splitting into page.tsx + route.ts.
-function confirmPage(token: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Unsubscribe — Aztec release announcements</title></head>
-<body>
-<h1>Unsubscribe</h1>
-<p>Stop receiving Aztec release announcements at this address?</p>
-<form method="post" action="/u/${token}">
-  <button type="submit">Unsubscribe</button>
-</form>
-<p><a href="/manage/${token}">or change preferences instead</a></p>
-</body>
-</html>`;
-}
+//
+// POST has two distinct callers sharing this one URL:
+//   - mail clients doing RFC 8058 one-click send body `List-Unsubscribe=One-Click`
+//     and MUST NOT be redirected (RFC 8058 §3.1) — they get a bare 200.
+//   - the confirm-page form below sends `confirm=1` and is a normal browser
+//     navigation — it gets unsubscribed and 303-redirected to /unsubscribed.
+// HTML building and token validation live in src/web/unsubscribe-html.ts so
+// they're unit-testable without booting Next (see test/unsubscribe-html.test.ts).
+
+const html = (body: string, status = 200) =>
+  new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8' } });
 
 export async function GET(_req: Request, ctx: { params: Promise<{ token: string }> }): Promise<Response> {
   const { token } = await ctx.params;
-  return new Response(confirmPage(token), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+  if (!isValidToken(token)) return html(renderInvalidTokenPage(), 404);
+  return html(renderConfirmPage(token));
 }
 
-// RFC 8058 §3.1: the response to a one-click POST MUST NOT be an HTTPS
-// redirect, so this always returns a bare 200 — both for mail-client
-// one-click POSTs and for the human confirm-button form submit above.
-// The confirm page could add a JS-driven redirect to /unsubscribed, but
-// that's cosmetic polish, not required by the brief or RFC 8058.
-export async function POST(_req: Request, ctx: { params: Promise<{ token: string }> }): Promise<Response> {
+export async function POST(req: Request, ctx: { params: Promise<{ token: string }> }): Promise<Response> {
   const { token } = await ctx.params;
+  if (!isValidToken(token)) return html(renderInvalidTokenPage(), 404);
+
+  const body = await req.text();
   await unsubscribeByToken(getDb(), token);
-  return new Response('Unsubscribed', { status: 200 });
+
+  if (isOneClickBody(body)) {
+    // RFC 8058 §3.1: MUST NOT redirect the one-click response.
+    return new Response('Unsubscribed', { status: 200 });
+  }
+  return new Response(null, { status: 303, headers: { location: '/unsubscribed' } });
 }
