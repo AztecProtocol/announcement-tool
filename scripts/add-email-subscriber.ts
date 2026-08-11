@@ -22,12 +22,18 @@ if (!email) {
   process.exit(1);
 }
 
+const severities = criticalsOnly ? ['critical'] : ['critical', 'recommended', 'info'];
+
 const sql = postgres(DB, { max: 1 });
 try {
   const existing = await sql`select id from subscriptions where channel = 'email' and endpoint = ${email}`;
   if (existing[0]) {
+    // Re-running always applies the flags you passed — an existing subscription
+    // is updated, not silently left as it was.
+    await sql`update subscriptions set filter_severities = ${severities} where id = ${existing[0].id as string}`;
     await verifySubscription(sql, existing[0].id as string);
-    console.log(`\n✓ ${email} was already subscribed — it is now marked verified.\n`);
+    console.log(`\n✓ ${email} was already subscribed — updated it.`);
+    console.log(`  Receives: ${criticalsOnly ? 'critical announcements only' : 'all severities'} (verified)\n`);
   } else {
     const sub = await createSubscription(sql, {
       channel: 'email',
