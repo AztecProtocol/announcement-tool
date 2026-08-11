@@ -35,3 +35,6 @@ ul.plain { list-style: none; padding: 0; }
 ul.plain li { border-bottom: 1px solid #eae7e1; padding: 12px 0; }
 code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; }
 pre { background: #211f1d; color: #f2efe9; padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e0dcd5; }
+th { color: #57534c; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }

@@ -209,6 +209,26 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 
 Discord, Telegram, and Signal *destinations* (webhook URLs, chat/group ids) are not environment variables — they live in `channel_settings` rows, since a deployment typically has more than one destination per channel.
 
+## Public web
+
+A Next.js app (App Router) in `app/` serves the public subscribe page, archive, feeds, and token-based flows.
+
+| Route | Purpose |
+|-------|---------|
+| `/` | Subscribe page — email form, webhook form, broadcast-channel links. Supports `/?preset=criticals` for a one-click mainnet+critical prefill. |
+| `/a/<slug>` | A single published announcement. |
+| `/archive` | List of published announcements. |
+| `/feed.json` | JSON feed of published announcements. |
+| `/feed.atom` | Atom feed of published announcements. |
+| `/confirm/<token>` | Email double-opt-in confirmation link. |
+| `/u/<token>` | Unsubscribe — GET shows a confirm page, POST unsubscribes (also serves the RFC 8058 one-click `List-Unsubscribe-Post` request). |
+| `/manage/<token>` | Update email subscription filters. |
+| `/docs/webhooks` | Webhook consumer docs — payload shape, headers, signature verification, retries. |
+
+**Run it:** `npm run web` for dev (Next dev server); `npm run web:build && npm run web:start` for a production build.
+
+**Behavior notes:** Email subscribing is double-opt-in — a new address gets a confirmation link and delivers nothing until it's clicked, and re-submitting an already-confirmed address just updates its filters, with both cases redirecting to the same `/subscribed` page so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries, and only activates the subscription on a 2xx response; the signing secret is shown exactly once, on the registration result, and is never displayed again.
+
 ## Alerting
 
 The worker calls `dispatchHealthAlerts` on every 15s tick (`src/core/alerts.ts`), which wraps `evaluateChannelHealth` (`src/core/health.ts`) with deduped, one-time-only email notification:
