@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { startEmailSubscription, confirmSubscription } from '../src/core/subscribe-flow.js';
-import { getSubscription } from '../src/core/subscriptions.js';
+import { getSubscription, createSubscription } from '../src/core/subscriptions.js';
 import type { EmailMessage, EmailSender } from '../src/adapters/esp.js';
 
 let sql: Sql;
@@ -60,5 +60,42 @@ describe('email double-opt-in', () => {
 
   it('confirming an unknown token returns undefined', async () => {
     expect(await confirmSubscription(sql, 'a'.repeat(32))).toBeUndefined();
+  });
+
+  // Regression test for a select-then-insert race: two near-simultaneous first-time
+  // subscribes for the same email can both pass startEmailSubscription's initial
+  // "does a row exist?" select, so the second call's insert loses to the unique
+  // (channel, endpoint) constraint and would previously throw a raw Postgres
+  // unique-violation. A true concurrent race (two separate requests interleaving at
+  // the database level) is not reliably reproducible from a single test process —
+  // a `Promise.all` of two `startEmailSubscription` calls was tried and empirically
+  // did NOT trigger the catch(23505) path in repeated runs (postgres.js appears to
+  // serialize the pooled queries such that the second call's select already sees the
+  // first call's committed insert, so it never reaches its own insert). So this test
+  // takes the honest, deterministic route instead: pre-create the row directly via
+  // createSubscription (bypassing the flow's own initial select, standing in for
+  // "another request already committed this insert"), then call
+  // startEmailSubscription for the same email and assert it does not throw and
+  // produces the same result the catch-and-fallback path is required to produce
+  // (filters updated, confirmation re-sent, still unverified). This proves the
+  // fallback *logic* (updateExistingAndNotify) is correct and reachable-without-throw
+  // for "row already exists"; it does not exercise the catch(23505) branch's own code
+  // path specifically, since here the leading select finds the row directly. The two
+  // code paths (leading-select-hit vs. catch-then-fallback) call the exact same
+  // updateExistingAndNotify function, so this test does cover the fallback behavior
+  // both paths rely on, even though it cannot force the race timing itself.
+  it('does not throw when the row already exists at insert time (existing-row branch)', async () => {
+    const { sender, sent } = recorder();
+    await createSubscription(sql, { channel: 'email', endpoint: 'race@example.com' });
+
+    const res = await startEmailSubscription(sql, sender, {
+      email: 'race@example.com', filters: { severities: ['critical'] },
+    });
+
+    expect(res).toBe('confirmation_sent');
+    expect(sent).toHaveLength(1);
+    const [row] = await sql`select filter_severities, verified from subscriptions where endpoint = 'race@example.com'`;
+    expect(row.filter_severities).toEqual(['critical']);
+    expect(row.verified).toBe(false);
   });
 });
