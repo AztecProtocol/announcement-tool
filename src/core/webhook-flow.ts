@@ -1,9 +1,17 @@
 import type { Sql } from 'postgres';
-import { createSubscription, verifySubscription, type SubscriptionFilters } from './subscriptions.js';
+import { createSubscription, verifySubscription, type Subscription, type SubscriptionFilters } from './subscriptions.js';
 import { assertDeliverableUrl, signPayload } from '../adapters/webhook.js';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505';
+}
+
+function emptyFilterError(f?: Partial<SubscriptionFilters>): string | undefined {
+  if (!f) return undefined;
+  for (const [k, v] of Object.entries(f)) {
+    if (Array.isArray(v) && v.length === 0) return `filter ${k} must not be empty`;
+  }
+  return undefined;
 }
 
 export async function registerWebhook(
@@ -11,6 +19,10 @@ export async function registerWebhook(
   input: {
     url: string; filters?: Partial<SubscriptionFilters>;
     fetchImpl?: typeof fetch; allowPrivateHosts?: boolean; timeoutMs?: number;
+    // Injectable in place of the real createSubscription — used by tests to
+    // simulate the concurrent-insert race (create the row, then throw 23505)
+    // without fighting ESM module mocking.
+    createSubscriptionImpl?: typeof createSubscription;
   },
 ): Promise<{ secretOnce?: string; verified: boolean; error?: string }> {
   try {
@@ -18,6 +30,11 @@ export async function registerWebhook(
   } catch (err) {
     return { verified: false, error: String(err instanceof Error ? err.message : err) };
   }
+
+  const topLevelFilterErr = emptyFilterError(input.filters);
+  if (topLevelFilterErr) return { verified: false, error: topLevelFilterErr };
+
+  const doCreate = input.createSubscriptionImpl ?? createSubscription;
 
   const existing = await sql`select id, secret from subscriptions
     where channel = 'webhook' and endpoint = ${input.url}`;
@@ -29,7 +46,7 @@ export async function registerWebhook(
     if (filterErr) return filterErr;
   } else {
     try {
-      const sub = await createSubscription(sql, { channel: 'webhook', endpoint: input.url, filters: input.filters });
+      const sub: Subscription = await doCreate(sql, { channel: 'webhook', endpoint: input.url, filters: input.filters });
       subId = sub.id; secret = sub.secret!; secretOnce = sub.secret;
     } catch (err) {
       // Concurrent registration for the same (channel, endpoint) lost the race to

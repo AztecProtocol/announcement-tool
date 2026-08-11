@@ -78,28 +78,49 @@ describe('registerWebhook', () => {
   // subscribe-flow.test.ts: two near-simultaneous first-time registrations for the
   // same endpoint can both pass the initial "does a row exist?" select, so the
   // second call's createSubscription insert loses to the unique (channel, endpoint)
-  // constraint and must not surface a raw Postgres 23505 unique-violation. As in the
-  // email flow, a genuine Promise.all race is not reliably reproducible from a single
-  // test process (postgres.js serializes pooled queries such that the second call's
-  // select already observes the first call's committed insert). This test takes the
-  // same deterministic route: pre-create the row directly via createSubscription
-  // (standing in for "another request already committed this insert"), then call
-  // registerWebhook for the same endpoint and assert it does not throw, does not
-  // re-expose the secret, and still completes verification against the existing
-  // subscription row.
-  it('does not throw when the row already exists at insert time (existing-row branch)', async () => {
+  // constraint and must not surface a raw Postgres 23505 unique-violation. Unlike a
+  // pre-create-then-call approach (which only exercises the ordinary existing-row
+  // branch, since the leading select would find the row directly), this test uses
+  // dependency injection to force execution down the actual catch(23505) path:
+  // registerWebhook's `createSubscriptionImpl` override first calls the real
+  // createSubscription (so the row genuinely gets created — simulating the
+  // concurrent winner committing first) and then throws a Postgres-shaped 23505
+  // error, so registerWebhook's own insert branch truly hits the catch block,
+  // re-selects the row, and falls through to applyFilters — proving that exact
+  // code path never throws and never re-exposes the secret.
+  it('does not throw when the insert loses the unique-violation race (23505 catch path)', async () => {
     const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
-    const pre = await createSubscription(sql, { channel: 'webhook', endpoint: url });
 
-    const res = await registerWebhook(sql, { url, filters: { severities: ['critical'] }, allowPrivateHosts: true });
+    let realSub: { id: string; secret?: string } | undefined;
+    const raceCreate: typeof createSubscription = async (sql2, input2) => {
+      const sub = await createSubscription(sql2, input2);
+      realSub = sub;
+      throw Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' });
+    };
+
+    const res = await registerWebhook(sql, {
+      url, filters: { severities: ['critical'] }, allowPrivateHosts: true,
+      createSubscriptionImpl: raceCreate,
+    });
     server.close();
 
     expect(res.secretOnce).toBeUndefined();
     expect(res.verified).toBe(true);
     const [row] = await sql`select id, secret, filter_severities, verified from subscriptions where endpoint = ${url}`;
-    expect(row.id).toBe(pre.id);
-    expect(row.secret).toBe(pre.secret);
+    expect(row.id).toBe(realSub!.id);
+    expect(row.secret).toBe(realSub!.secret);
     expect(row.filter_severities).toEqual(['critical']);
     expect(row.verified).toBe(true);
+  });
+
+  it('fresh registration with an empty filter array returns an error without creating a row', async () => {
+    const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
+    const res = await registerWebhook(sql, { url, filters: { severities: [] }, allowPrivateHosts: true });
+    server.close();
+    expect(res.verified).toBe(false);
+    expect(res.error).toContain('severities');
+    expect(res.secretOnce).toBeUndefined();
+    const [{ c }] = await sql`select count(*)::int as c from subscriptions`;
+    expect(c).toBe(0);
   });
 });
