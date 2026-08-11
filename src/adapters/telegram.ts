@@ -1,7 +1,7 @@
 import type { Sql } from 'postgres';
 import type { ChannelAdapter } from './types.js';
 import type { Announcement, DeliveryKind } from '../core/types.js';
-import { renderPlain } from '../core/render.js';
+import { renderTelegramHtml } from '../core/render.js';
 
 export function makeTelegramAdapter(
   sql: Sql,
@@ -22,12 +22,18 @@ export function makeTelegramAdapter(
       const chatId = cfg.chat_id as string | undefined;
       if (!chatId) throw new Error(`telegram setting ${target} has no chat_id`);
 
-      // Plain text on purpose: MarkdownV2 requires escaping ~18 characters and one
-      // missed escape rejects the entire message. Announcement prose is full of them.
+      // HTML parse mode on purpose (not MarkdownV2, which needs ~18 characters
+      // escaped and rejects the whole message on one miss): HTML needs only
+      // &, <, > escaped, which the renderer does completely with balanced tags.
       const res = await doFetch(`${apiBase}/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: renderPlain(a, kind), disable_web_page_preview: true }),
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: renderTelegramHtml(a, kind),
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        }),
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) throw new Error(`telegram delivery failed: HTTP ${res.status}`);

@@ -28,7 +28,7 @@ function listen(handler: Parameters<typeof createServer>[1]): Promise<{ server: 
 }
 
 describe('telegram adapter', () => {
-  it('sends plain text to the configured chat via the bot token path', async () => {
+  it('sends HTML-formatted text to the configured chat via the bot token path', async () => {
     let path = '', body = '';
     const { server, base } = await listen((req, res) => {
       path = req.url ?? ''; let d = ''; req.on('data', c => { d += c; });
@@ -44,10 +44,10 @@ describe('telegram adapter', () => {
     expect(path).toBe('/botTESTTOKEN/sendMessage');
     const payload = JSON.parse(body);
     expect(payload.chat_id).toBe('@AztecAnnouncements');
-    expect(payload.parse_mode).toBeUndefined(); // plain text — no escaping hazard
+    expect(payload.parse_mode).toBe('HTML'); // HTML mode: only &<> need escaping, tags always balanced
     expect(payload.disable_web_page_preview).toBe(true);
     expect(payload.text).toContain('[MAINNET] [TESTNET] [RECOMMENDED] [GOVERNANCE]');
-    expect(payload.text).toContain('AZIP-7 signaling open');
+    expect(payload.text).toContain('<b>AZIP-7 signaling open</b>'); // title is bold
     expect(payload.text).toContain('/a/slug-t');
   });
 

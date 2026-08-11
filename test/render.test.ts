@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail } from '../src/core/render.js';
+import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown } from '../src/core/render.js';
 import type { Announcement } from '../src/core/types.js';
 
 const a: Announcement = {
@@ -56,5 +56,34 @@ describe('render', () => {
   it('omits the actions section when there are none', () => {
     const out = renderPlain({ ...a, actionsRequired: [] }, 'publish');
     expect(out).not.toContain('Action required');
+  });
+});
+
+describe('markdown handling per channel', () => {
+  const md = { ...a, bodyMd: 'A **bold** word, `code`, a [link](https://example.com/x), and 1 < 2 & 3 > 2.' };
+
+  it('renderPlain strips markdown markers so no literal ** reaches a reader', () => {
+    const out = renderPlain(md, 'publish');
+    expect(out).toContain('A bold word, code, a link: https://example.com/x, and 1 < 2 & 3 > 2.');
+    expect(out).not.toContain('**');
+  });
+
+  it('renderTelegramHtml converts to balanced HTML with entities escaped', () => {
+    const out = renderTelegramHtml(md, 'publish');
+    expect(out).toContain('<b>Upgrade to v5.1.0 by 2026-08-20 14:00 UTC</b>');
+    expect(out).toContain('A <b>bold</b> word, <code>code</code>, a <a href="https://example.com/x">link</a>');
+    expect(out).toContain('1 &lt; 2 &amp; 3 &gt; 2');
+    expect(out).not.toContain('**');
+  });
+
+  it('unmatched ** stays literal instead of producing a broken tag', () => {
+    const out = renderTelegramHtml({ ...a, bodyMd: 'an unmatched ** marker' }, 'publish');
+    expect(out).toContain('an unmatched ** marker');
+    expect(out).not.toContain('<b></b>');
+  });
+
+  it('stripMarkdown turns inline links into "label: url"', () => {
+    expect(stripMarkdown('see [the docs](https://docs.example.com) now'))
+      .toBe('see the docs: https://docs.example.com now');
   });
 });
