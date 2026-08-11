@@ -64,6 +64,11 @@ export async function getSubscriptionByVerifyToken(sql: Sql, token: string): Pro
   return rows[0] ? rowToSub(rows[0]) : undefined;
 }
 
+export async function getSubscriptionByUnsubscribeToken(sql: Sql, token: string): Promise<Subscription | undefined> {
+  const rows = await sql`select * from subscriptions where unsubscribe_token = ${token}`;
+  return rows[0] ? rowToSub(rows[0]) : undefined;
+}
+
 const intersects = (a: readonly string[], b: readonly string[]) => a.some(v => b.includes(v));
 
 export function matchesSubscription(
