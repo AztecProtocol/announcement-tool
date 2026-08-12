@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </header>
         <main>{children}</main>
         <footer className="site-footer">
-          <p>Announcements for Aztec operators and ecosystem teams. Subscribing is optional — everything here is public.</p>
+          <p>Announcements for Aztec operators and ecosystem teams.</p>
         </footer>
       </body>
     </html>

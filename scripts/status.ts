@@ -25,12 +25,15 @@ try {
     if (cfg.prefix) console.log(`          prefix: ${cfg.prefix}`);
   }
 
-  const subs = await sql`select channel, endpoint, verified, filter_severities from subscriptions order by channel, endpoint`;
+  const subs = await sql`select channel, endpoint, verified, filter_networks, filter_types, filter_severities, filter_audiences
+    from subscriptions order by channel, endpoint`;
   console.log('\nSUBSCRIBERS');
   console.log('===========');
   if (subs.length === 0) console.log('(none — run: npm run test:subscriber -- you@example.com)');
   for (const s of subs) {
-    console.log(`${String(s.channel).padEnd(9)} ${String(s.endpoint).padEnd(38)} ${s.verified ? 'verified' : 'NOT VERIFIED'}  severities: ${(s.filter_severities as string[]).join(',')}`);
+    console.log(`${String(s.channel).padEnd(9)} ${String(s.endpoint).padEnd(38)} ${s.verified ? 'verified' : 'NOT VERIFIED'}`);
+    console.log(`          networks: ${(s.filter_networks as string[]).join(',')}   types: ${(s.filter_types as string[]).join(',')}`);
+    console.log(`          severities: ${(s.filter_severities as string[]).join(',')}   audiences: ${(s.filter_audiences as string[]).join(',')}`);
   }
 
   const anns = await sql`select id, slug, type, severity, status, published_at from announcements
