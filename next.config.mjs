@@ -9,11 +9,14 @@ const nextConfig = {
   // leaves client components un-hydrated (forms render but do nothing) when the
   // site is browsed over a host other than localhost — e.g. a test server's IP.
   // DEV ONLY: `next start` in production ignores this. Set DEV_ORIGIN to the
-  // host you actually browse, e.g. DEV_ORIGIN=167.233.212.20:3001
+  // host you browse, e.g. DEV_ORIGIN=167.233.212.20 — entries must be bare
+  // hostnames, so any port or scheme given here is stripped.
   allowedDevOrigins: [
     'localhost',
     '127.0.0.1',
-    ...(process.env.DEV_ORIGIN ? [process.env.DEV_ORIGIN] : []),
+    ...(process.env.DEV_ORIGIN
+      ? [process.env.DEV_ORIGIN.replace(/^[a-z]+:\/\//i, '').split('/')[0].split(':')[0]]
+      : []),
   ],
 };
 export default nextConfig;
