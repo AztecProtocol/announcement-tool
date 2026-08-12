@@ -1,6 +1,6 @@
 import { getDb } from '../../src/web/db.js';
 import { listPublished } from '../../src/core/queries.js';
-import { tagLine } from '../../src/core/render.js';
+import { tagLine, formatDeadline } from '../../src/core/render.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,7 @@ export default async function ArchivePage() {
       <ul className="plain">
         {announcements.map(a => (
           <li key={a.id}>
-            <p className="tags">{tagLine(a)} · {a.publishedAt ? new Date(a.publishedAt).toUTCString() : ''}</p>
+            <p className="tags">{tagLine(a)} · {a.publishedAt ? formatDeadline(a.publishedAt) : ''}</p>
             <a href={`/a/${a.slug}`}><strong>{a.title}</strong></a>
           </li>
         ))}

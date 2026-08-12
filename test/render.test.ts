@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml } from '../src/core/render.js';
+import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml, formatDeadline } from '../src/core/render.js';
 import type { Announcement } from '../src/core/types.js';
 
 const a: Announcement = {
@@ -34,7 +34,7 @@ describe('render', () => {
     expect(out).toContain('[MAINNET] [CRITICAL] [UPGRADE]');
     expect(out).toContain('Upgrade to v5.1.0 by 2026-08-20 14:00 UTC');
     expect(out).toContain('Upgrade node to v5.1.0');
-    expect(out).toContain('2026-08-20T14:00:00Z');
+    expect(out).toContain('20 Aug 2026, 14:00 UTC'); // humanized, not raw ISO
     expect(out).toContain('sequencer, prover');
     expect(out).toContain('https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0');
     expect(out.trimEnd().endsWith('https://announce.aztec.foundation/a/2026-08-upgrade-v5-1-0')).toBe(true);
@@ -102,7 +102,7 @@ describe('renderEmail html part', () => {
     const { html } = renderEmail(a, 'publish');
     expect(html).toContain('<strong>Action required:</strong>');
     expect(html).toContain('Upgrade node to v5.1.0');
-    expect(html).toContain('<strong>2026-08-20T14:00:00Z</strong>');
+    expect(html).toContain('<strong>20 Aug 2026, 14:00 UTC</strong>');
     expect(html).toContain('(sequencer, prover)');
   });
 });
@@ -111,5 +111,37 @@ describe('renderBodyHtml', () => {
   it('renders markdown paragraphs with escaped entities', () => {
     const html = renderBodyHtml('One **bold**.\n\nTwo < three.');
     expect(html).toBe('<p style="margin:0 0 12px">One <b>bold</b>.</p>\n<p style="margin:0 0 12px">Two &lt; three.</p>');
+  });
+});
+
+describe('formatDeadline', () => {
+  it('renders an unambiguous UTC timestamp for human channels', () => {
+    expect(formatDeadline('2026-08-24T10:56:26Z')).toBe('24 Aug 2026, 10:56 UTC');
+    expect(formatDeadline('2026-01-05T09:05:00.000Z')).toBe('5 Jan 2026, 09:05 UTC');
+  });
+
+  it('converts a non-UTC offset to UTC rather than showing local time', () => {
+    expect(formatDeadline('2026-08-24T12:56:26+02:00')).toBe('24 Aug 2026, 10:56 UTC');
+  });
+
+  it('returns unparseable input unchanged instead of printing Invalid Date', () => {
+    expect(formatDeadline('not a date')).toBe('not a date');
+  });
+
+  it('humanizes deadlines in every human-facing rendering', () => {
+    const withDeadline = {
+      ...a,
+      actionsRequired: [{ action: 'Upgrade', deadline: '2026-08-24T10:56:26Z', applies_to: ['sequencer'] }],
+    };
+    for (const out of [
+      renderPlain(withDeadline, 'publish'),
+      renderMarkdown(withDeadline, 'publish'),
+      renderTelegramHtml(withDeadline, 'publish'),
+      renderEmail(withDeadline, 'publish').text,
+      renderEmail(withDeadline, 'publish').html,
+    ]) {
+      expect(out).toContain('24 Aug 2026, 10:56 UTC');
+      expect(out).not.toContain('2026-08-24T10:56:26Z');
+    }
   });
 });

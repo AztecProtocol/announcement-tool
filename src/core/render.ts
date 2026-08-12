@@ -16,12 +16,28 @@ export function kindPrefix(kind: DeliveryKind): string {
   return kind === 'update' ? 'UPDATED: ' : kind === 'reminder' ? 'REMINDER: ' : '';
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * ISO timestamp → "24 Aug 2026, 10:56 UTC" for human-facing channels.
+ * Deliberately explicit about UTC and unambiguous about day/month order, since
+ * readers are worldwide. Machine surfaces (webhook JSON, feeds) keep raw ISO.
+ * Returns the input unchanged if it isn't parseable.
+ */
+export function formatDeadline(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, `
+    + `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+
 function actionLines(a: Announcement, bullet: string): string[] {
   if (a.actionsRequired.length === 0) return [];
   const lines = [`Action required:`];
   for (const act of a.actionsRequired) {
     const parts = [`${bullet}${act.action}`];
-    if (act.deadline) parts.push(`by ${act.deadline}`);
+    if (act.deadline) parts.push(`by ${formatDeadline(act.deadline)}`);
     if (act.applies_to.length) parts.push(`(${act.applies_to.join(', ')})`);
     lines.push(parts.join(' '));
   }
@@ -117,7 +133,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
       + `<ul style="margin:0 0 12px;padding-left:20px">`
       + a.actionsRequired.map(act => {
           const parts = [escapeHtml(act.action)];
-          if (act.deadline) parts.push(`by <strong>${escapeHtml(act.deadline)}</strong>`);
+          if (act.deadline) parts.push(`by <strong>${escapeHtml(formatDeadline(act.deadline))}</strong>`);
           if (act.applies_to.length) parts.push(`(${escapeHtml(act.applies_to.join(', '))})`);
           return `<li style="margin:0 0 4px">${parts.join(' ')}</li>`;
         }).join('')

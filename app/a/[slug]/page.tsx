@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getDb } from '../../../src/web/db.js';
 import { getPublishedBySlug } from '../../../src/core/queries.js';
-import { tagLine, renderBodyHtml } from '../../../src/core/render.js';
+import { tagLine, renderBodyHtml, formatDeadline } from '../../../src/core/render.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,7 @@ export default async function AnnouncementPage({ params }: { params: Promise<{ s
     <article>
       <p className="tags">{tagLine(a)}</p>
       <h1>{a.title}</h1>
-      <p className="muted">Published {a.publishedAt ? new Date(a.publishedAt).toUTCString() : ''}</p>
+      <p className="muted">Published {a.publishedAt ? formatDeadline(a.publishedAt) : ''}</p>
       <div className="announcement-body" dangerouslySetInnerHTML={{ __html: renderBodyHtml(a.bodyMd) }} />
       {a.actionsRequired.length > 0 && (
         <div className="notice">
@@ -22,7 +22,7 @@ export default async function AnnouncementPage({ params }: { params: Promise<{ s
             {a.actionsRequired.map((act, i) => (
               <li key={i}>
                 {act.action}
-                {act.deadline ? <> — by <strong>{act.deadline}</strong></> : null}
+                {act.deadline ? <> — by <strong>{formatDeadline(act.deadline)}</strong></> : null}
                 {act.applies_to.length ? <> ({act.applies_to.join(', ')})</> : null}
               </li>
             ))}
