@@ -4,6 +4,7 @@ import './globals.css';
 export const metadata = {
   title: 'Aztec release announcements',
   description: 'Upgrades, governance events and operational notices for Aztec operators.',
+  icons: { icon: '/brand/aztec-symbol.png' },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -11,7 +12,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <header className="site-header">
-          <a href="/" className="brand">Aztec release announcements</a>
+          {/* Ink wordmark on the Parchment ground, per the brand's two-version rule. */}
+          <a href="/" className="brand" aria-label="Aztec release announcements — home">
+            <img src="/brand/aztec-wordmark-ink.svg" alt="Aztec" width={101} height={26} />
+          </a>
           <nav>
             <a href="/archive">Archive</a>
             <a href="/docs/webhooks">Webhook docs</a>
