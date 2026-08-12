@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata = {
   title: 'Aztec release announcements',
-  description: 'Upgrades, governance events and operational notices for Aztec operators — release-only, no noise.',
+  description: 'Upgrades, governance events and operational notices for Aztec operators.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </header>
         <main>{children}</main>
         <footer className="site-footer">
-          <p>Release-only announcements for Aztec operators and ecosystem teams. Subscribing is optional — everything here is public.</p>
+          <p>Announcements for Aztec operators and ecosystem teams. Subscribing is optional — everything here is public.</p>
         </footer>
       </body>
     </html>

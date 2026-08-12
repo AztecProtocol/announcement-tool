@@ -215,7 +215,7 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 
 | Route | Purpose |
 |-------|---------|
-| `/` | Subscribe page — email form, webhook form, broadcast-channel links. Supports `/?preset=criticals` for a one-click mainnet+critical prefill. |
+| `/` | Subscribe page — email form, webhook form, broadcast-channel links. |
 | `/a/<slug>` | A single published announcement. |
 | `/archive` | List of published announcements. |
 | `/feed.json` | JSON feed of published announcements. |

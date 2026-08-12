@@ -67,11 +67,17 @@ export function makeBrevoSender(opts: HttpOpts & { fromName?: string } = {}): Em
   };
 }
 
+/**
+ * Dev sender: prints the whole message instead of sending it. The body matters —
+ * confirmation and unsubscribe links only reach a developer this way.
+ */
 export function makeConsoleSender(): EmailSender {
   return {
     name: 'console',
     async send(msg: EmailMessage): Promise<void> {
-      console.log(`[email:console] to=${msg.to} subject=${msg.subject}`);
+      console.log(
+        `\n${'='.repeat(72)}\n[email:console] to: ${msg.to}\nsubject: ${msg.subject}\n${'-'.repeat(72)}\n${msg.text}${'='.repeat(72)}\n`,
+      );
     },
   };
 }

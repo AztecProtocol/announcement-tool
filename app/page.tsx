@@ -13,35 +13,20 @@ const box = (name: string, value: string, checked: boolean) => (
   </label>
 );
 
-export default async function SubscribePage({ searchParams }: { searchParams: Promise<{ preset?: string; error?: string }> }) {
-  const { preset, error } = await searchParams;
-  const criticalsOnly = preset === 'criticals';
+export default async function SubscribePage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error } = await searchParams;
 
-  // Default: both networks, upgrade + governance types (info unchecked),
+  // Defaults: both networks, upgrade + governance types (info unchecked),
   // critical + recommended severities (info unchecked), operators only.
-  // Criticals-only preset: mainnet + critical only, both types, operators only.
-  const isNetworkChecked = (v: Network) => (criticalsOnly ? v === 'mainnet' : true);
-  const isTypeChecked = (v: AnnouncementType) => (criticalsOnly ? true : v !== 'info');
-  const isSeverityChecked = (v: Severity) => (criticalsOnly ? v === 'critical' : v !== 'info');
+  const isNetworkChecked = (_v: Network) => true;
+  const isTypeChecked = (v: AnnouncementType) => v !== 'info';
+  const isSeverityChecked = (v: Severity) => v !== 'info';
   const isAudienceChecked = (v: Audience) => v === 'operators';
 
   return (
     <>
       <h1>Get Aztec release announcements</h1>
-      <p>Upgrades, governance events and operational notices — release-only, a few messages a month, nothing else.</p>
-
-      <p>
-        <a
-          href="/?preset=criticals"
-          className="secondary"
-          style={{
-            display: 'inline-block', fontWeight: 600, padding: '9px 18px', borderRadius: 7,
-            border: '1px solid #3a5a78', background: '#fff', color: '#3a5a78', textDecoration: 'none',
-          }}
-        >
-          Release-criticals only — mainnet
-        </a>
-      </p>
+      <p>Upgrades, governance events and operational notices.</p>
 
       {error === 'email' && (
         <div className="notice"><p>Enter a valid email address.</p></div>
@@ -64,7 +49,7 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
 
       <div className="card">
         <h2>Broadcast channels</h2>
-        <p className="muted">These carry everything, release-only — for filtered delivery use email or webhook above.</p>
+        <p className="muted">These carry every announcement. For filtered delivery, use email or webhook above.</p>
         <ul className="plain">
           <li><a href="#">Discord</a></li>
           <li><a href="#">Telegram</a></li>
