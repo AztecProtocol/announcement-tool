@@ -2,6 +2,7 @@
 import { useRef, useState } from 'react';
 import { useActionState } from 'react';
 import { createDraftAction } from './actions.js';
+import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
@@ -22,7 +23,7 @@ const box = (name: string, value: string, checked: boolean) => (
 );
 
 type ActionRow = { key: number; deadline: string; appliesTo: string };
-type LinkRow = { key: number };
+type LinkRow = { key: number; url: string };
 
 type ToolbarOp =
   | { label: string; title: string; wrap: [string, string] }
@@ -41,9 +42,8 @@ export default function ComposeForm() {
   const [result, formAction, pending] = useActionState<Result | undefined, FormData>(action, undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [type, setType] = useState<AnnouncementType>('upgrade');
-  const [linksTouched, setLinksTouched] = useState(false);
   const [actionRows, setActionRows] = useState<ActionRow[]>([]);
-  const [linkRows, setLinkRows] = useState<LinkRow[]>([{ key: 0 }]);
+  const [linkRows, setLinkRows] = useState<LinkRow[]>([{ key: 0, url: '' }]);
   const nextActionKey = useRef(0);
   const nextLinkKey = useRef(1);
 
@@ -65,7 +65,7 @@ export default function ComposeForm() {
     el.focus();
   }
 
-  const showGithubWarning = type === 'upgrade' && !linksTouched;
+  const showGithubWarning = type === 'upgrade' && !linkRows.some(row => GH_RELEASE.test(row.url));
 
   return (
     <div className="card compose-grid">
@@ -166,13 +166,16 @@ export default function ComposeForm() {
                   type="text"
                   name={`linkLabel.${i}`}
                   placeholder="Label (e.g. GitHub release)"
-                  onChange={() => setLinksTouched(true)}
                 />
                 <input
                   type="url"
                   name={`linkUrl.${i}`}
                   placeholder="https://…"
-                  onChange={() => setLinksTouched(true)}
+                  value={row.url}
+                  onChange={e => {
+                    const url = e.target.value;
+                    setLinkRows(rows => rows.map(r => (r.key === row.key ? { ...r, url } : r)));
+                  }}
                 />
                 <button
                   type="button"
@@ -186,7 +189,7 @@ export default function ComposeForm() {
             <button
               type="button"
               className="secondary"
-              onClick={() => setLinkRows(rows => [...rows, { key: nextLinkKey.current++ }])}
+              onClick={() => setLinkRows(rows => [...rows, { key: nextLinkKey.current++, url: '' }])}
             >
               Add link
             </button>

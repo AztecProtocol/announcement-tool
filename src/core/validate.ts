@@ -21,7 +21,9 @@ const schema = z.object({
   supersedes: z.string().optional(),
 });
 
-const GH_RELEASE = /^https:\/\/github\.com\/AztecProtocol\/[^/]+\/releases\//;
+// Exported so the compose form can mirror this check live in the UI —
+// the warning it renders must track this exact pattern, not a copy of it.
+export const GH_RELEASE = /^https:\/\/github\.com\/AztecProtocol\/[^/]+\/releases\//;
 
 export function validateAnnouncement(input: AnnouncementInput): { warnings: string[] } {
   schema.parse(input);
