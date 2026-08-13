@@ -4,12 +4,33 @@
 // for that specifier).
 import { headers } from 'next/dist/server/request/headers.js';
 import { redirect } from 'next/navigation';
+import { ZodError } from 'zod';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
 import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate } from '../../src/core/templates.js';
 import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
+
+const GENERIC_ERROR = 'Something went wrong — check the server logs.';
+
+/**
+ * Maps a caught error to a message safe to send to the browser.
+ *
+ * ZodError and FourEyesError (and any other plain Error thrown deliberately
+ * by core modules, e.g. "announcement not found: <id>") carry messages that
+ * are safe and useful to show. Anything else — most importantly a raw
+ * postgres driver error — may embed connection strings, hostnames, or query
+ * fragments, so it's logged server-side and replaced with a generic message
+ * before it ever reaches the client.
+ */
+function safeErrorMessage(err: unknown, context: string): string {
+  if (err instanceof ZodError) return err.issues.map(i => i.message).join('; ');
+  if (err instanceof FourEyesError) return err.message;
+  if (err instanceof Error && err.name === 'Error') return err.message;
+  console.error(`[admin/actions] ${context}:`, err);
+  return GENERIC_ERROR;
+}
 
 function inputFromForm(formData: FormData): AnnouncementInput {
   const pick = (name: string): string[] => formData.getAll(name).map(String);
@@ -76,7 +97,7 @@ export async function createDraftAction(formData: FormData): Promise<{ id?: stri
   try {
     draft = await createDraft(db, input, identity.email);
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'could not create draft' };
+    return { error: safeErrorMessage(err, 'createDraft') };
   }
 
   redirect(`/admin/review/${draft.id}`);
@@ -103,7 +124,7 @@ export async function saveTemplateAction(formData: FormData): Promise<{ template
     const template = await saveTemplate(db, { name, input, createdBy: identity.email });
     return { template };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'could not save template' };
+    return { error: safeErrorMessage(err, 'saveTemplate') };
   }
 }
 
@@ -125,7 +146,7 @@ export async function previewAction(formData: FormData): Promise<{ preview?: Pre
     const preview = await previewAnnouncement(db, input);
     return { preview };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'could not build preview' };
+    return { error: safeErrorMessage(err, 'previewAnnouncement') };
   }
 }
 
@@ -148,7 +169,7 @@ export async function requestPublishAction(id: string): Promise<PublishResult> {
     const announcement = await requestPublish(db, id, identity.email);
     return { announcement };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'could not request publication' };
+    return { error: safeErrorMessage(err, 'requestPublish') };
   }
 }
 
@@ -168,7 +189,6 @@ export async function confirmPublishAction(id: string): Promise<PublishResult> {
     const announcement = await confirmPublish(db, id, identity.email);
     return { announcement };
   } catch (err) {
-    if (err instanceof FourEyesError) return { error: err.message };
-    return { error: err instanceof Error ? err.message : 'could not confirm publication' };
+    return { error: safeErrorMessage(err, 'confirmPublish') };
   }
 }

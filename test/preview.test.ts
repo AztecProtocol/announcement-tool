@@ -35,10 +35,10 @@ describe('previewAnnouncement', () => {
     const preview = await previewAnnouncement(sql, input);
 
     expect(preview.discord).toHaveLength(1);
-    expect(preview.discord[0].target).toBe('discord:mainnet-updates');
-    expect(preview.discord[0].content.startsWith(prefix)).toBe(true);
-    expect(preview.discord[0].content).toContain('**Upgrade now**');
-    expect(preview.discord[0].content).toContain('Body text.');
+    expect(preview.discord![0].target).toBe('discord:mainnet-updates');
+    expect(preview.discord![0].content.startsWith(prefix)).toBe(true);
+    expect(preview.discord![0].content).toContain('**Upgrade now**');
+    expect(preview.discord![0].content).toContain('Body text.');
   });
 
   it('discord: a channel whose networks/types do not match produces no preview entry', async () => {
@@ -58,32 +58,80 @@ describe('previewAnnouncement', () => {
       })})`;
     const preview = await previewAnnouncement(sql, input);
     expect(preview.discord).toHaveLength(1);
-    expect(preview.discord[0].content.startsWith('**Upgrade now**')).toBe(false);
-    expect(preview.discord[0].content).toContain('[MAINNET] [CRITICAL] [UPGRADE]');
+    expect(preview.discord![0].content.startsWith('**Upgrade now**')).toBe(false);
+    expect(preview.discord![0].content).toContain('[MAINNET] [CRITICAL] [UPGRADE]');
   });
 
-  it('telegram preview uses HTML mode', async () => {
+  it('telegram preview uses HTML mode when a matching telegram channel_settings row exists', async () => {
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:mainnet', 'telegram', ${sql.json({ networks: ['mainnet'], types: ['upgrade'] })})`;
     const preview = await previewAnnouncement(sql, input);
     expect(preview.telegram).toContain('<b>Upgrade now</b>');
   });
 
+  it('telegram preview is undefined when no telegram channel_settings row matches', async () => {
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.telegram).toBeUndefined();
+  });
+
+  it('telegram preview is undefined when a telegram row exists but its network/type does not match', async () => {
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:testnet', 'telegram', ${sql.json({ networks: ['testnet'], types: ['upgrade'] })})`;
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.telegram).toBeUndefined();
+  });
+
   it('email preview subject matches renderEmail', async () => {
     const preview = await previewAnnouncement(sql, input);
-    expect(preview.email.subject).toContain('Upgrade now');
-    expect(preview.email.subject).toContain('[MAINNET]');
-    expect(preview.email.text).toContain('Body text.');
+    expect(preview.email!.subject).toContain('Upgrade now');
+    expect(preview.email!.subject).toContain('[MAINNET]');
+    expect(preview.email!.text).toContain('Body text.');
   });
 
   it('webhook preview is valid JSON containing event_id and actions_required', async () => {
     const preview = await previewAnnouncement(sql, input);
-    const parsed = JSON.parse(preview.webhook);
+    const parsed = JSON.parse(preview.webhook!);
     expect(parsed.event_id).toContain('ann_preview');
     expect(parsed.announcement.actions_required).toEqual([]);
   });
 
-  it('signal preview uses plain text rendering', async () => {
+  it('signal preview uses plain text rendering when a matching signal channel_settings row exists', async () => {
+    await sql`insert into channel_settings (key, channel, config) values
+      ('signal:mainnet', 'signal', ${sql.json({ networks: ['mainnet'], types: ['upgrade'] })})`;
     const preview = await previewAnnouncement(sql, input);
     expect(preview.signal).toContain('Upgrade now');
     expect(preview.signal).not.toContain('**');
+  });
+
+  it('signal preview is undefined when no signal channel_settings row matches', async () => {
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.signal).toBeUndefined();
+  });
+
+  it('rejects invalid input (e.g. a javascript: link) with a validation error instead of a rendered preview', async () => {
+    const badInput: AnnouncementInput = {
+      ...input,
+      links: [{ label: 'evil', url: 'javascript:alert(1)' }],
+    };
+    const preview = await previewAnnouncement(sql, badInput);
+    expect(preview.error).toBeDefined();
+    expect(preview.discord).toBeUndefined();
+    expect(preview.email).toBeUndefined();
+    expect(preview.webhook).toBeUndefined();
+  });
+
+  it('surfaces the non-blocking GitHub-release warning alongside a successful preview', async () => {
+    const preview = await previewAnnouncement(sql, input); // type: upgrade, no github release link
+    expect(preview.error).toBeUndefined();
+    expect(preview.warnings).toBeDefined();
+    expect(preview.warnings!.some(w => w.includes('GitHub release'))).toBe(true);
+    expect(preview.email).toBeDefined();
+  });
+
+  it('does not surface warnings when validation passes cleanly', async () => {
+    const cleanInput: AnnouncementInput = { ...input, type: 'info' };
+    const preview = await previewAnnouncement(sql, cleanInput);
+    expect(preview.error).toBeUndefined();
+    expect(preview.warnings).toBeUndefined();
   });
 });

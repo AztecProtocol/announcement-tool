@@ -363,6 +363,12 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
         {previewResult?.error && (
           <div className="notice"><p>Error: {previewResult.error}</p></div>
         )}
+        {previewResult?.preview?.error && (
+          <div className="notice"><p>Error: {previewResult.preview.error}</p></div>
+        )}
+        {previewResult?.preview?.warnings?.map(w => (
+          <div className="notice" key={w}><p>{w}</p></div>
+        ))}
 
         <div className="preview-tabs" role="tablist" style={{ marginTop: 14 }}>
           {PREVIEW_CHANNELS.map(ch => (
@@ -379,8 +385,12 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
         </div>
 
         <div className="preview-panel" role="tabpanel">
-          {!previewResult?.preview ? (
-            <p className="preview-empty">Click &quot;Refresh preview&quot; to see how this announcement will render on each channel.</p>
+          {!previewResult?.preview || previewResult.preview.error ? (
+            <p className="preview-empty">
+              {previewResult?.preview?.error
+                ? 'Fix the validation error above, then refresh the preview.'
+                : 'Click "Refresh preview" to see how this announcement will render on each channel.'}
+            </p>
           ) : (
             <PreviewPane channel={previewTab} preview={previewResult.preview} />
           )}
@@ -393,7 +403,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
 function PreviewPane({ channel, preview }: { channel: PreviewChannel; preview: PreviewSet }) {
   switch (channel) {
     case 'discord':
-      if (preview.discord.length === 0) {
+      if (!preview.discord || preview.discord.length === 0) {
         return <p className="preview-empty">No Discord channel matches this announcement&apos;s network and type.</p>;
       }
       return (
@@ -407,10 +417,17 @@ function PreviewPane({ channel, preview }: { channel: PreviewChannel; preview: P
         </>
       );
     case 'telegram':
+      if (!preview.telegram) {
+        return <p className="preview-empty">No Telegram channel matches this announcement&apos;s network and type.</p>;
+      }
       return <div>{preview.telegram}</div>;
     case 'signal':
+      if (!preview.signal) {
+        return <p className="preview-empty">No Signal channel matches this announcement&apos;s network and type.</p>;
+      }
       return <div>{preview.signal}</div>;
     case 'email':
+      if (!preview.email) return null;
       return (
         <>
           <p className="preview-discord-target">Subject: {preview.email.subject}</p>

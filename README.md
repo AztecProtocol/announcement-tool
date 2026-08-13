@@ -243,7 +243,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 
 ### Publishers and the bootstrap rule
 
-`app/admin/layout.tsx` checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`) before rendering any admin page or running any admin server action.
+`app/admin/layout.tsx` checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`) before rendering any admin page, so a non-publisher tailnet identity cannot read drafts, requester emails, fan-out targets, or templates either. Each mutating server action in `app/admin/actions.ts` also runs its own `isPublisher` check independently — the layout is not the only enforcement point for writes.
 
 - **Bootstrap rule:** if the `publishers` table is empty, every identity is treated as a publisher. This exists so the first deployment isn't locked out before anyone has been added.
 - While the table is empty, the admin shell shows a standing warning: "No publishers configured — anyone reaching this page can publish. Add publishers before launch."
