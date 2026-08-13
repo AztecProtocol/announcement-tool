@@ -13,5 +13,5 @@ export async function testSql(): Promise<Sql> {
   return postgres(TEST_DB_URL, { max: 4 });
 }
 export async function resetDb(sql: Sql): Promise<void> {
-  await sql`truncate announcements, subscriptions, delivery_ledger, audit_log, channel_settings, alert_state restart identity`;
+  await sql`truncate announcements, subscriptions, delivery_ledger, audit_log, channel_settings, alert_state, publishers restart identity`;
 }

@@ -31,7 +31,8 @@
     // `next/navigation` package folder, never the sibling .d.ts file. This
     // paths mapping is a targeted workaround, not a resolution-mode change.
     "paths": {
-      "next/navigation": ["./node_modules/next/navigation.d.ts"]
+      "next/navigation": ["./node_modules/next/navigation.d.ts"],
+      "next/headers": ["./node_modules/next/headers.d.ts"]
     }
   },
   "include": [
