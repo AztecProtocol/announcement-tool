@@ -34,4 +34,9 @@ describe('validateAnnouncement', () => {
     const { warnings } = validateAnnouncement({ ...base, links: [] });
     expect(warnings.some(w => w.includes('GitHub release'))).toBe(true);
   });
+  it('rejects link schemes other than http/https', () => {
+    expect(() => validateAnnouncement({ ...base, links: [{ label: 'x', url: 'javascript:alert(1)' }] })).toThrow();
+    expect(() => validateAnnouncement({ ...base, links: [{ label: 'x', url: 'data:text/html,<script>' }] })).toThrow();
+    expect(() => validateAnnouncement({ ...base, links: [{ label: 'ok', url: 'http://example.com/x' }] })).not.toThrow();
+  });
 });

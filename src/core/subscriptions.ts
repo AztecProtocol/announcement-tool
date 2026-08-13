@@ -50,6 +50,22 @@ export async function createSubscription(
   return rowToSub(row);
 }
 
+export async function updateSubscriptionFilters(
+  sql: Sql, id: string, f: Partial<SubscriptionFilters>,
+): Promise<void> {
+  for (const [k, v] of Object.entries(f)) {
+    if (Array.isArray(v) && v.length === 0) throw new Error(`filter ${k} must not be empty`);
+  }
+  // One statement: coalesce leaves unmentioned columns untouched, so a partial
+  // update can never half-apply the way three sequential statements could.
+  await sql`update subscriptions set
+    filter_networks   = coalesce(${f.networks ?? null}::text[], filter_networks),
+    filter_types      = coalesce(${f.types ?? null}::text[], filter_types),
+    filter_severities = coalesce(${f.severities ?? null}::text[], filter_severities),
+    filter_audiences  = coalesce(${f.audiences ?? null}::text[], filter_audiences)
+    where id = ${id}`;
+}
+
 export async function verifySubscription(sql: Sql, id: string): Promise<void> {
   await sql`update subscriptions set verified = true where id = ${id}`;
 }

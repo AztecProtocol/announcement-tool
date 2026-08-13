@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres';
-import { getSubscriptionByUnsubscribeToken, type SubscriptionFilters } from './subscriptions.js';
+import { getSubscriptionByUnsubscribeToken, updateSubscriptionFilters, type SubscriptionFilters } from './subscriptions.js';
 
 export async function unsubscribeByToken(sql: Sql, token: string): Promise<boolean> {
   const sub = await getSubscriptionByUnsubscribeToken(sql, token);
@@ -15,14 +15,14 @@ export async function unsubscribeByToken(sql: Sql, token: string): Promise<boole
 export async function updateFiltersByToken(
   sql: Sql, token: string, f: Partial<SubscriptionFilters>,
 ): Promise<boolean> {
+  // updateSubscriptionFilters throws on the empty-array guard; that must happen
+  // before the lookup so a malformed request fails the same way regardless of
+  // whether the token is valid (this caller's contract: throw, don't swallow).
   for (const [k, v] of Object.entries(f)) {
     if (Array.isArray(v) && v.length === 0) throw new Error(`filter ${k} must not be empty`);
   }
   const sub = await getSubscriptionByUnsubscribeToken(sql, token);
   if (!sub) return false;
-  if (f.networks) await sql`update subscriptions set filter_networks = ${f.networks} where id = ${sub.id}`;
-  if (f.types) await sql`update subscriptions set filter_types = ${f.types} where id = ${sub.id}`;
-  if (f.severities) await sql`update subscriptions set filter_severities = ${f.severities} where id = ${sub.id}`;
-  if (f.audiences) await sql`update subscriptions set filter_audiences = ${f.audiences} where id = ${sub.id}`;
+  await updateSubscriptionFilters(sql, sub.id, f);
   return true;
 }

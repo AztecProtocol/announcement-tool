@@ -54,10 +54,12 @@ describe('registerWebhook', () => {
     expect(row.verified).toBe(false);
   });
 
-  it('re-registering updates filters, keeps the secret, does not return it again', async () => {
+  it('re-registering with the correct secret updates filters, keeps the secret, does not return it again', async () => {
     const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
     const first = await registerWebhook(sql, { url, allowPrivateHosts: true });
-    const again = await registerWebhook(sql, { url, filters: { severities: ['critical'] }, allowPrivateHosts: true });
+    const again = await registerWebhook(sql, {
+      url, secret: first.secretOnce, filters: { severities: ['critical'] }, allowPrivateHosts: true,
+    });
     server.close();
     expect(again.secretOnce).toBeUndefined();
     expect(again.unsubscribeUrl).toBeUndefined();
@@ -124,5 +126,34 @@ describe('registerWebhook', () => {
     expect(res.secretOnce).toBeUndefined();
     const [{ c }] = await sql`select count(*)::int as c from subscriptions`;
     expect(c).toBe(0);
+  });
+
+  it('re-registration without the secret is refused with a generic message', async () => {
+    const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
+    await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const res = await registerWebhook(sql, { url, filters: { severities: ['critical'] }, allowPrivateHosts: true });
+    server.close();
+    expect(res.verified).toBe(false);
+    expect(res.error).toBe('not authorized or not registered');
+    const [row] = await sql`select filter_severities from subscriptions where endpoint = ${url}`;
+    expect(row.filter_severities).toEqual(['critical', 'recommended', 'info']); // unchanged
+  });
+
+  it('re-registration with the correct secret updates filters', async () => {
+    const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
+    const first = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const res = await registerWebhook(sql, {
+      url, secret: first.secretOnce, filters: { severities: ['critical'] }, allowPrivateHosts: true,
+    });
+    server.close();
+    expect(res.verified).toBe(true);
+    expect(res.secretOnce).toBeUndefined();
+    const [row] = await sql`select filter_severities from subscriptions where endpoint = ${url}`;
+    expect(row.filter_severities).toEqual(['critical']);
+  });
+
+  it('an unregistered url with a wrong secret answers identically — no existence oracle', async () => {
+    const a = await registerWebhook(sql, { url: 'https://never-registered.example.com/h', secret: 'whsec_wrong' });
+    expect(a.error).toBe('not authorized or not registered');
   });
 });

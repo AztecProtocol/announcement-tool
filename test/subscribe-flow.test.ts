@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { startEmailSubscription, confirmSubscription } from '../src/core/subscribe-flow.js';
+import { startEmailSubscription, confirmSubscription, confirmFilterChange } from '../src/core/subscribe-flow.js';
 import { getSubscription, createSubscription } from '../src/core/subscriptions.js';
 import type { EmailMessage, EmailSender } from '../src/adapters/esp.js';
 
@@ -43,18 +43,31 @@ describe('email double-opt-in', () => {
     expect(row.verified).toBe(false);
   });
 
-  it('re-subscribing a verified address updates filters, sends a notice, stays verified', async () => {
+  it('re-subscribing a verified address with no filter change sends an update notice, stays verified', async () => {
     const { sender, sent } = recorder();
     await startEmailSubscription(sql, sender, { email: 'v@example.com' });
     const token = sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
     await confirmSubscription(sql, token);
 
-    const res = await startEmailSubscription(sql, sender, { email: 'v@example.com', filters: { networks: ['mainnet'] } });
+    const res = await startEmailSubscription(sql, sender, { email: 'v@example.com' });
     expect(res).toBe('updated');
     expect(sent).toHaveLength(2);
     expect(sent[1].subject.toLowerCase()).toContain('updated');
-    const [row] = await sql`select filter_networks, verified from subscriptions where endpoint = 'v@example.com'`;
-    expect(row.filter_networks).toEqual(['mainnet']);
+    const [row] = await sql`select verified from subscriptions where endpoint = 'v@example.com'`;
+    expect(row.verified).toBe(true);
+  });
+
+  it('re-subscribing a verified address with a filter change does not apply it until confirmed', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'v2@example.com' });
+    const token = sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
+    await confirmSubscription(sql, token);
+
+    const res = await startEmailSubscription(sql, sender, { email: 'v2@example.com', filters: { networks: ['mainnet'] } });
+    expect(res).toBe('change_pending');
+    expect(sent).toHaveLength(2);
+    const [row] = await sql`select filter_networks, verified from subscriptions where endpoint = 'v2@example.com'`;
+    expect(row.filter_networks).toEqual(['mainnet', 'testnet']); // unchanged until confirmed
     expect(row.verified).toBe(true);
   });
 
@@ -132,5 +145,30 @@ describe('email double-opt-in', () => {
     expect(row.id).toBe(realSub!.id);
     expect(row.filter_severities).toEqual(['critical']);
     expect(row.verified).toBe(false);
+  });
+
+  it('a verified subscriber gets a confirm-change email; filters change only after confirming', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'cc@example.com' });
+    await confirmSubscription(sql, sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1]);
+
+    const res = await startEmailSubscription(sql, sender, {
+      email: 'cc@example.com', filters: { severities: ['info'] }, baseUrl: 'https://announce.example',
+    });
+    expect(res).toBe('change_pending');
+    const [before] = await sql`select filter_severities, pending_filters from subscriptions where endpoint = 'cc@example.com'`;
+    expect(before.filter_severities).toEqual(['critical', 'recommended', 'info']); // unchanged
+    expect(before.pending_filters).not.toBeNull();
+
+    const token = sent[1].text.match(/\/confirm-change\/([0-9a-f]{32})/)![1];
+    expect(await confirmFilterChange(sql, token)).toBe(true);
+    const [after] = await sql`select filter_severities, pending_filters, pending_token from subscriptions where endpoint = 'cc@example.com'`;
+    expect(after.filter_severities).toEqual(['info']);
+    expect(after.pending_filters).toBeNull();
+    expect(after.pending_token).toBeNull(); // single-use
+  });
+
+  it('confirmFilterChange rejects an unknown token', async () => {
+    expect(await confirmFilterChange(sql, 'a'.repeat(32))).toBe(false);
   });
 });

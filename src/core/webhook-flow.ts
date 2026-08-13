@@ -1,6 +1,8 @@
 import type { Sql } from 'postgres';
-import { createSubscription, verifySubscription, type Subscription, type SubscriptionFilters } from './subscriptions.js';
+import { createSubscription, updateSubscriptionFilters, verifySubscription, type Subscription, type SubscriptionFilters } from './subscriptions.js';
 import { assertDeliverableUrl, signPayload } from '../adapters/webhook.js';
+
+const NOT_AUTHORIZED = 'not authorized or not registered';
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505';
@@ -21,7 +23,7 @@ function emptyFilterError(f?: Partial<SubscriptionFilters>): string | undefined 
 export async function registerWebhook(
   sql: Sql,
   input: {
-    url: string; filters?: Partial<SubscriptionFilters>;
+    url: string; filters?: Partial<SubscriptionFilters>; secret?: string;
     fetchImpl?: typeof fetch; allowPrivateHosts?: boolean; timeoutMs?: number; baseUrl?: string;
     // Injectable in place of the real createSubscription — used by tests to
     // simulate the concurrent-insert race (create the row, then throw 23505)
@@ -44,10 +46,23 @@ export async function registerWebhook(
     where channel = 'webhook' and endpoint = ${input.url}`;
   let subId: string, secret: string, secretOnce: string | undefined, unsubscribeUrl: string | undefined;
   if (existing[0]) {
+    // Modifying an existing registration requires the secret it was issued
+    // with; a wrong or absent secret gets the exact same generic error as
+    // the no-such-URL case below, so the response can't be used to probe
+    // registered URLs.
+    if (input.secret === undefined || input.secret !== existing[0].secret) {
+      return { verified: false, error: NOT_AUTHORIZED };
+    }
     subId = existing[0].id as string;
     secret = existing[0].secret as string;
     const filterErr = await applyFilters(sql, subId, input.filters);
     if (filterErr) return filterErr;
+  } else if (input.secret !== undefined) {
+    // Unknown URL, but a secret was supplied — this only happens on an attempt
+    // to modify an existing registration, so answer identically to the
+    // wrong-secret case above rather than falling through to first-time
+    // registration (which would create a row and reveal the URL was unknown).
+    return { verified: false, error: NOT_AUTHORIZED };
   } else {
     try {
       const sub: Subscription = await doCreate(sql, { channel: 'webhook', endpoint: input.url, filters: input.filters });
@@ -101,12 +116,11 @@ async function applyFilters(
   sql: Sql, subId: string, f?: Partial<SubscriptionFilters>,
 ): Promise<{ secretOnce?: string; unsubscribeUrl?: string; verified: boolean; error?: string } | undefined> {
   if (!f) return undefined;
-  for (const [k, v] of Object.entries(f)) {
-    if (Array.isArray(v) && v.length === 0) return { verified: false, error: `filter ${k} must not be empty` };
+  try {
+    await updateSubscriptionFilters(sql, subId, f);
+  } catch (err) {
+    // registerWebhook's contract: never throw, always return { verified: false, error }.
+    return { verified: false, error: err instanceof Error ? err.message : String(err) };
   }
-  if (f.networks) await sql`update subscriptions set filter_networks = ${f.networks} where id = ${subId}`;
-  if (f.types) await sql`update subscriptions set filter_types = ${f.types} where id = ${subId}`;
-  if (f.severities) await sql`update subscriptions set filter_severities = ${f.severities} where id = ${subId}`;
-  if (f.audiences) await sql`update subscriptions set filter_audiences = ${f.audiences} where id = ${subId}`;
   return undefined;
 }

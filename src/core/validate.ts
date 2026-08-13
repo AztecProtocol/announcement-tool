@@ -13,7 +13,10 @@ const schema = z.object({
     deadline: z.string().datetime({ offset: true }).optional(),
     applies_to: z.array(z.string()),
   })),
-  links: z.array(z.object({ label: z.string().min(1), url: z.string().url() })),
+  links: z.array(z.object({
+    label: z.string().min(1),
+    url: z.string().url().refine(u => /^https?:$/.test(new URL(u).protocol), 'link must be http or https'),
+  })),
   expiresAt: z.string().datetime({ offset: true }).optional(),
   supersedes: z.string().optional(),
 });
