@@ -1,9 +1,10 @@
 'use client';
 import { useRef, useState } from 'react';
 import { useActionState } from 'react';
-import { createDraftAction, previewAction } from './actions.js';
+import { useRouter } from 'next/navigation';
+import { createDraftAction, previewAction, saveTemplateAction } from './actions.js';
 import { GH_RELEASE } from '../../src/core/validate.js';
-import type { AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
+import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
@@ -23,8 +24,8 @@ const box = (name: string, value: string, checked: boolean) => (
   </label>
 );
 
-type ActionRow = { key: number; deadline: string; appliesTo: string };
-type LinkRow = { key: number; url: string };
+type ActionRow = { key: number; action: string; deadline: string; appliesTo: string };
+type LinkRow = { key: number; label: string; url: string };
 
 type ToolbarOp =
   | { label: string; title: string; wrap: [string, string] }
@@ -44,18 +45,66 @@ const PREVIEW_CHANNELS: PreviewChannel[] = ['discord', 'telegram', 'signal', 'em
 
 type PreviewResult = { preview?: PreviewSet; error?: string };
 
-export default function ComposeForm() {
+/** ISO string -> value for an <input type="datetime-local">, or '' if unset. */
+function toLocalInput(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export type ComposeFormProps = {
+  templates?: { id: string; name: string }[];
+  recentAnnouncements?: { id: string; title: string; slug: string }[];
+  prefill?: AnnouncementInput;
+};
+
+export default function ComposeForm({ templates = [], recentAnnouncements = [], prefill }: ComposeFormProps) {
+  const router = useRouter();
   const [result, formAction, pending] = useActionState<Result | undefined, FormData>(action, undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const [type, setType] = useState<AnnouncementType>('upgrade');
-  const [actionRows, setActionRows] = useState<ActionRow[]>([]);
-  const [linkRows, setLinkRows] = useState<LinkRow[]>([{ key: 0, url: '' }]);
-  const nextActionKey = useRef(0);
-  const nextLinkKey = useRef(1);
+  const [type, setType] = useState<AnnouncementType>(prefill?.type ?? 'upgrade');
+  const [actionRows, setActionRows] = useState<ActionRow[]>(
+    (prefill?.actionsRequired ?? []).map((ar, i) => ({
+      key: i,
+      action: ar.action,
+      deadline: toLocalInput(ar.deadline),
+      appliesTo: ar.applies_to.join(', '),
+    })),
+  );
+  const [linkRows, setLinkRows] = useState<LinkRow[]>(
+    (prefill?.links ?? []).length > 0
+      ? prefill!.links.map((l, i) => ({ key: i, label: l.label, url: l.url }))
+      : [{ key: 0, label: '', url: '' }],
+  );
+  const nextActionKey = useRef(actionRows.length);
+  const nextLinkKey = useRef(linkRows.length);
   const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
   const [previewResult, setPreviewResult] = useState<PreviewResult | undefined>(undefined);
   const [previewPending, setPreviewPending] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [saveTemplateResult, setSaveTemplateResult] = useState<{ ok?: true; error?: string } | undefined>(undefined);
+  const [saveTemplatePending, setSaveTemplatePending] = useState(false);
+
+  function goto(from: string) {
+    router.push(from ? `/admin?from=${encodeURIComponent(from)}` : '/admin');
+  }
+
+  async function handleSaveTemplate() {
+    const el = formRef.current;
+    if (!el || !templateName.trim()) return;
+    setSaveTemplatePending(true);
+    try {
+      const formData = new FormData(el);
+      formData.set('templateName', templateName.trim());
+      const res = await saveTemplateAction(formData);
+      setSaveTemplateResult(res.error ? { error: res.error } : { ok: true });
+    } finally {
+      setSaveTemplatePending(false);
+    }
+  }
 
   async function refreshPreview() {
     const el = formRef.current;
@@ -94,11 +143,44 @@ export default function ComposeForm() {
     <div className="card compose-grid">
       <div>
         <h2>New announcement</h2>
+
+        <form method="GET" action="/admin" className="start-from-picker">
+          <label htmlFor="from">Start from</label>
+          <select
+            id="from"
+            name="from"
+            defaultValue=""
+            onChange={e => goto(e.target.value)}
+          >
+            <option value="">Blank</option>
+            {templates.length > 0 && (
+              <optgroup label="Saved templates">
+                {templates.map(t => (
+                  <option key={t.id} value={`template:${t.id}`}>{t.name}</option>
+                ))}
+              </optgroup>
+            )}
+            {recentAnnouncements.length > 0 && (
+              <optgroup label="Past announcements">
+                {recentAnnouncements.map(a => (
+                  <option key={a.id} value={`announcement:${a.id}`}>{a.title}</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          <noscript><button type="submit">Go</button></noscript>
+        </form>
+        {prefill && (
+          <div className="notice">
+            <p>Prefilled from a saved template or past announcement. Dates (deadlines, expiry) are cleared — set new ones below.</p>
+          </div>
+        )}
+
         {result?.error && <div className="notice"><p>Error: {result.error}</p></div>}
 
         <form action={formAction} ref={formRef}>
           <label htmlFor="title">Title</label>
-          <input id="title" type="text" name="title" placeholder="v5.1.0 release" required />
+          <input id="title" type="text" name="title" placeholder="v5.1.0 release" defaultValue={prefill?.title ?? ''} required />
 
           <fieldset>
             <legend>Type</legend>
@@ -120,13 +202,24 @@ export default function ComposeForm() {
             <legend>Severity</legend>
             {SEVERITIES.map(v => (
               <label className="check" key={v}>
-                <input type="radio" name="severity" value={v} defaultChecked={v === 'recommended'} /> {v}
+                <input
+                  type="radio"
+                  name="severity"
+                  value={v}
+                  defaultChecked={v === (prefill?.severity ?? 'recommended')}
+                /> {v}
               </label>
             ))}
           </fieldset>
 
-          <fieldset><legend>Networks</legend>{NETWORKS.map(v => box('networks', v, true))}</fieldset>
-          <fieldset><legend>Audience</legend>{AUDIENCES.map(v => box('audiences', v, v === 'operators'))}</fieldset>
+          <fieldset>
+            <legend>Networks</legend>
+            {NETWORKS.map(v => box('networks', v, prefill ? prefill.networks.includes(v) : true))}
+          </fieldset>
+          <fieldset>
+            <legend>Audience</legend>
+            {AUDIENCES.map(v => box('audiences', v, prefill ? prefill.audiences.includes(v) : v === 'operators'))}
+          </fieldset>
 
           <label htmlFor="bodyMd">Body (Markdown)</label>
           <div className="toolbar">
@@ -147,6 +240,7 @@ export default function ComposeForm() {
             ref={textareaRef}
             rows={14}
             placeholder="What's changing, and why it matters."
+            defaultValue={prefill?.bodyMd ?? ''}
             required
           />
 
@@ -160,9 +254,9 @@ export default function ComposeForm() {
             <legend>Actions required</legend>
             {actionRows.map((row, i) => (
               <div className="row-repeat" key={row.key}>
-                <input type="text" name={`action.${i}`} placeholder="Action (e.g. Update your node)" />
-                <input type="datetime-local" name={`deadline.${i}`} />
-                <input type="text" name={`appliesTo.${i}`} placeholder="Applies to (comma-separated roles)" />
+                <input type="text" name={`action.${i}`} placeholder="Action (e.g. Update your node)" defaultValue={row.action} />
+                <input type="datetime-local" name={`deadline.${i}`} defaultValue={row.deadline} />
+                <input type="text" name={`appliesTo.${i}`} placeholder="Applies to (comma-separated roles)" defaultValue={row.appliesTo} />
                 <button
                   type="button"
                   className="secondary"
@@ -175,7 +269,7 @@ export default function ComposeForm() {
             <button
               type="button"
               className="secondary"
-              onClick={() => setActionRows(rows => [...rows, { key: nextActionKey.current++, deadline: '', appliesTo: '' }])}
+              onClick={() => setActionRows(rows => [...rows, { key: nextActionKey.current++, action: '', deadline: '', appliesTo: '' }])}
             >
               Add action
             </button>
@@ -189,6 +283,7 @@ export default function ComposeForm() {
                   type="text"
                   name={`linkLabel.${i}`}
                   placeholder="Label (e.g. GitHub release)"
+                  defaultValue={row.label}
                 />
                 <input
                   type="url"
@@ -212,19 +307,42 @@ export default function ComposeForm() {
             <button
               type="button"
               className="secondary"
-              onClick={() => setLinkRows(rows => [...rows, { key: nextLinkKey.current++, url: '' }])}
+              onClick={() => setLinkRows(rows => [...rows, { key: nextLinkKey.current++, label: '', url: '' }])}
             >
               Add link
             </button>
           </fieldset>
 
           <label htmlFor="expiresAt">Expires (optional)</label>
-          <input id="expiresAt" type="datetime-local" name="expiresAt" />
+          <input id="expiresAt" type="datetime-local" name="expiresAt" defaultValue={toLocalInput(prefill?.expiresAt)} />
 
           <div>
             <button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save draft'}</button>
           </div>
         </form>
+
+        <div className="save-as-template">
+          <label htmlFor="templateName">Save as template</label>
+          <div className="row-repeat">
+            <input
+              id="templateName"
+              type="text"
+              placeholder="Template name (e.g. Standard upgrade)"
+              value={templateName}
+              onChange={e => { setTemplateName(e.target.value); setSaveTemplateResult(undefined); }}
+            />
+            <button
+              type="button"
+              className="secondary"
+              disabled={saveTemplatePending || !templateName.trim()}
+              onClick={handleSaveTemplate}
+            >
+              {saveTemplatePending ? 'Saving…' : 'Save template'}
+            </button>
+          </div>
+          {saveTemplateResult?.ok && <p className="muted">Template saved.</p>}
+          {saveTemplateResult?.error && <div className="notice"><p>Error: {saveTemplateResult.error}</p></div>}
+        </div>
       </div>
 
       <div className="compose-preview">

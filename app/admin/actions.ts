@@ -8,7 +8,8 @@ import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
 import { createDraft } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
-import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
+import { saveTemplate } from '../../src/core/templates.js';
+import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
 
 function inputFromForm(formData: FormData): AnnouncementInput {
   const pick = (name: string): string[] => formData.getAll(name).map(String);
@@ -79,6 +80,31 @@ export async function createDraftAction(formData: FormData): Promise<{ id?: stri
   }
 
   redirect(`/admin/review/${draft.id}`);
+}
+
+export async function saveTemplateAction(formData: FormData): Promise<{ template?: Template; error?: string }> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  const name = String(formData.get('templateName') ?? '').trim();
+  if (!name) return { error: 'template name is required' };
+
+  let input: AnnouncementInput;
+  try {
+    input = inputFromForm(formData);
+  } catch {
+    return { error: 'could not read form data' };
+  }
+
+  try {
+    const template = await saveTemplate(db, { name, input, createdBy: identity.email });
+    return { template };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'could not save template' };
+  }
 }
 
 export async function previewAction(formData: FormData): Promise<{ preview?: PreviewSet; error?: string }> {

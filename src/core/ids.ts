@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 
 export const newAnnouncementId = () => `ann_${ulid()}`;
 export const newSubscriptionId = () => `sub_${ulid()}`;
+export const newTemplateId = () => `tpl_${ulid()}`;
 export const newSecret = () => `whsec_${randomBytes(24).toString('hex')}`;
 export const newToken = () => randomBytes(16).toString('hex');
 

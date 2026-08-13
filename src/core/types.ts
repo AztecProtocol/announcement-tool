@@ -47,3 +47,11 @@ export interface DeliveryTarget {
   channel: string;
   target: string;
 }
+
+export interface Template {
+  id: string;
+  name: string;
+  input: AnnouncementInput;
+  createdBy: string;
+  createdAt: string;
+}
