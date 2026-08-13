@@ -38,11 +38,21 @@
     // Independently re-verified 2026-08-13: with the paths entry + a public
     // `next/headers` import, GET /admin returns 500
     // `TypeError: (void 0) is not a function`; with the deep import below and
-    // no entry, GET /admin returns 200. (`next/navigation` above is safe only
-    // because nothing imports a *runtime* value through that mapping.)
-    // Files needing headers() import `next/dist/server/request/headers.js`
-    // (app/admin/layout.tsx, app/admin/actions.ts). RE-TEST ON NEXT UPGRADE:
-    // if the public specifier ever type-checks under NodeNext, drop both.
+    // no entry, GET /admin returns 200.
+    //
+    // ⚠️ THE SAME TRAP APPLIES TO `next/navigation` ABOVE. The mapping is safe
+    // only for the exports we currently import through it that are erased or
+    // resolved elsewhere at runtime (`redirect`, `notFound` in server
+    // components). Importing a genuine client-runtime value through it breaks
+    // identically: `useRouter` from `next/navigation` 500s under Turbopack dev
+    // (found by the Plan-4a end-to-end smoke, 2026-08-13). ANY new runtime
+    // import from these packages needs the deep-import treatment:
+    //   headers   → next/dist/server/request/headers.js
+    //   useRouter → next/dist/client/components/navigation.js
+    // Current deep-import sites: app/admin/layout.tsx, app/admin/actions.ts,
+    // app/admin/compose-form.tsx, app/admin/review/[id]/publish-control.tsx.
+    // RE-TEST ON NEXT UPGRADE: if the public specifiers ever type-check under
+    // NodeNext, drop the mapping and all deep imports together.
     "paths": {
       "next/navigation": ["./node_modules/next/navigation.d.ts"]
     }
