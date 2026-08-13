@@ -30,9 +30,17 @@
     // has none) — it only checks ancestor node_modules for a literal
     // `next/navigation` package folder, never the sibling .d.ts file. This
     // paths mapping is a targeted workaround, not a resolution-mode change.
+    //
+    // `next/headers` deliberately has NO entry here: adding one (any target,
+    // any key syntax — tried exact and wildcard) makes Turbopack's *runtime*
+    // resolver silently bind the import to `undefined` in dev, even though
+    // `tsc --noEmit` type-checks fine. Reproduced with a minimal probe page
+    // doing nothing but `typeof headers` — 500/undefined with the paths entry,
+    // working with it removed. Files that need `headers()` import it from the
+    // internal `next/dist/server/request/headers.js` path instead (see
+    // app/admin/layout.tsx and app/admin/actions.ts) to sidestep this.
     "paths": {
-      "next/navigation": ["./node_modules/next/navigation.d.ts"],
-      "next/headers": ["./node_modules/next/headers.d.ts"]
+      "next/navigation": ["./node_modules/next/navigation.d.ts"]
     }
   },
   "include": [

@@ -1,11 +1,17 @@
 import type { ReactNode } from 'react';
-import { headers } from 'next/headers';
+// Deep import, not `next/headers`: see the `paths` comment in tsconfig.json —
+// mapping the `next/headers` specifier (any form) makes Turbopack's dev
+// resolver silently bind the import to `undefined` at runtime, even though it
+// type-checks. This path is what `next/headers` re-exports from anyway.
+import { headers } from 'next/dist/server/request/headers.js';
 import { resolveIdentity, listPublishers } from '../../src/core/identity.js';
 import { getDb } from '../../src/web/db.js';
 
 export const metadata = {
   title: 'Admin — Aztec release announcements',
 };
+
+export const dynamic = 'force-dynamic';
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const identity = resolveIdentity(await headers());
