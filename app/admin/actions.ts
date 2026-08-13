@@ -6,10 +6,10 @@ import { headers } from 'next/dist/server/request/headers.js';
 import { redirect } from 'next/navigation';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
-import { createDraft } from '../../src/core/announcements.js';
+import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate } from '../../src/core/templates.js';
-import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
+import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
 
 function inputFromForm(formData: FormData): AnnouncementInput {
   const pick = (name: string): string[] => formData.getAll(name).map(String);
@@ -126,5 +126,49 @@ export async function previewAction(formData: FormData): Promise<{ preview?: Pre
     return { preview };
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'could not build preview' };
+  }
+}
+
+type PublishResult = { announcement?: Announcement; error?: string };
+
+/**
+ * Non-critical drafts publish immediately here (`requestPublish` performs the
+ * publish itself when severity isn't critical); critical drafts move to
+ * `publish_requested`. Either way, the caller re-reads the announcement to
+ * render its new state.
+ */
+export async function requestPublishAction(id: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await requestPublish(db, id, identity.email);
+    return { announcement };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'could not request publication' };
+  }
+}
+
+/**
+ * FourEyesError (confirmer === requester) must reach the page as a visible
+ * message, never an unhandled throw / 500 — that's the whole point of the
+ * four-eyes control.
+ */
+export async function confirmPublishAction(id: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await confirmPublish(db, id, identity.email);
+    return { announcement };
+  } catch (err) {
+    if (err instanceof FourEyesError) return { error: err.message };
+    return { error: err instanceof Error ? err.message : 'could not confirm publication' };
   }
 }

@@ -1,6 +1,8 @@
-import type { TransactionSql } from 'postgres';
+import type { Sql, TransactionSql } from 'postgres';
 import type { Announcement, AnnouncementType, DeliveryKind, DeliveryTarget, Network } from './types.js';
 import { matchesSubscription, rowToSub } from './subscriptions.js';
+
+type Tx = Sql | TransactionSql;
 
 export interface ChannelSetting {
   key: string; channel: 'discord' | 'telegram' | 'signal';
@@ -27,15 +29,26 @@ export function broadcastTargetsFor(
     .map(cs => ({ channel: cs.channel, target: cs.key }));
 }
 
-export async function enqueueDeliveries(tx: TransactionSql, a: Announcement, kind: DeliveryKind): Promise<number> {
-  const settings = (await tx`select * from channel_settings`).map(rowToSetting);
+/**
+ * Every destination this announcement would be delivered to, without writing
+ * anything. `enqueueDeliveries` calls this so the confirmation screen and the
+ * actual enqueue can never drift apart — one matching implementation, two callers.
+ */
+export async function countFanoutTargets(sql: Tx, a: Announcement): Promise<DeliveryTarget[]> {
+  const settings = (await sql`select * from channel_settings`).map(rowToSetting);
   const targets: DeliveryTarget[] = broadcastTargetsFor(a, settings);
 
-  const subs = await tx`select * from subscriptions where verified = true`;
+  const subs = await sql`select * from subscriptions where verified = true`;
   for (const row of subs) {
     const s = rowToSub(row);
     if (matchesSubscription(a, s)) targets.push({ channel: s.channel, target: s.id });
   }
+
+  return targets;
+}
+
+export async function enqueueDeliveries(tx: TransactionSql, a: Announcement, kind: DeliveryKind): Promise<number> {
+  const targets = await countFanoutTargets(tx, a);
 
   let inserted = 0;
   for (const t of targets) {

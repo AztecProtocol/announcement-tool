@@ -3,6 +3,7 @@ import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../src/core/announcements.js';
 import { createSubscription, verifySubscription } from '../src/core/subscriptions.js';
+import { countFanoutTargets } from '../src/core/outbox.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
@@ -57,6 +58,25 @@ describe('publish flow', () => {
       { channel: 'telegram', target: 'telegram:main' },
       { channel: 'webhook', target: hit.id },
     ]);
+  });
+
+  it('countFanoutTargets matches exactly what enqueueDeliveries writes', async () => {
+    const hit = await createSubscription(sql, { channel: 'webhook', endpoint: 'https://a.example.com/h', filters: { severities: ['critical'] } });
+    await verifySubscription(sql, hit.id);
+    await createSubscription(sql, { channel: 'webhook', endpoint: 'https://unverified.example.com/h' }); // never verified
+    const miss = await createSubscription(sql, { channel: 'email', endpoint: 'x@y.z', filters: { networks: ['testnet'] } });
+    await verifySubscription(sql, miss.id);
+
+    const a = await createDraft(sql, critical, 'alice@x');
+
+    const preview = await countFanoutTargets(sql, a);
+
+    await requestPublish(sql, a.id, 'alice@x');
+    await confirmPublish(sql, a.id, 'bob@x');
+
+    const rows = await sql`select channel, target from delivery_ledger where announcement_id = ${a.id} order by channel, target`;
+    const sortedPreview = [...preview].sort((x, y) => x.channel.localeCompare(y.channel) || x.target.localeCompare(y.target));
+    expect(sortedPreview).toEqual(rows.map(r => ({ channel: r.channel, target: r.target })));
   });
 
   it('double confirm does not duplicate ledger rows', async () => {
