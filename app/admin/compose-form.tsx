@@ -1,9 +1,10 @@
 'use client';
 import { useRef, useState } from 'react';
 import { useActionState } from 'react';
-import { createDraftAction } from './actions.js';
+import { createDraftAction, previewAction } from './actions.js';
 import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
+import type { PreviewSet } from '../../src/core/preview.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
@@ -38,14 +39,36 @@ const TOOLBAR: ToolbarOp[] = [
   { label: 'H', title: 'Heading', prefix: '## ' },
 ];
 
+type PreviewChannel = 'discord' | 'telegram' | 'signal' | 'email' | 'webhook';
+const PREVIEW_CHANNELS: PreviewChannel[] = ['discord', 'telegram', 'signal', 'email', 'webhook'];
+
+type PreviewResult = { preview?: PreviewSet; error?: string };
+
 export default function ComposeForm() {
   const [result, formAction, pending] = useActionState<Result | undefined, FormData>(action, undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const [type, setType] = useState<AnnouncementType>('upgrade');
   const [actionRows, setActionRows] = useState<ActionRow[]>([]);
   const [linkRows, setLinkRows] = useState<LinkRow[]>([{ key: 0, url: '' }]);
   const nextActionKey = useRef(0);
   const nextLinkKey = useRef(1);
+  const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
+  const [previewResult, setPreviewResult] = useState<PreviewResult | undefined>(undefined);
+  const [previewPending, setPreviewPending] = useState(false);
+
+  async function refreshPreview() {
+    const el = formRef.current;
+    if (!el) return;
+    setPreviewPending(true);
+    try {
+      const formData = new FormData(el);
+      const res = await previewAction(formData);
+      setPreviewResult(res);
+    } finally {
+      setPreviewPending(false);
+    }
+  }
 
   function applyToolbarOp(op: ToolbarOp) {
     const el = textareaRef.current;
@@ -73,7 +96,7 @@ export default function ComposeForm() {
         <h2>New announcement</h2>
         {result?.error && <div className="notice"><p>Error: {result.error}</p></div>}
 
-        <form action={formAction}>
+        <form action={formAction} ref={formRef}>
           <label htmlFor="title">Title</label>
           <input id="title" type="text" name="title" placeholder="v5.1.0 release" required />
 
@@ -205,8 +228,71 @@ export default function ComposeForm() {
       </div>
 
       <div className="compose-preview">
-        {/* rendered markdown preview arrives in Task 4 */}
+        <h2>Preview</h2>
+        <div>
+          <button type="button" onClick={refreshPreview} disabled={previewPending}>
+            {previewPending ? 'Refreshing…' : 'Refresh preview'}
+          </button>
+        </div>
+
+        {previewResult?.error && (
+          <div className="notice"><p>Error: {previewResult.error}</p></div>
+        )}
+
+        <div className="preview-tabs" role="tablist" style={{ marginTop: 14 }}>
+          {PREVIEW_CHANNELS.map(ch => (
+            <button
+              type="button"
+              key={ch}
+              role="tab"
+              aria-selected={previewTab === ch}
+              onClick={() => setPreviewTab(ch)}
+            >
+              {ch}
+            </button>
+          ))}
+        </div>
+
+        <div className="preview-panel" role="tabpanel">
+          {!previewResult?.preview ? (
+            <p className="preview-empty">Click &quot;Refresh preview&quot; to see how this announcement will render on each channel.</p>
+          ) : (
+            <PreviewPane channel={previewTab} preview={previewResult.preview} />
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+function PreviewPane({ channel, preview }: { channel: PreviewChannel; preview: PreviewSet }) {
+  switch (channel) {
+    case 'discord':
+      if (preview.discord.length === 0) {
+        return <p className="preview-empty">No Discord channel matches this announcement&apos;s network and type.</p>;
+      }
+      return (
+        <>
+          {preview.discord.map(d => (
+            <div className="preview-discord-entry" key={d.target}>
+              <p className="preview-discord-target">{d.target}</p>
+              <div>{d.content}</div>
+            </div>
+          ))}
+        </>
+      );
+    case 'telegram':
+      return <div>{preview.telegram}</div>;
+    case 'signal':
+      return <div>{preview.signal}</div>;
+    case 'email':
+      return (
+        <>
+          <p className="preview-discord-target">Subject: {preview.email.subject}</p>
+          <div>{preview.email.text}</div>
+        </>
+      );
+    case 'webhook':
+      return <div>{preview.webhook}</div>;
+  }
 }

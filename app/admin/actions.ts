@@ -7,6 +7,7 @@ import { redirect } from 'next/navigation';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
 import { createDraft } from '../../src/core/announcements.js';
+import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
 
 function inputFromForm(formData: FormData): AnnouncementInput {
@@ -78,4 +79,26 @@ export async function createDraftAction(formData: FormData): Promise<{ id?: stri
   }
 
   redirect(`/admin/review/${draft.id}`);
+}
+
+export async function previewAction(formData: FormData): Promise<{ preview?: PreviewSet; error?: string }> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  let input: AnnouncementInput;
+  try {
+    input = inputFromForm(formData);
+  } catch {
+    return { error: 'could not read form data' };
+  }
+
+  try {
+    const preview = await previewAnnouncement(db, input);
+    return { preview };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'could not build preview' };
+  }
 }
