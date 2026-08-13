@@ -1,7 +1,14 @@
 'use client';
 import { useRef, useState } from 'react';
 import { useActionState } from 'react';
-import { useRouter } from 'next/navigation';
+// Deep import, not `next/navigation` — see tsconfig.json's `paths` comment.
+// The `paths` mapping there fixes `tsc`/NodeNext resolution for the public
+// specifier but Turbopack then resolves the RUNTIME import through the same
+// mapping to the .d.ts (no exports), giving `(void 0) is not a function` for
+// useRouter specifically — the same failure mode already documented for
+// `next/headers`, just not previously hit for `next/navigation` because no
+// admin client component had called useRouter until Task 6.
+import { useRouter } from 'next/dist/client/components/navigation.js';
 import { createDraftAction, previewAction, saveTemplateAction } from './actions.js';
 import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';

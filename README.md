@@ -229,6 +229,53 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 
 **Behavior notes:** Email subscribing is double-opt-in — a new address gets a confirmation link and delivers nothing until it's clicked, and re-submitting an already-confirmed address just updates its filters, with both cases redirecting to the same `/subscribed` page so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries, and only activates the subscription on a 2xx response; the signing secret is shown exactly once, on the registration result, and is never displayed again.
 
+## Admin
+
+The admin UI (`/admin`) is where announcements are composed, previewed, and published. It is a set of Next.js server routes and server actions under `app/admin/`; no separate service.
+
+### Identity
+
+Every admin route resolves the caller's identity from request headers (`src/core/identity.ts`):
+
+- In production, identity comes from Tailscale's `Tailscale-User-Login` proxy header (plus optional `Tailscale-User-Name`). This is sound **only** because the app binds to `localhost` and `tailscale serve` is the sole route in — if the port were ever exposed directly, these headers could be forged by any caller.
+- In development, set `ADMIN_EMAIL` and it is used as a fallback identity when no Tailscale header is present.
+- If neither is present, the admin layout renders an access-denied page instead of the requested content.
+
+### Publishers and the bootstrap rule
+
+`app/admin/layout.tsx` checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`) before rendering any admin page or running any admin server action.
+
+- **Bootstrap rule:** if the `publishers` table is empty, every identity is treated as a publisher. This exists so the first deployment isn't locked out before anyone has been added.
+- While the table is empty, the admin shell shows a standing warning: "No publishers configured — anyone reaching this page can publish. Add publishers before launch."
+- **Publishers must be added to the table before launch.** Once at least one row exists, only listed emails may compose, preview, or publish.
+- If the publisher lookup itself fails (e.g. database unreachable), the layout fails closed and shows an "Admin is unavailable" page rather than falling through to open access.
+
+### Compose, preview, publish
+
+1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, repeatable "actions required" and "links" fields, and an optional expiry date. Submitting creates a draft (`createDraft`) and redirects to its review page.
+2. **Review** (`/admin/review/<id>`) — shows a live per-channel preview (webhook JSON, Discord/Telegram/Signal message text including any configured Discord role-mention prefix, email rendering) and the publish control.
+3. **Publish:**
+   - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
+   - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any *other* publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError` and the review page shows it as an inline error, not a crash.
+
+### Templates and starting points
+
+The compose page (`/admin?from=template:<id>` or `?from=announcement:<id>`) can prefill the form three ways:
+
+- **Blank** — the default, empty form.
+- **Saved template** — pick from the "Saved templates" dropdown, sourced from the `templates` table. Any draft can be saved as a template from the compose form ("Save as template").
+- **Past announcement** — start from a previously published announcement (`listPublished`), reusing its text, type, networks, audiences, and severity.
+
+In both prefill cases, **all dates are cleared** — `expiresAt` and every action's `deadline` — so a reused announcement can never carry a stale, already-past deadline into a new draft. The form shows a note when prefilled: "Dates (deadlines, expiry) are cleared — set new ones below."
+
+### Running admin locally
+
+```bash
+ADMIN_EMAIL=you@example.com npm run web
+```
+
+Then open `/admin`. With an empty `publishers` table, any `ADMIN_EMAIL` value is accepted (bootstrap rule above). To exercise the four-eyes flow locally, request publication with one `ADMIN_EMAIL`, then restart (or run a second dev server) with a different `ADMIN_EMAIL` to confirm.
+
 ## Alerting
 
 The worker calls `dispatchHealthAlerts` on every 15s tick (`src/core/alerts.ts`), which wraps `evaluateChannelHealth` (`src/core/health.ts`) with deduped, one-time-only email notification:

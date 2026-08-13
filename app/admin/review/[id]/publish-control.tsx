@@ -1,6 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+// Deep import — see the comment on the same import in app/admin/compose-form.tsx
+// (tsconfig.json's `paths` mapping for `next/navigation` breaks Turbopack's
+// runtime resolution of useRouter, same failure mode as next/headers).
+import { useRouter } from 'next/dist/client/components/navigation.js';
 import { requestPublishAction, confirmPublishAction } from '../../actions.js';
 import { formatDeadline } from '../../../../src/core/render.js';
 import type { Announcement } from '../../../../src/core/types.js';
