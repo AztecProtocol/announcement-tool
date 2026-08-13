@@ -21,7 +21,22 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     );
   }
 
-  const publishers = await listPublishers(getDb());
+  // Invariant: identity resolution failing OR publisher lookup failing must both
+  // prevent children rendering. The identity check above fails closed by returning
+  // early. This one fails closed explicitly: if we can't verify who is allowed to
+  // publish, we must not render admin children — a future refactor that wraps this
+  // in a broader try/catch must not swallow this and fall through with a default.
+  let publishers: string[];
+  try {
+    publishers = await listPublishers(getDb());
+  } catch {
+    return (
+      <main>
+        <h1>Admin is unavailable</h1>
+        <p className="muted">Could not verify publisher configuration.</p>
+      </main>
+    );
+  }
   const bootstrapping = publishers.length === 0;
   const sourceLabel = identity.source === 'tailscale' ? 'tailnet' : 'dev';
 
