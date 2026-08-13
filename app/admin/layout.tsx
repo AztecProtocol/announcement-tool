@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
-// Deep import, not `next/headers`: see the `paths` comment in tsconfig.json —
-// mapping the `next/headers` specifier (any form) makes Turbopack's dev
-// resolver silently bind the import to `undefined` at runtime, even though it
-// type-checks. This path is what `next/headers` re-exports from anyway.
+// Deep import, not `next/headers`. The public specifier does not type-check
+// under TS7/NodeNext, and mapping it in tsconfig `paths` makes Turbopack
+// resolve the RUNTIME import to a .d.ts (no exports) — `(void 0) is not a
+// function`. This is the module `next/headers` itself re-exports. Full
+// reasoning and the re-verification steps are in tsconfig.json's paths comment.
 import { headers } from 'next/dist/server/request/headers.js';
 import { resolveIdentity, listPublishers } from '../../src/core/identity.js';
 import { getDb } from '../../src/web/db.js';

@@ -31,14 +31,18 @@
     // `next/navigation` package folder, never the sibling .d.ts file. This
     // paths mapping is a targeted workaround, not a resolution-mode change.
     //
-    // `next/headers` deliberately has NO entry here: adding one (any target,
-    // any key syntax — tried exact and wildcard) makes Turbopack's *runtime*
-    // resolver silently bind the import to `undefined` in dev, even though
-    // `tsc --noEmit` type-checks fine. Reproduced with a minimal probe page
-    // doing nothing but `typeof headers` — 500/undefined with the paths entry,
-    // working with it removed. Files that need `headers()` import it from the
-    // internal `next/dist/server/request/headers.js` path instead (see
-    // app/admin/layout.tsx and app/admin/actions.ts) to sidestep this.
+    // `next/headers` deliberately has NO entry here. Turbopack (unlike plain
+    // `tsc`) honours tsconfig `paths` for its OWN module resolution, so a
+    // mapping that points at a .d.ts resolves the runtime import to a
+    // type-only file with no exports — the call then compiles to `(void 0)()`.
+    // Independently re-verified 2026-08-13: with the paths entry + a public
+    // `next/headers` import, GET /admin returns 500
+    // `TypeError: (void 0) is not a function`; with the deep import below and
+    // no entry, GET /admin returns 200. (`next/navigation` above is safe only
+    // because nothing imports a *runtime* value through that mapping.)
+    // Files needing headers() import `next/dist/server/request/headers.js`
+    // (app/admin/layout.tsx, app/admin/actions.ts). RE-TEST ON NEXT UPGRADE:
+    // if the public specifier ever type-checks under NodeNext, drop both.
     "paths": {
       "next/navigation": ["./node_modules/next/navigation.d.ts"]
     }
