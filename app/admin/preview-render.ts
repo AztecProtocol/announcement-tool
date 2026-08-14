@@ -19,7 +19,15 @@ export type Block =
   | { kind: 'bullet'; spans: Inline[] }
   | { kind: 'tag'; text: string };
 
-const HEADING_RE = /^(#{1,3})[ \t]+(.+?)[ \t]*$/;
+/**
+ * Mirrors HEADING_RE in src/core/render.ts: 2-3 leading hashes only, so the
+ * level mapping below (>= 3 ? 3 : 2) matches the renderer's h2/h3 output
+ * exactly. The constant cannot be shared across the src/ and app/ module
+ * boundary — this file is imported by a client component, and pulling in
+ * renderer internals is what that boundary exists to prevent — so keep any
+ * future edit to the renderer's heading rule mirrored here by hand.
+ */
+const HEADING_RE = /^(#{2,3})[ \t]+(.+?)[ \t]*$/;
 const BULLET_RE = /^[-*][ \t]+(.*)$/;
 /**
  * The tag line ([MAINNET] [CRITICAL] [UPGRADE]) can be preceded by the kind

@@ -194,4 +194,12 @@ describe('headings', () => {
     const ann = { ...baseAnnouncement, bodyMd: '## What changes' };
     expect(renderMarkdown(ann, 'publish')).toContain('## What changes');
   });
+
+  it('does not emit an h1 for a single-hash line', () => {
+    expect(renderBodyHtml('# Top')).not.toContain('<h1');
+  });
+
+  it('leaves a single-hash line as literal text', () => {
+    expect(stripMarkdown('# Top')).toBe('# Top');
+  });
 });

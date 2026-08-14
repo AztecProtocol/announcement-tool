@@ -51,11 +51,13 @@ function linkLines(a: Announcement): string[] {
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
- * A markdown heading line: 1-3 leading hashes, then a space, at line start.
+ * A markdown heading line: 2-3 leading hashes, then a space, at line start.
  * Requiring the space keeps "issue #123" and "C#" from matching, and anchoring
- * to line start keeps a mid-line "##" literal.
+ * to line start keeps a mid-line "##" literal. A single "#" is deliberately
+ * excluded: the compose toolbar only ever inserts "## ", so a lone "#" has no
+ * canonical level to render as (see the round-trip regression tests).
  */
-const HEADING_RE = /^(#{1,3})[ \t]+(.+?)[ \t]*$/;
+const HEADING_RE = /^(#{2,3})[ \t]+(.+?)[ \t]*$/;
 
 /**
  * Strip the markdown we support (bold, inline code, links) for plain-text
@@ -115,7 +117,7 @@ export function renderBodyHtml(md: string): string {
     .map(p => {
       const h = HEADING_RE.exec(p.trim());
       if (h && !p.trim().includes('\n')) {
-        const level = Math.min(h[1].length, 3); // ## → h2, ### → h3
+        const level = h[1].length; // ## → h2, ### → h3
         const size = level === 2 ? 16 : 14;
         return `<h${level} style="font-size:${size}px;line-height:1.35;margin:16px 0 8px">`
           + `${escapeHtml(h[2])}</h${level}>`;
