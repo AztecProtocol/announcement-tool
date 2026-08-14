@@ -51,14 +51,42 @@ function linkLines(a: Announcement): string[] {
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /**
+ * A markdown heading line: 1-3 leading hashes, then a space, at line start.
+ * Requiring the space keeps "issue #123" and "C#" from matching, and anchoring
+ * to line start keeps a mid-line "##" literal.
+ */
+const HEADING_RE = /^(#{1,3})[ \t]+(.+?)[ \t]*$/;
+
+/**
  * Strip the markdown we support (bold, inline code, links) for plain-text
  * channels, so literal ** and backticks never reach a reader.
+ * Also converts headings to uppercase lines without markers.
  */
 export function stripMarkdown(md: string): string {
   return md
+    .split('\n')
+    .map(line => {
+      const h = HEADING_RE.exec(line);
+      return h ? h[2].toUpperCase() : line;
+    })
+    .join('\n')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1: $2');
+}
+
+/**
+ * Telegram HTML mode supports no heading tag, so a heading line becomes a bold
+ * line. Applied per line before inline conversion, hence the explicit escape.
+ */
+export function headingToBold(md: string): string {
+  return md
+    .split('\n')
+    .map(line => {
+      const h = HEADING_RE.exec(line);
+      return h ? `<b>${escapeHtml(h[2])}</b>` : line;
+    })
+    .join('\n');
 }
 
 /**
@@ -66,17 +94,34 @@ export function stripMarkdown(md: string): string {
  * an unmatched ** or backtick stays literal, so emitted tags always balance
  * (Telegram would reject a malformed entity; email clients render it wrong).
  */
-function mdInlineHtml(md: string): string {
+export function mdInlineHtml(md: string): string {
   return escapeHtml(md)
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
     .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
 }
 
-/** Markdown body → HTML paragraphs (blank line = new paragraph). */
+/** Body → Telegram HTML: headings to bold lines, everything else inline-converted. */
+function telegramBodyHtml(md: string): string {
+  return md
+    .split('\n')
+    .map(line => (HEADING_RE.test(line) ? headingToBold(line) : mdInlineHtml(line)))
+    .join('\n');
+}
+
+/** Markdown body → HTML paragraphs (blank line = new paragraph); headings → h2/h3. */
 export function renderBodyHtml(md: string): string {
   return md.split(/\n{2,}/)
-    .map(p => `<p style="margin:0 0 12px">${mdInlineHtml(p).replace(/\n/g, '<br>')}</p>`)
+    .map(p => {
+      const h = HEADING_RE.exec(p.trim());
+      if (h && !p.trim().includes('\n')) {
+        const level = Math.min(h[1].length, 3); // ## → h2, ### → h3
+        const size = level === 2 ? 16 : 14;
+        return `<h${level} style="font-size:${size}px;line-height:1.35;margin:16px 0 8px">`
+          + `${escapeHtml(h[2])}</h${level}>`;
+      }
+      return `<p style="margin:0 0 12px">${mdInlineHtml(p).replace(/\n/g, '<br>')}</p>`;
+    })
     .join('\n');
 }
 
@@ -105,7 +150,7 @@ export function renderTelegramHtml(a: Announcement, kind: DeliveryKind): string 
     '',
     `<b>${escapeHtml(a.title)}</b>`,
     '',
-    mdInlineHtml(a.bodyMd),
+    telegramBodyHtml(a.bodyMd),
     ...(a.actionsRequired.length ? ['', ...actionLines(a, '- ').map(escapeHtml)] : []),
     ...(a.links.length ? ['', ...a.links.map(l => `<a href="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>`)] : []),
     '',

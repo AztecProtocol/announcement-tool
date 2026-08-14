@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml, formatDeadline } from '../src/core/render.js';
+import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml, formatDeadline, headingToBold } from '../src/core/render.js';
 import type { Announcement } from '../src/core/types.js';
 
-const a: Announcement = {
+const baseAnnouncement: Announcement = {
   id: 'ann_R', revision: 1, slug: '2026-08-upgrade-v5-1-0', type: 'upgrade',
   networks: ['mainnet'], audiences: ['operators'], severity: 'critical',
   title: 'Upgrade to v5.1.0 by 2026-08-20 14:00 UTC',
@@ -11,6 +11,8 @@ const a: Announcement = {
   links: [{ label: 'GitHub release', url: 'https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0' }],
   status: 'published', createdBy: 'a@x', publishedAt: '2026-08-06T10:00:00Z',
 };
+
+const a = baseAnnouncement;
 
 describe('render', () => {
   it('builds the canonical url from PUBLIC_BASE_URL', () => {
@@ -143,5 +145,53 @@ describe('formatDeadline', () => {
       expect(out).toContain('24 Aug 2026, 10:56 UTC');
       expect(out).not.toContain('2026-08-24T10:56:26Z');
     }
+  });
+});
+
+describe('headings', () => {
+  const body = 'Intro line.\n\n## What changes\n\nDetail line.\n\n### Smaller\n\nMore.';
+
+  it('uppercases headings and drops markers in plain text', () => {
+    const out = stripMarkdown(body);
+    expect(out).toContain('WHAT CHANGES');
+    expect(out).toContain('SMALLER');
+    expect(out).not.toContain('##');
+  });
+
+  it('leaves a hash that is not a heading alone', () => {
+    expect(stripMarkdown('issue #123 and C# code')).toBe('issue #123 and C# code');
+  });
+
+  it('does not uppercase a hash inside a line', () => {
+    expect(stripMarkdown('see ## not a heading')).toBe('see ## not a heading');
+  });
+
+  it('converts headings to bold for telegram', () => {
+    expect(headingToBold('## What changes')).toBe('<b>What changes</b>');
+    expect(headingToBold('### Smaller')).toBe('<b>Smaller</b>');
+  });
+
+  it('renders headings as h2/h3 in email html', () => {
+    const html = renderBodyHtml(body);
+    expect(html).toMatch(/<h2[^>]*>What changes<\/h2>/);
+    expect(html).toMatch(/<h3[^>]*>Smaller<\/h3>/);
+    expect(html).not.toContain('## What changes');
+  });
+
+  it('escapes html inside a heading', () => {
+    expect(renderBodyHtml('## a <b> & c')).toContain('a &lt;b&gt; &amp; c');
+    expect(headingToBold('## a <b>')).toBe('<b>a &lt;b&gt;</b>');
+  });
+
+  it('keeps telegram headings bold end to end', () => {
+    const ann = { ...baseAnnouncement, bodyMd: '## What changes\n\nDetail.' };
+    const out = renderTelegramHtml(ann, 'publish');
+    expect(out).toContain('<b>What changes</b>');
+    expect(out).not.toContain('## What changes');
+  });
+
+  it('leaves discord markdown headings untouched', () => {
+    const ann = { ...baseAnnouncement, bodyMd: '## What changes' };
+    expect(renderMarkdown(ann, 'publish')).toContain('## What changes');
   });
 });
