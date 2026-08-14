@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseMarkdownBlocks, parseTelegramHtml, parseMentions } from '../app/admin/preview-render.js';
+import { renderMarkdown, renderTelegramHtml } from '../src/core/render.js';
+import type { Announcement } from '../src/core/types.js';
 
 describe('parseMarkdownBlocks', () => {
   it('reads a heading', () => {
@@ -101,5 +103,130 @@ describe('parseMentions', () => {
 
   it('returns a single text span when there is no mention', () => {
     expect(parseMentions('plain prefix')).toEqual([{ kind: 'text', text: 'plain prefix' }]);
+  });
+});
+
+/**
+ * Round-trip: feed the REAL renderer output into the REAL parser, instead of
+ * hand-writing input strings. This is the regression guard for the level
+ * mismatch at '#' that six per-task reviews missed, because every prior test
+ * on either side only ever exercised its own hand-written fixture.
+ */
+describe('renderer output -> parser round trip', () => {
+  const baseAnnouncement: Announcement = {
+    id: 'ann_R', revision: 1, slug: '2026-08-upgrade-v5-1-0', type: 'upgrade',
+    networks: ['mainnet'], audiences: ['operators'], severity: 'critical',
+    title: 'Upgrade to v5.1.0 by 2026-08-20 14:00 UTC',
+    bodyMd: '',
+    actionsRequired: [],
+    links: [],
+    status: 'published', createdBy: 'a@x', publishedAt: '2026-08-06T10:00:00Z',
+  };
+
+  const withBody = (bodyMd: string): Announcement => ({ ...baseAnnouncement, bodyMd });
+
+  describe('markdown channel (renderMarkdown -> parseMarkdownBlocks)', () => {
+    it('reads a level-2 heading', () => {
+      const wire = renderMarkdown(withBody('## What changes'), 'publish');
+      const blocks = parseMarkdownBlocks(wire);
+      expect(blocks).toContainEqual({ kind: 'heading', level: 2, text: 'What changes' });
+    });
+
+    it('reads a level-3 heading', () => {
+      const wire = renderMarkdown(withBody('### Smaller'), 'publish');
+      const blocks = parseMarkdownBlocks(wire);
+      expect(blocks).toContainEqual({ kind: 'heading', level: 3, text: 'Smaller' });
+    });
+
+    it('does not treat a single-hash line as a heading', () => {
+      const wire = renderMarkdown(withBody('# Top'), 'publish');
+      const blocks = parseMarkdownBlocks(wire);
+      expect(blocks.some(b => b.kind === 'heading')).toBe(false);
+    });
+
+    it('reads the tag line as a tag block', () => {
+      const wire = renderMarkdown(withBody('body'), 'publish');
+      const blocks = parseMarkdownBlocks(wire);
+      expect(blocks[0]).toEqual({ kind: 'tag', text: '[MAINNET] [CRITICAL] [UPGRADE]' });
+    });
+
+    it('reads an update-prefixed tag line as a tag block', () => {
+      const wire = renderMarkdown(withBody('body'), 'update');
+      const blocks = parseMarkdownBlocks(wire);
+      expect(blocks[0]).toEqual({ kind: 'tag', text: 'UPDATED: [MAINNET] [CRITICAL] [UPGRADE]' });
+    });
+
+    it('reads a bullet', () => {
+      const wire = renderMarkdown(withBody('- first step'), 'publish');
+      const blocks = parseMarkdownBlocks(wire);
+      expect(blocks).toContainEqual({ kind: 'bullet', spans: [{ kind: 'text', text: 'first step' }] });
+    });
+
+    it('reads an inline run of bold, code and link', () => {
+      const wire = renderMarkdown(withBody('use **v5.2.0** with `--flag` see [docs](https://x.io)'), 'publish');
+      const blocks = parseMarkdownBlocks(wire);
+      const para = blocks.find(
+        b => b.kind === 'para' && b.spans.some(s => s.kind === 'code' && s.text === '--flag'),
+      );
+      expect(para).toEqual({
+        kind: 'para',
+        spans: [
+          { kind: 'text', text: 'use ' },
+          { kind: 'bold', text: 'v5.2.0' },
+          { kind: 'text', text: ' with ' },
+          { kind: 'code', text: '--flag' },
+          { kind: 'text', text: ' see ' },
+          { kind: 'link', text: 'docs', href: 'https://x.io' },
+        ],
+      });
+    });
+  });
+
+  describe('telegram channel (renderTelegramHtml -> parseTelegramHtml)', () => {
+    it('reads a level-2 heading as a bold block', () => {
+      const wire = renderTelegramHtml(withBody('## What changes'), 'publish');
+      const blocks = parseTelegramHtml(wire);
+      expect(blocks).toContainEqual({ kind: 'para', spans: [{ kind: 'bold', text: 'What changes' }] });
+    });
+
+    it('reads a level-3 heading as a bold block', () => {
+      const wire = renderTelegramHtml(withBody('### Smaller'), 'publish');
+      const blocks = parseTelegramHtml(wire);
+      expect(blocks).toContainEqual({ kind: 'para', spans: [{ kind: 'bold', text: 'Smaller' }] });
+    });
+
+    it('does not bold a single-hash line as a heading', () => {
+      const wire = renderTelegramHtml(withBody('# Top'), 'publish');
+      const blocks = parseTelegramHtml(wire);
+      const hasHeadingLikeBold = blocks.some(
+        b => b.kind === 'para' && b.spans.length === 1 && b.spans[0].kind === 'bold' && b.spans[0].text === 'Top',
+      );
+      expect(hasHeadingLikeBold).toBe(false);
+    });
+
+    it('reads the tag line as a tag block, including the reminder prefix', () => {
+      const wire = renderTelegramHtml(withBody('body'), 'reminder');
+      const blocks = parseTelegramHtml(wire);
+      expect(blocks[0]).toEqual({ kind: 'tag', text: 'REMINDER: [MAINNET] [CRITICAL] [UPGRADE]' });
+    });
+
+    it('reads an inline run of bold, code and link', () => {
+      const wire = renderTelegramHtml(withBody('use **v5.2.0** with `--flag` see [docs](https://x.io)'), 'publish');
+      const blocks = parseTelegramHtml(wire);
+      const para = blocks.find(
+        b => b.kind === 'para' && b.spans.some(s => s.kind === 'bold' && s.text === 'v5.2.0'),
+      );
+      expect(para).toEqual({
+        kind: 'para',
+        spans: [
+          { kind: 'text', text: 'use ' },
+          { kind: 'bold', text: 'v5.2.0' },
+          { kind: 'text', text: ' with ' },
+          { kind: 'code', text: '--flag' },
+          { kind: 'text', text: ' see ' },
+          { kind: 'link', text: 'docs', href: 'https://x.io' },
+        ],
+      });
+    });
   });
 });
