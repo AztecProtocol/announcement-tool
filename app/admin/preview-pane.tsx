@@ -55,20 +55,6 @@ function MentionPrefix({ prefix }: { prefix: string }) {
   );
 }
 
-/**
- * Splits a Discord payload into its configured prefix and the rendered body.
- * The adapter joins them with a single newline, so the first line is the prefix
- * whenever a prefix is configured. Falls back to no prefix when the payload
- * starts with the tag line the renderer emits.
- */
-function splitDiscordPrefix(content: string): { prefix?: string; body: string } {
-  const nl = content.indexOf('\n');
-  if (nl === -1) return { body: content };
-  const first = content.slice(0, nl);
-  if (/^(\[[A-Z0-9 _-]+\][ \t]*)+$/.test(first.trim())) return { body: content };
-  return { prefix: first, body: content.slice(nl + 1) };
-}
-
 export function PreviewPane(
   { channel, preview, mode }: { channel: PreviewChannel; preview: PreviewSet; mode: PreviewMode },
 ) {
@@ -86,22 +72,21 @@ export function PreviewPane(
               Exact bytes posted to Discord, prefix included.
             </p>
           )}
-          {preview.discord.map(d => {
-            const { prefix, body } = splitDiscordPrefix(d.content);
-            return (
-              <div className="preview-discord-entry" key={d.target}>
-                <p className="preview-discord-target">{d.target}</p>
-                {raw ? (
-                  <div className="pv-raw">{d.content}</div>
-                ) : (
-                  <div className="pv-surface pv-discord">
-                    {prefix && <MentionPrefix prefix={prefix} />}
-                    <Blocks blocks={parseMarkdownBlocks(body)} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {preview.discord.map(d => (
+            <div className="preview-discord-entry" key={d.target}>
+              <p className="preview-discord-target">{d.target}</p>
+              {raw ? (
+                <div className="pv-raw">{d.content}</div>
+              ) : (
+                <div className="pv-surface pv-discord">
+                  {d.prefix && <MentionPrefix prefix={d.prefix} />}
+                  <Blocks blocks={parseMarkdownBlocks(
+                    d.prefix ? d.content.slice(d.prefix.length + 1) : d.content,
+                  )} />
+                </div>
+              )}
+            </div>
+          ))}
         </>
       );
     }

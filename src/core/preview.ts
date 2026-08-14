@@ -15,7 +15,7 @@ export interface PreviewSet {
   // Non-blocking notices from validateAnnouncement (e.g. the GitHub-release
   // reminder) that don't prevent a preview from rendering.
   warnings?: string[];
-  discord?: { target: string; content: string }[];
+  discord?: { target: string; content: string; prefix?: string }[];
   // undefined when no telegram/signal channel_settings row matches this
   // announcement's network and type — mirrors the discord array's filtering
   // via broadcastTargetsFor so the preview never shows a channel that
@@ -63,7 +63,7 @@ export async function previewAnnouncement(
     const cfg = settings.find(s => s.key === t.target)!.config;
     const prefix = (cfg.prefix as string | undefined)?.trim();
     const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
-    return { target: t.target, content };
+    return { target: t.target, content, ...(prefix ? { prefix } : {}) };
   });
 
   const telegram = targets.some(t => t.channel === 'telegram') ? renderTelegramHtml(a, kind) : undefined;

@@ -145,4 +145,47 @@ describe('previewAnnouncement', () => {
     expect(preview.error).toBeUndefined();
     expect(preview.warnings).toBeUndefined();
   });
+
+  it('carries the discord prefix as its own field', async () => {
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({
+        networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook', prefix,
+      })})`;
+
+    const res = await previewAnnouncement(sql, input);
+    const entry = res.discord?.[0];
+    expect(entry).toBeDefined();
+    expect(entry!.prefix).toBe(prefix);
+    expect(entry!.content).toBe(`${prefix}\n${entry!.content.slice(prefix.length + 1)}`);
+    expect(entry!.content.startsWith(prefix)).toBe(true);
+  });
+
+  it('leaves the discord content byte-identical to the adapter payload', async () => {
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({
+        networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook', prefix,
+      })})`;
+
+    const res = await previewAnnouncement(sql, input);
+    const entry = res.discord?.[0];
+    expect(entry).toBeDefined();
+    // The adapter composes exactly this: prefix + '\n' + renderMarkdown(a, kind),
+    // or renderMarkdown alone when no prefix is configured.
+    expect(entry!.content.startsWith(`${prefix}\n`)).toBe(true);
+  });
+
+  it('does not treat the "update"-kind tag line as a discord prefix', async () => {
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({
+        networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook',
+      })})`;
+
+    const res = await previewAnnouncement(sql, input, 'update');
+    const entry = res.discord?.[0];
+    expect(entry).toBeDefined();
+    expect(entry!.prefix).toBeUndefined();
+    expect(entry!.content.startsWith('UPDATED: [MAINNET]')).toBe(true);
+  });
 });
