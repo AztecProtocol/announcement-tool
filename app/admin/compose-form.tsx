@@ -13,6 +13,7 @@ import { createDraftAction, previewAction, saveTemplateAction } from './actions.
 import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
+import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pane.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
@@ -47,7 +48,6 @@ const TOOLBAR: ToolbarOp[] = [
   { label: 'H', title: 'Heading', prefix: '## ' },
 ];
 
-type PreviewChannel = 'discord' | 'telegram' | 'signal' | 'email' | 'webhook';
 const PREVIEW_CHANNELS: PreviewChannel[] = ['discord', 'telegram', 'signal', 'email', 'webhook'];
 
 type PreviewResult = { preview?: PreviewSet; error?: string };
@@ -89,6 +89,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   const nextActionKey = useRef(actionRows.length);
   const nextLinkKey = useRef(linkRows.length);
   const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('rendered');
   const [previewResult, setPreviewResult] = useState<PreviewResult | undefined>(undefined);
   const [previewPending, setPreviewPending] = useState(false);
   const [templateName, setTemplateName] = useState('');
@@ -384,6 +385,20 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
           ))}
         </div>
 
+        <div className="preview-mode" role="group" aria-label="Preview mode">
+          {(['rendered', 'raw'] as PreviewMode[]).map(m => (
+            <button
+              type="button"
+              key={m}
+              aria-pressed={previewMode === m}
+              data-state={previewMode === m ? 'active' : 'inactive'}
+              onClick={() => setPreviewMode(m)}
+            >
+              {m === 'rendered' ? 'Rendered' : 'Raw payload'}
+            </button>
+          ))}
+        </div>
+
         <div className="preview-panel" role="tabpanel">
           {!previewResult?.preview || previewResult.preview.error ? (
             <p className="preview-empty">
@@ -392,49 +407,10 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
                 : 'Click "Refresh preview" to see how this announcement will render on each channel.'}
             </p>
           ) : (
-            <PreviewPane channel={previewTab} preview={previewResult.preview} />
+            <PreviewPane channel={previewTab} preview={previewResult.preview} mode={previewMode} />
           )}
         </div>
       </div>
     </div>
   );
-}
-
-function PreviewPane({ channel, preview }: { channel: PreviewChannel; preview: PreviewSet }) {
-  switch (channel) {
-    case 'discord':
-      if (!preview.discord || preview.discord.length === 0) {
-        return <p className="preview-empty">No Discord channel matches this announcement&apos;s network and type.</p>;
-      }
-      return (
-        <>
-          {preview.discord.map(d => (
-            <div className="preview-discord-entry" key={d.target}>
-              <p className="preview-discord-target">{d.target}</p>
-              <div>{d.content}</div>
-            </div>
-          ))}
-        </>
-      );
-    case 'telegram':
-      if (!preview.telegram) {
-        return <p className="preview-empty">No Telegram channel matches this announcement&apos;s network and type.</p>;
-      }
-      return <div>{preview.telegram}</div>;
-    case 'signal':
-      if (!preview.signal) {
-        return <p className="preview-empty">No Signal channel matches this announcement&apos;s network and type.</p>;
-      }
-      return <div>{preview.signal}</div>;
-    case 'email':
-      if (!preview.email) return null;
-      return (
-        <>
-          <p className="preview-discord-target">Subject: {preview.email.subject}</p>
-          <div>{preview.email.text}</div>
-        </>
-      );
-    case 'webhook':
-      return <div>{preview.webhook}</div>;
-  }
 }
