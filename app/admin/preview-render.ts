@@ -21,7 +21,15 @@ export type Block =
 
 const HEADING_RE = /^(#{1,3})[ \t]+(.+?)[ \t]*$/;
 const BULLET_RE = /^[-*][ \t]+(.*)$/;
-const TAG_LINE_RE = /^(\[[A-Z0-9 _-]+\][ \t]*)+$/;
+/**
+ * The tag line ([MAINNET] [CRITICAL] [UPGRADE]) can be preceded by the kind
+ * prefix that renderMarkdown/renderTelegramHtml prepend for non-first
+ * deliveries — kindPrefix() in src/core/render.ts returns 'UPDATED: ' or
+ * 'REMINDER: ' (never anything else). The optional group here matches only
+ * those two literal prefixes, not any arbitrary "word: " text, so an update
+ * or reminder payload's first line still classifies as a tag block.
+ */
+const TAG_LINE_RE = /^(?:(?:UPDATED|REMINDER): )?(\[[A-Z0-9 _-]+\][ \t]*)+$/;
 
 /** Inline markdown → spans. Pair-wise like the renderer: an unmatched marker stays literal. */
 function markdownSpans(text: string): Inline[] {

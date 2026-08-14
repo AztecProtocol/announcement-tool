@@ -38,6 +38,21 @@ describe('parseMarkdownBlocks', () => {
     expect(block).toEqual({ kind: 'tag', text: '[MAINNET] [CRITICAL] [UPGRADE]' });
   });
 
+  it('recognises a tag line carrying an update prefix', () => {
+    const [block] = parseMarkdownBlocks('UPDATED: [MAINNET] [CRITICAL] [UPGRADE]');
+    expect(block).toEqual({ kind: 'tag', text: 'UPDATED: [MAINNET] [CRITICAL] [UPGRADE]' });
+  });
+
+  it('recognises a tag line carrying a reminder prefix', () => {
+    const [block] = parseMarkdownBlocks('REMINDER: [MAINNET] [CRITICAL] [UPGRADE]');
+    expect(block).toEqual({ kind: 'tag', text: 'REMINDER: [MAINNET] [CRITICAL] [UPGRADE]' });
+  });
+
+  it('does not treat arbitrary prefixed text as a tag line', () => {
+    const [block] = parseMarkdownBlocks('NOTE: [MAINNET] [CRITICAL]');
+    expect(block.kind).toBe('para');
+  });
+
   it('leaves an unmatched marker literal', () => {
     const [block] = parseMarkdownBlocks('a ** dangling');
     expect((block as { spans: unknown[] }).spans).toEqual([{ kind: 'text', text: 'a ** dangling' }]);
@@ -67,6 +82,11 @@ describe('parseTelegramHtml', () => {
   it('unescapes entities back to characters', () => {
     const [block] = parseTelegramHtml('a &lt;b&gt; &amp; c');
     expect((block as { spans: { text: string }[] }).spans[0].text).toBe('a <b> & c');
+  });
+
+  it('recognises an update-prefixed tag line in telegram html', () => {
+    const [block] = parseTelegramHtml('UPDATED: [MAINNET] [CRITICAL] [UPGRADE]');
+    expect(block).toEqual({ kind: 'tag', text: 'UPDATED: [MAINNET] [CRITICAL] [UPGRADE]' });
   });
 });
 
