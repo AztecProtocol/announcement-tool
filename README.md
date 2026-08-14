@@ -254,6 +254,26 @@ Every admin route resolves the caller's identity from request headers (`src/core
 
 1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, repeatable "actions required" and "links" fields, and an optional expiry date. Submitting creates a draft (`createDraft`) and redirects to its review page.
 2. **Review** (`/admin/review/<id>`) — shows a live per-channel preview (webhook JSON, Discord/Telegram/Signal message text including any configured Discord role-mention prefix, email rendering) and the publish control.
+
+### Preview modes
+
+Each channel tab has two modes.
+
+**Rendered** approximates what a reader sees on that platform: headings appear as headings, bold as bold, inline code as a monospace chip, and Discord role mentions as pills. Use this mode to check the announcement reads well.
+
+**Raw payload** shows the exact string sent to that channel. Use this mode to verify what actually goes on the wire.
+
+For Discord, the raw payload is the authoritative view. It shows the configured channel prefix — role mentions and the emoji preamble — exactly as it will be posted. Because Discord messages are sent with role and everyone mentions enabled, always read the raw Discord payload before publishing and confirm the mentions are the ones you intend.
+
+Markdown headings render differently per channel, because the platforms differ:
+
+| Channel | `## What changes` appears as |
+|---|---|
+| Discord | a native Discord heading |
+| Telegram | a bold line (Telegram HTML has no heading tag) |
+| Signal | `WHAT CHANGES` (plain text only) |
+| Email | a real heading in the HTML part, `WHAT CHANGES` in the text part |
+
 3. **Publish:**
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
    - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any *other* publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError` and the review page shows it as an inline error, not a crash.
