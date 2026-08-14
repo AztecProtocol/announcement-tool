@@ -88,6 +88,17 @@ describe('previewAnnouncement', () => {
     expect(preview.email!.text).toContain('Body text.');
   });
 
+  it('includes the email html part alongside the text part', async () => {
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.email?.html).toContain('<h1');
+    expect(preview.email?.html).toContain(input.title);
+  });
+
+  it('keeps the unsubscribe placeholder unresolved in the preview html', async () => {
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.email?.html).toContain('{{UNSUBSCRIBE}}');
+  });
+
   it('webhook preview is valid JSON containing event_id and actions_required', async () => {
     const preview = await previewAnnouncement(sql, input);
     const parsed = JSON.parse(preview.webhook!);

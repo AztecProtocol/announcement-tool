@@ -22,7 +22,7 @@ export interface PreviewSet {
   // countFanoutTargets would not actually deliver to.
   telegram?: string;
   signal?: string;
-  email?: { subject: string; text: string };
+  email?: { subject: string; text: string; html: string };
   webhook?: string;
 }
 
@@ -69,7 +69,7 @@ export async function previewAnnouncement(
   const telegram = targets.some(t => t.channel === 'telegram') ? renderTelegramHtml(a, kind) : undefined;
   const signal = targets.some(t => t.channel === 'signal') ? renderPlain(a, kind) : undefined;
 
-  const { subject, text } = renderEmail(a, kind);
+  const { subject, text, html } = renderEmail(a, kind);
 
   // Mirrors the payload shape webhook.ts sends, field by field.
   const webhookPayload = {
@@ -88,7 +88,7 @@ export async function previewAnnouncement(
     discord,
     telegram,
     signal,
-    email: { subject, text },
+    email: { subject, text, html },
     webhook: JSON.stringify(webhookPayload, null, 2),
   };
 }
