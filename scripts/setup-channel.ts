@@ -50,7 +50,22 @@ async function main(): Promise<void> {
 
   if (channel === 'discord') {
     config.webhook_url = await ask('Discord webhook URL (Channel Settings -> Integrations -> Webhooks)');
-    const prefix = await ask('Text to put above every message — role mentions/emoji (blank for none)', '');
+
+    const roles: { name: string; id: string }[] = [];
+    for (;;) {
+      const name = await ask('Add a role to mention? Enter a name, or blank to finish');
+      if (!name) break;
+      let id = '';
+      for (;;) {
+        id = await ask('  Role ID (Discord: enable Developer Mode, right-click the role, Copy Role ID)');
+        if (/^\d+$/.test(id)) break;
+        console.log('  ✗ role id must be all digits — try again');
+      }
+      roles.push({ name, id });
+    }
+    if (roles.length) config.roles = roles;
+
+    const prefix = await ask('Emoji preamble to put above every message (blank for none)', '');
     if (prefix) config.prefix = prefix;
     const username = await ask('Bot display name in Discord', 'Aztec Announcements');
     if (username) config.username = username;
