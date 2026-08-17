@@ -7,6 +7,8 @@
  * Deliberately React-free so it is unit-testable on its own.
  */
 
+import type { DiscordRole } from '../../src/core/types.js';
+
 export type Inline =
   | { kind: 'text'; text: string }
   | { kind: 'bold'; text: string }
@@ -131,8 +133,20 @@ export function parseTelegramHtml(html: string): Block[] {
  * Discord channel_settings prefix, which is operator-authored config rather
  * than free text, so those guards aren't needed here. Intentional divergence
  * — do not merge the two patterns.
+ *
+ * roles is optional and only ever used to relabel a <@&id> span with the
+ * configured role's name, since Discord shows a name in the pill and the id
+ * is only the wire format. An id with no matching role (stale config) falls
+ * back to the raw token rather than an empty or misleading label.
  */
-export function parseMentions(prefix: string): Inline[] {
+export function parseMentions(prefix: string, roles?: DiscordRole[]): Inline[] {
   const pattern = /<@[&!]?\d+>|@(?:everyone|here)/g;
-  return collect(prefix, pattern, m => ({ kind: 'bold', text: m[0] }));
+  return collect(prefix, pattern, m => {
+    const roleId = /^<@&(\d+)>$/.exec(m[0])?.[1];
+    if (roleId) {
+      const role = roles?.find(r => r.id === roleId);
+      if (role) return { kind: 'bold', text: `@${role.name}` };
+    }
+    return { kind: 'bold', text: m[0] };
+  });
 }

@@ -104,6 +104,21 @@ describe('parseMentions', () => {
   it('returns a single text span when there is no mention', () => {
     expect(parseMentions('plain prefix')).toEqual([{ kind: 'text', text: 'plain prefix' }]);
   });
+
+  it('labels a role mention with its configured name', () => {
+    const roles = [{ name: 'mainnet-sequencer', id: '1538890653835075584' }];
+    const spans = parseMentions('<@&1538890653835075584> 🇦🇿', roles);
+    expect(spans[0]).toEqual({ kind: 'bold', text: '@mainnet-sequencer' });
+  });
+
+  it('falls back to the raw token for an unknown id', () => {
+    const spans = parseMentions('<@&999>', [{ name: 'other', id: '111' }]);
+    expect(spans[0]).toEqual({ kind: 'bold', text: '<@&999>' });
+  });
+
+  it('still labels @everyone and @here', () => {
+    expect(parseMentions('@everyone')[0]).toEqual({ kind: 'bold', text: '@everyone' });
+  });
 });
 
 /**

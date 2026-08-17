@@ -1,6 +1,7 @@
 'use client';
 
 import type { PreviewSet } from '../../src/core/preview.js';
+import type { DiscordRole } from '../../src/core/types.js';
 import {
   parseMarkdownBlocks, parseTelegramHtml, parseMentions,
   type Block, type Inline,
@@ -43,10 +44,10 @@ function Blocks({ blocks }: { blocks: Block[] }) {
 }
 
 /** Mentions drawn as Discord draws them — as pills. The raw view shows the literal bytes. */
-function MentionPrefix({ prefix }: { prefix: string }) {
+function MentionPrefix({ prefix, roles }: { prefix: string; roles?: DiscordRole[] }) {
   return (
     <p className="pv-prefix">
-      {parseMentions(prefix).map((s, i) =>
+      {parseMentions(prefix, roles).map((s, i) =>
         s.kind === 'bold'
           ? <span key={i} className="pv-mention">{s.text}</span>
           : <span key={i}>{s.text}</span>,
@@ -79,7 +80,7 @@ export function PreviewPane(
                 <div className="pv-raw">{d.content}</div>
               ) : (
                 <div className="pv-surface pv-discord">
-                  {d.prefix && <MentionPrefix prefix={d.prefix} />}
+                  {d.prefix && <MentionPrefix prefix={d.prefix} roles={d.roles} />}
                   <Blocks blocks={parseMarkdownBlocks(
                     d.prefix ? d.content.slice(d.prefix.length + 1) : d.content,
                   )} />
