@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { listPublished, getPublishedBySlug } from '../src/core/queries.js';
+import { listPublished, getPublishedBySlug, listAwaitingConfirmation } from '../src/core/queries.js';
 import { createDraft, requestPublish, confirmPublish, reviseDraft } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
@@ -13,6 +13,10 @@ afterAll(async () => { await sql.end(); });
 const input = (title: string): AnnouncementInput => ({
   type: 'info', networks: ['mainnet'], audiences: ['operators'], severity: 'info',
   title, bodyMd: 'Body.', actionsRequired: [], links: [],
+});
+
+const criticalInput = (title: string): AnnouncementInput => ({
+  ...input(title), severity: 'critical',
 });
 
 describe('published queries', () => {
@@ -41,5 +45,42 @@ describe('published queries', () => {
     const found = await getPublishedBySlug(sql, one.slug);
     expect(found?.id).toBe(one.id);
     expect(await getPublishedBySlug(sql, 'no-such-slug')).toBeUndefined();
+  });
+});
+
+describe('listAwaitingConfirmation', () => {
+  it('returns an announcement whose publish was requested', async () => {
+    const a = await createDraft(sql, criticalInput('Needs a second pair of eyes'), 'alice@test.local');
+    await requestPublish(sql, a.id, 'alice@test.local');
+    const rows = await listAwaitingConfirmation(sql);
+    expect(rows.map(r => r.id)).toContain(a.id);
+  });
+
+  it('does not return a plain draft', async () => {
+    const a = await createDraft(sql, criticalInput('Still a draft'), 'alice@test.local');
+    const rows = await listAwaitingConfirmation(sql);
+    expect(rows.map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('does not return an announcement once it is confirmed', async () => {
+    const a = await createDraft(sql, criticalInput('Will be confirmed'), 'alice@test.local');
+    await requestPublish(sql, a.id, 'alice@test.local');
+    await confirmPublish(sql, a.id, 'bob@test.local');
+    const rows = await listAwaitingConfirmation(sql);
+    expect(rows.map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('does not return a non-critical announcement, which publishes without confirmation', async () => {
+    const a = await createDraft(sql, input('Routine info'), 'alice@test.local');
+    await requestPublish(sql, a.id, 'alice@test.local');
+    const rows = await listAwaitingConfirmation(sql);
+    expect(rows.map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('reports who requested the publish', async () => {
+    const a = await createDraft(sql, criticalInput('Who asked'), 'alice@test.local');
+    await requestPublish(sql, a.id, 'alice@test.local');
+    const row = (await listAwaitingConfirmation(sql)).find(r => r.id === a.id);
+    expect(row?.publishRequestedBy).toBe('alice@test.local');
   });
 });

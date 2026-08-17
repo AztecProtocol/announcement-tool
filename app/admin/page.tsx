@@ -1,8 +1,14 @@
+// Deep import, not `next/headers` — see the comment on the same import in
+// app/admin/layout.tsx (tsconfig.json `paths` breaks Turbopack's dev resolver
+// for that specifier).
+import { headers } from 'next/dist/server/request/headers.js';
 import ComposeForm from './compose-form.js';
+import PendingQueue from './pending-queue.js';
 import { getDb } from '../../src/web/db.js';
 import { listTemplates, templateFromAnnouncement } from '../../src/core/templates.js';
 import { getLatest } from '../../src/core/announcements.js';
-import { listPublished } from '../../src/core/queries.js';
+import { resolveIdentity } from '../../src/core/identity.js';
+import { listPublished, listAwaitingConfirmation } from '../../src/core/queries.js';
 import type { AnnouncementInput } from '../../src/core/types.js';
 
 export const metadata = {
@@ -28,10 +34,12 @@ export default async function AdminComposePage({
 }) {
   const { from } = await searchParams;
   const db = getDb();
+  const identity = resolveIdentity(await headers());
 
-  const [templates, recentAnnouncements] = await Promise.all([
+  const [templates, recentAnnouncements, pending] = await Promise.all([
     listTemplates(db),
     listPublished(db, 20),
+    listAwaitingConfirmation(db),
   ]);
 
   let prefill: AnnouncementInput | undefined;
@@ -47,10 +55,16 @@ export default async function AdminComposePage({
   }
 
   return (
-    <ComposeForm
-      templates={templates.map(t => ({ id: t.id, name: t.name }))}
-      recentAnnouncements={recentAnnouncements.map(a => ({ id: a.id, title: a.title, slug: a.slug }))}
-      prefill={prefill}
-    />
+    <>
+      <PendingQueue
+        items={pending.map(a => ({ id: a.id, title: a.title, severity: a.severity, requestedBy: a.publishRequestedBy }))}
+        viewer={identity?.email ?? ''}
+      />
+      <ComposeForm
+        templates={templates.map(t => ({ id: t.id, name: t.name }))}
+        recentAnnouncements={recentAnnouncements.map(a => ({ id: a.id, title: a.title, slug: a.slug }))}
+        prefill={prefill}
+      />
+    </>
   );
 }

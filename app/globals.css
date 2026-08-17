@@ -534,3 +534,36 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 .pv-email { padding: 0; overflow: hidden; }
 .pv-emailhtml { padding: 4px; }
 .pv-emailhtml a { color: var(--link); }
+
+/* ── Pending confirmation queue ───────────────────────────────────── */
+.pending-queue {
+  border: 1px solid var(--recommended-line);
+  background: var(--recommended-bg);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 22px;
+}
+.pending-queue h2 {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--recommended);
+  margin: 0 0 10px;
+}
+.pending-queue ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.pending-queue li { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.pending-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pending-title { font-weight: 600; }
+.pending-meta { font-size: 12.5px; color: var(--ink-2); }
+.pending-action {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--chartreuse);
+  text-decoration: none;
+  flex: none;
+}
