@@ -288,6 +288,16 @@ The prefix is stored per Discord channel and is read only by the Discord adapter
 so it reaches no other channel. The compose form warns if it finds a mention in
 the body.
 
+### Composing
+
+**Public URL.** The slug is generated from the month, type and title, and is editable before the first save. It becomes the permanent public path (`/a/<slug>`) and is unique across announcements, so changing it after publication breaks links that are already distributed. The generation step skips the type word if the title already starts with it (for example, a title "Upgrade to v5.3.0" with type "upgrade" produces no repeated word). The slug is capped at 5 title words (after the type word is removed, if applicable).
+
+**Times are UTC.** Deadline and expiry fields are entered and displayed in UTC, matching how announcements state deadlines to operators. What you type is what operators receive, regardless of where you are. Out-of-range values — day 32, month 13, hour 25 — are rejected rather than silently rolling over into the next month.
+
+**Applies to.** Select from the common operator roles (`sequencer`, `prover`, `full-node`), or type a role the tags do not cover — the vocabulary is curated, not closed.
+
+**Awaiting confirmation.** Critical announcements need a second publisher. Any announcement whose publication has been requested appears at the top of the admin page for every publisher, so the second person does not need a link sent to them. The requester cannot confirm their own critical announcement — only a different publisher may confirm it.
+
 3. **Publish:**
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
    - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any *other* publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError` and the review page shows it as an inline error, not a crash.
