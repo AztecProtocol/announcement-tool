@@ -456,10 +456,6 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border-color: var(--ink);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-}
-
 /* ── Rendered channel preview ─────────────────────────────────────── */
 .preview-mode { display: flex; gap: 4px; margin-bottom: 10px; }
 .preview-mode button {
@@ -522,12 +518,19 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
    The raw view is the authoritative byte-for-byte record. */
 .pv-prefix { margin: 0 0 10px; }
 .pv-mention {
+  /* #5865F2 is Discord's brand "blurple". Deliberately outside the parchment
+     token system — this pill mimics Discord's own mention styling, not this
+     app's theme — so do not swap it for a design token. */
   background: rgba(88, 101, 242, 0.15);
   color: #4650c0;
   border-radius: 4px;
   padding: 1px 4px;
   font-weight: 500;
 }
+/* Each of these currently only repeats .pv-surface's background: #fff — kept
+   as reserved per-channel hooks (preview-pane.tsx applies them alongside
+   .pv-surface on every channel) so a future per-channel visual tweak has
+   somewhere to attach without touching the shared .pv-surface rule. */
 .pv-discord { background: #fff; }
 .pv-telegram { background: #fff; }
 .pv-signal { background: #fff; }
@@ -566,4 +569,11 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   color: var(--chartreuse);
   text-decoration: none;
   flex: none;
+}
+
+/* Kept at the end of the file, where a media query conventionally belongs —
+   it was previously stranded mid-file with sections appended after it,
+   which invites a future addition to wrongly assume it's motion-scoped. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

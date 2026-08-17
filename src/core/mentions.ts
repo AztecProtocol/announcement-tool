@@ -18,6 +18,13 @@
 // \b after the alternation keeps @everyonesomething / @hereafter from
 // matching, since \b requires a non-word character (or end of string) to
 // follow "everyone"/"here".
+//
+// app/admin/preview-render.ts's parseMentions uses a looser pattern with
+// neither the lookbehind nor the \b guard. That is intentional, not drift:
+// this regex scans the announcement body (free text that can contain emails
+// and URLs, so the false-positive guards matter), while parseMentions scans
+// only the Discord channel_settings prefix (operator-authored config, not
+// free text, so the guards would be dead weight there). Do not merge the two.
 const MENTION_RE = /(?<![\w.@\-/])@(?:everyone|here)\b|<@[&!]?\d+>/g;
 
 export function findMentions(body: string): string[] {

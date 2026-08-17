@@ -17,7 +17,8 @@ import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pa
 import { normalizeSlug, slugError } from '../../src/core/slug.js';
 import { makeSlug } from '../../src/core/ids.js';
 import { isoToUtcInput } from '../../src/core/datetime.js';
-import { ROLES, parseRoles } from '../../src/core/roles.js';
+import { parseRoles } from '../../src/core/roles.js';
+import { ActionRowFields, type ActionRow } from './action-row.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
@@ -36,7 +37,6 @@ const box = (name: string, value: string, checked: boolean) => (
   </label>
 );
 
-type ActionRow = { key: number; action: string; deadline: string; appliesTo: string };
 type LinkRow = { key: number; label: string; url: string };
 
 type ToolbarOp =
@@ -154,6 +154,20 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
     el.focus();
   }
 
+  function toggleRole(index: number, role: string) {
+    setActionRows(rows => rows.map((r, idx) => {
+      if (idx !== index) return r;
+      const current = parseRoles(r.appliesTo);
+      const active = current.includes(role);
+      const next = active ? current.filter(x => x !== role) : [...current, role];
+      return { ...r, appliesTo: next.join(', ') };
+    }));
+  }
+
+  function changeAppliesTo(index: number, appliesTo: string) {
+    setActionRows(rows => rows.map((r, idx) => (idx === index ? { ...r, appliesTo } : r)));
+  }
+
   const showGithubWarning = type === 'upgrade' && !linkRows.some(row => GH_RELEASE.test(row.url));
 
   return (
@@ -217,11 +231,14 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
               onChange={e => { setSlugTouched(true); setSlug(e.target.value); }}
               onBlur={e => setSlug(normalizeSlug(e.target.value))}
               aria-describedby="slug-hint"
+              aria-invalid={slugTouched && !!slugError(slug)}
             />
             <p id="slug-hint" className="hint">
               <code>/a/{slug || '…'}</code> — permanent once published.
-              {slugTouched && slugError(slug) ? ` ${slugError(slug)}` : ''}
             </p>
+            {slugTouched && slugError(slug) && (
+              <p role="alert" className="hint">{slugError(slug)}</p>
+            )}
           </div>
 
           <fieldset>
@@ -295,64 +312,14 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
           <fieldset>
             <legend>Actions required</legend>
             {actionRows.map((row, i) => (
-              <div className="row-repeat" key={row.key}>
-                <input
-                  type="text"
-                  name={`action.${i}`}
-                  placeholder="Action (e.g. Update your node)"
-                  defaultValue={row.action}
-                  aria-label="Action"
-                />
-                <input
-                  type="datetime-local"
-                  name={`deadline.${i}`}
-                  defaultValue={row.deadline}
-                  aria-label="Deadline"
-                  aria-describedby={`deadline-utc-hint.${i}`}
-                />
-                <span id={`deadline-utc-hint.${i}`} className="hint hint-inline">UTC</span>
-                <div className="role-tags" role="group" aria-label="Applies to">
-                  {ROLES.map(role => {
-                    const active = parseRoles(row.appliesTo).includes(role);
-                    return (
-                      <button
-                        type="button"
-                        key={role}
-                        className="role-tag"
-                        aria-pressed={active}
-                        onClick={() => setActionRows(rows => rows.map((r, idx) => {
-                          if (idx !== i) return r;
-                          const current = parseRoles(r.appliesTo);
-                          const next = active
-                            ? current.filter(x => x !== role)
-                            : [...current, role];
-                          return { ...r, appliesTo: next.join(', ') };
-                        }))}
-                      >
-                        {role}
-                      </button>
-                    );
-                  })}
-                </div>
-                <input
-                  type="text"
-                  name={`appliesTo.${i}`}
-                  placeholder="Or type roles, comma-separated"
-                  aria-label="Applies to (comma-separated roles)"
-                  value={row.appliesTo}
-                  onChange={e => {
-                    const appliesTo = e.target.value;
-                    setActionRows(rows => rows.map((r, idx) => (idx === i ? { ...r, appliesTo } : r)));
-                  }}
-                />
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setActionRows(rows => rows.filter(r => r.key !== row.key))}
-                >
-                  Remove
-                </button>
-              </div>
+              <ActionRowFields
+                key={row.key}
+                row={row}
+                index={i}
+                onToggleRole={toggleRole}
+                onChangeAppliesTo={changeAppliesTo}
+                onRemove={key => setActionRows(rows => rows.filter(r => r.key !== key))}
+              />
             ))}
             <button
               type="button"

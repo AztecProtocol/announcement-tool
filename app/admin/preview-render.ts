@@ -124,6 +124,13 @@ export function parseTelegramHtml(html: string): Block[] {
  * id form Discord resolves (<@&123>) and the plain @Name form used in the
  * configured prefixes. Emits 'bold' for a mention because the pill styling is
  * applied by the component, which keys off the span kind.
+ *
+ * src/core/mentions.ts's findMentions uses a stricter pattern (lookbehind +
+ * \b guards against false positives like emails and URL paths) because it
+ * scans free-text announcement bodies. This function only ever sees the
+ * Discord channel_settings prefix, which is operator-authored config rather
+ * than free text, so those guards aren't needed here. Intentional divergence
+ * — do not merge the two patterns.
  */
 export function parseMentions(prefix: string): Inline[] {
   const pattern = /<@[&!]?\d+>|@(?:everyone|here)/g;
