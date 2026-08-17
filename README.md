@@ -16,7 +16,9 @@ docker compose -f docker-compose.dev.yml up -d
 # Install dependencies
 npm install
 
-# Run migrations
+# Run migrations. Do this before starting the app or the worker: draft
+# creation writes columns added by recent migrations, and an app started
+# against an un-migrated database fails on every draft.
 npm run migrate
 
 # Run tests (single-fork Vitest against real Postgres)
@@ -290,9 +292,8 @@ the body.
 The compose form has a "Notify the configured Discord roles" checkbox that decides,
 per announcement, whether the prefix is sent. It is checked by default for `critical`
 announcements and unchecked otherwise, and the author can change it either way before
-requesting or publishing. Before relying on this to suppress a ping, confirm the
-setting in the raw Discord preview — when the checkbox is off, the Discord post
-carries no prefix and no mentions, but every other channel is unaffected either way.
+requesting or publishing. When the checkbox is off, the Discord post carries no
+prefix and no mentions; every other channel is unaffected either way.
 
 ### Composing
 
@@ -341,7 +342,7 @@ The compose page (`/admin?from=template:<id>` or `?from=announcement:<id>`) can 
 - **Saved template** — pick from the "Saved templates" dropdown, sourced from the `templates` table. Any draft can be saved as a template from the compose form ("Save as template").
 - **Past announcement** — start from a previously published announcement (`listPublished`), reusing its text, type, networks, audiences, and severity.
 
-In both prefill cases, **all dates are cleared** — every action's `deadline` — so a reused announcement can never carry a stale, already-past deadline into a new draft. The form shows a note when prefilled: "Dates (deadlines, expiry) are cleared — set new ones below." (The wording still mentions expiry; the field itself is gone.)
+In both prefill cases, **all dates are cleared** — every action's `deadline` — so a reused announcement can never carry a stale, already-past deadline into a new draft. The form shows a note when prefilled: "Deadlines are cleared — set new ones below."
 
 ### Running admin locally
 
