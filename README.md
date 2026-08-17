@@ -259,7 +259,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 ### Compose, preview, publish
 
 1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, and repeatable "actions required" and "links" fields. Submitting creates a draft (`createDraft`) and redirects to its review page.
-2. **Review** (`/admin/review/<id>`) — shows a live per-channel preview (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering) and the publish control.
+2. **Review** (`/admin/review/<id>`) — shows the rendered body, a summary of which destinations the announcement will fan out to, and the publish control. The per-channel preview (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering) is only on the compose page — read it there, before creating the draft, since the review page does not repeat it.
 
 ### Preview modes
 
