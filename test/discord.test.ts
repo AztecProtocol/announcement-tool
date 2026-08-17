@@ -33,21 +33,25 @@ describe('discord adapter', () => {
       let d = ''; req.on('data', c => { d += c; });
       req.on('end', () => { body = d; res.writeHead(204); res.end(); });
     });
-    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    // Pasted mentions in the prefix text are stripped (see discord-mentions.ts);
+    // the mention line is built only from the selection, so give the fixture
+    // an explicit selection and expect that composed line, not the raw prefix.
+    const prefix = 'Announcement:';
+    const roles = [{ name: 'Mainnet', id: '111' }];
     await sql`insert into channel_settings (key, channel, config) values
-      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, roles, username: 'Aztec Announcements' })})`;
 
     const adapter = makeDiscordAdapter(sql);
-    await adapter.deliver({ ...ann, mentionRoles: true }, 'discord:mainnet-updates', 'publish');
+    await adapter.deliver({ ...ann, mentionRoleIds: ['111'] }, 'discord:mainnet-updates', 'publish');
     server.close();
 
     const payload = JSON.parse(body);
-    expect(payload.content.startsWith(prefix)).toBe(true);
+    expect(payload.content.startsWith(`<@&111> ${prefix}`)).toBe(true);
     expect(payload.content).toContain('[MAINNET] [CRITICAL] [UPGRADE]');
     expect(payload.content).toContain('**Upgrade now**');
     expect(payload.content).toContain('/a/slug-d');
     expect(payload.username).toBe('Aztec Announcements');
-    expect(payload.allowed_mentions.parse).toContain('roles');
+    expect(payload.allowed_mentions.roles).toContain('111');
   });
 
   it('works without a prefix configured', async () => {
@@ -63,56 +67,140 @@ describe('discord adapter', () => {
     expect(JSON.parse(body).content.startsWith('[MAINNET]')).toBe(true);
   });
 
-  it('omits the configured prefix when mentionRoles is false', async () => {
+  it('omits the mention line when no role is selected', async () => {
     let body = '';
     const { server, url } = await listen((req, res) => {
       let d = ''; req.on('data', c => { d += c; });
       req.on('end', () => { body = d; res.writeHead(204); res.end(); });
     });
-    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    const prefix = 'Announcement:';
+    const roles = [{ name: 'Mainnet', id: '111' }];
     await sql`insert into channel_settings (key, channel, config) values
-      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, roles, username: 'Aztec Announcements' })})`;
 
-    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoles: false }, 'discord:mainnet-updates', 'publish');
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: [] }, 'discord:mainnet-updates', 'publish');
     server.close();
 
     expect(JSON.parse(body).content).not.toContain('<@&');
   });
 
-  it('includes the configured prefix when mentionRoles is true', async () => {
+  it('includes the mention line when a role is selected', async () => {
     let body = '';
     const { server, url } = await listen((req, res) => {
       let d = ''; req.on('data', c => { d += c; });
       req.on('end', () => { body = d; res.writeHead(204); res.end(); });
     });
-    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    const prefix = 'Announcement:';
+    const roles = [{ name: 'Mainnet', id: '111' }];
     await sql`insert into channel_settings (key, channel, config) values
-      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, roles, username: 'Aztec Announcements' })})`;
 
-    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoles: true }, 'discord:mainnet-updates', 'publish');
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['111'] }, 'discord:mainnet-updates', 'publish');
     server.close();
 
     expect(JSON.parse(body).content).toContain('<@&');
   });
 
-  it('does not apply the prefix to an announcement authored before the column existed', async () => {
+  it('does not apply the prefix to an announcement authored before the selection column existed', async () => {
     let body = '';
     const { server, url } = await listen((req, res) => {
       let d = ''; req.on('data', c => { d += c; });
       req.on('end', () => { body = d; res.writeHead(204); res.end(); });
     });
-    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    const prefix = 'Announcement:';
+    const roles = [{ name: 'Mainnet', id: '111' }];
     await sql`insert into channel_settings (key, channel, config) values
-      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, roles, username: 'Aztec Announcements' })})`;
 
-    // A row written before migration 010 maps to mentionRoles: undefined — the
-    // property genuinely absent, not present-and-false. That's the code path
-    // `rowToAnnouncement` actually produces for legacy rows via `?? undefined`.
-    const { mentionRoles: _omitted, ...legacy } = { ...ann, mentionRoles: true };
+    // A row written before migration 010 maps to mentionRoleIds: undefined —
+    // the property genuinely absent, not present-and-empty. That's the code
+    // path `rowToAnnouncement` actually produces for legacy rows via `?? undefined`.
+    const { mentionRoleIds: _omitted, ...legacy } = { ...ann, mentionRoleIds: ['111'] };
     await makeDiscordAdapter(sql).deliver(legacy, 'discord:mainnet-updates', 'publish');
     server.close();
 
     expect(JSON.parse(body).content).not.toContain('<@&');
+  });
+
+  it('mentions only the selected role', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const roles = [{ name: 'role-a', id: '111' }, { name: 'role-b', id: '222' }];
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, roles })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['111'] }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    const content = JSON.parse(body).content;
+    expect(content).toContain('<@&111>');
+    expect(content).not.toContain('<@&222>');
+  });
+
+  it('narrows allowed_mentions to the mentioned roles', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const roles = [{ name: 'role-a', id: '111' }, { name: 'role-b', id: '222' }];
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, roles })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['111'] }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).allowed_mentions).toEqual({ parse: [], roles: ['111'] });
+  });
+
+  it('permits nothing when no role is selected', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const roles = [{ name: 'role-a', id: '111' }];
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, roles })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: [] }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).allowed_mentions).toEqual({ parse: [], roles: [] });
+  });
+
+  it('permits everyone only when everyone is selected', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['everyone'] }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).allowed_mentions.parse).toEqual(['everyone']);
+  });
+
+  it('combines a built-in with a named role', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const roles = [{ name: 'role-a', id: '111' }];
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, roles })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['here', '111'] }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).allowed_mentions).toEqual({ parse: ['everyone'], roles: ['111'] });
   });
 
   it('throws on unknown target so the worker retries', async () => {

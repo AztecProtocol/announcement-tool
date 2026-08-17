@@ -1,10 +1,11 @@
 import { ZodError } from 'zod';
 import type { Sql } from 'postgres';
-import type { Announcement, AnnouncementInput, DeliveryKind } from './types.js';
+import type { Announcement, AnnouncementInput, DeliveryKind, DiscordRole } from './types.js';
 import { renderPlain, renderMarkdown, renderTelegramHtml, renderEmail } from './render.js';
 import { rowToSetting, broadcastTargetsFor } from './outbox.js';
 import { makeSlug } from './ids.js';
 import { validateAnnouncement } from './validate.js';
+import { composeMentionLine, parseDiscordRoles } from './discord-mentions.js';
 
 export interface PreviewSet {
   // Set only when the input fails validateAnnouncement (e.g. a javascript:
@@ -15,7 +16,7 @@ export interface PreviewSet {
   // Non-blocking notices from validateAnnouncement (e.g. the GitHub-release
   // reminder) that don't prevent a preview from rendering.
   warnings?: string[];
-  discord?: { target: string; content: string; prefix?: string }[];
+  discord?: { target: string; content: string; prefix?: string; roles: DiscordRole[] }[];
   // undefined when no telegram/signal channel_settings row matches this
   // announcement's network and type — mirrors the discord array's filtering
   // via broadcastTargetsFor so the preview never shows a channel that
@@ -61,9 +62,9 @@ export async function previewAnnouncement(
   const discordTargets = targets.filter(t => t.channel === 'discord');
   const discord = discordTargets.map(t => {
     const cfg = settings.find(s => s.key === t.target)!.config;
-    const prefix = a.mentionRoles ? (cfg.prefix as string | undefined)?.trim() : undefined;
+    const prefix = composeMentionLine(cfg, a.mentionRoleIds);
     const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
-    return { target: t.target, content, ...(prefix ? { prefix } : {}) };
+    return { target: t.target, content, ...(prefix ? { prefix } : {}), roles: parseDiscordRoles(cfg) };
   });
 
   const telegram = targets.some(t => t.channel === 'telegram') ? renderTelegramHtml(a, kind) : undefined;

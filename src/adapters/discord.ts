@@ -2,6 +2,7 @@ import type { Sql } from 'postgres';
 import type { ChannelAdapter } from './types.js';
 import type { Announcement, DeliveryKind } from '../core/types.js';
 import { renderMarkdown } from '../core/render.js';
+import { composeMentionLine, mentionedRoleIds, mentionsEveryone } from '../core/discord-mentions.js';
 
 async function loadSetting(sql: Sql, target: string): Promise<Record<string, unknown>> {
   const rows = await sql`select config from channel_settings where key = ${target}`;
@@ -21,7 +22,7 @@ export function makeDiscordAdapter(
       const webhookUrl = cfg.webhook_url as string | undefined;
       if (!webhookUrl) throw new Error(`discord setting ${target} has no webhook_url`);
 
-      const prefix = a.mentionRoles ? (cfg.prefix as string | undefined)?.trim() : undefined;
+      const prefix = composeMentionLine(cfg, a.mentionRoleIds);
       const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
 
       const res = await doFetch(webhookUrl, {
@@ -30,7 +31,16 @@ export function makeDiscordAdapter(
         body: JSON.stringify({
           content,
           ...(cfg.username ? { username: cfg.username as string } : {}),
-          allowed_mentions: { parse: ['roles', 'everyone'] },
+          // Permit exactly what was selected. `parse: []` plus an explicit role
+          // list means a literal @everyone typed into a body cannot ping.
+          // Caveat: Discord's everyone permission has no id-list form, so when
+          // the author selects @everyone or @here, `parse: ['everyone']` also
+          // re-enables a stray literal in the body. Unavoidable via this API,
+          // and only when the author deliberately chose to notify everyone.
+          allowed_mentions: {
+            parse: mentionsEveryone(a.mentionRoleIds) ? ['everyone'] : [],
+            roles: mentionedRoleIds(cfg, a.mentionRoleIds),
+          },
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
