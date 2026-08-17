@@ -571,13 +571,6 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   flex: none;
 }
 
-/* Kept at the end of the file, where a media query conventionally belongs —
-   it was previously stranded mid-file with sections appended after it,
-   which invites a future addition to wrongly assume it's motion-scoped. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-}
-
 /* ── Withdraw and reject ──────────────────────────────────────────── */
 /* border-left-color is restated explicitly (not left to win on declaration
    order against .notice's `border-left: 3px solid var(--link)`) so this rule
@@ -604,3 +597,10 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
 .pending-controls { display: flex; align-items: center; gap: 8px; flex: none; }
 .pending-controls button.destructive { font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 6px; }
 .pending-error { font-size: 12.5px; color: var(--critical); }
+
+/* Kept at the end of the file, where a media query conventionally belongs —
+   it was previously stranded mid-file with sections appended after it,
+   which invites a future addition to wrongly assume it's motion-scoped. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
