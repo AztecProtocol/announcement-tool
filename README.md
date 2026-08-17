@@ -137,13 +137,18 @@ insert into channel_settings (key, channel, config) values
   ('discord:mainnet-updates', 'discord', '{
      "networks": ["mainnet"], "types": ["upgrade","info"],
      "webhook_url": "https://discord.com/api/webhooks/...",
-     "prefix": "<@&MAINNET_SEQUENCER_ROLE_ID> <@&GENESIS_SEQUENCER_ROLE_ID>",
+     "roles": [
+       { "name": "Mainnet Sequencer", "id": "1234567890123456789" },
+       { "name": "Genesis Sequencer", "id": "2345678901234567890" }
+     ],
+     "prefix": "📣",
      "username": "Aztec Announcements"
    }');
 ```
 
 - `webhook_url` (required) — the Discord incoming webhook URL for the target channel.
-- `prefix` (optional) — raw text prepended to the message body, on its own line. Used for role-mention pings (`<@&ROLE_ID>`) or an emoji preamble; sent as-is, so it must already contain valid Discord mention syntax. The adapter sets `allowed_mentions: { parse: ["roles", "everyone"] }` so role mentions in `prefix` actually notify.
+- `roles` (optional) — named roles this destination can mention, as `{ name, id }` pairs. Set with `npm run setup:channel`, not by hand — see "Where mentions belong" below.
+- `prefix` (optional) — an emoji preamble prepended to the message body, on its own line. It is text only: any mention typed into it (a pasted `<@&ROLE_ID>` / `<@ID>`, or a literal `@everyone` / `@here`) is stripped before sending, never posted and never permitted. Use the role selection below for mentions.
 - `username` (optional) — overrides the webhook's default display name.
 - `networks` / `types` — used by the fan-out matcher to decide whether an announcement routes to this destination; not read by the adapter itself.
 - **Env vars:** none — the webhook URL carries its own auth.
@@ -254,7 +259,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 ### Compose, preview, publish
 
 1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, and repeatable "actions required" and "links" fields. Submitting creates a draft (`createDraft`) and redirects to its review page.
-2. **Review** (`/admin/review/<id>`) — shows a live per-channel preview (webhook JSON, Discord/Telegram/Signal message text including any configured Discord role-mention prefix, email rendering) and the publish control.
+2. **Review** (`/admin/review/<id>`) — shows a live per-channel preview (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering) and the publish control.
 
 ### Preview modes
 
@@ -264,7 +269,7 @@ Each channel tab has two modes.
 
 **Raw payload** shows the exact string sent to that channel. Use this mode to verify what actually goes on the wire.
 
-For Discord, the raw payload is the authoritative view. It shows the configured channel prefix — role mentions and the emoji preamble — exactly as it will be posted. Because Discord messages are sent with role and everyone mentions enabled, always read the raw Discord payload before publishing and confirm the mentions are the ones you intend.
+For Discord, the raw payload is the authoritative view. It shows the mention line built from the roles selected on the compose form, followed by the emoji preamble, exactly as it will be posted. Always read the raw Discord payload before publishing and confirm the mentions are the ones you intend.
 
 Markdown headings render differently per channel, because the platforms differ:
 
@@ -279,21 +284,49 @@ Markdown headings render differently per channel, because the platforms differ:
 
 The announcement body is shared by every channel. Only Discord turns `@everyone`,
 `@here` or a role mention into a notification — on Telegram, Signal, email and
-webhook the same text arrives as literal characters a reader cannot act on.
+webhook the same text arrives as literal characters a reader cannot act on. Do
+not put mentions in the announcement body. The compose form warns if it finds
+one there, and the warning still applies: put mentions in the role selection
+described below, not the body.
 
-Discord messages post with role and everyone mentions enabled. Read the raw
-Discord preview before publishing and confirm the prefix is the one you intend.
+**Do not rely on typing a mention into the Discord prefix.** The prefix is an
+emoji preamble only. Any mention pasted or typed into it — a role mention, a
+user mention, or a literal `@everyone` / `@here` — is stripped before the
+message is sent and never notifies anyone.
 
-Configure mentions as part of the Discord channel prefix with `npm run setup:channel`.
-The prefix is stored per Discord channel and is read only by the Discord adapter,
-so it reaches no other channel. The compose form warns if it finds a mention in
-the body.
+Configure named roles per Discord destination with `npm run setup:channel`.
+Each role is a name and a numeric Discord role id, stored in that
+destination's `channel_settings` row. To get an id: enable Developer Mode in
+Discord, right-click the role, and choose "Copy Role ID" — the tool checks
+that what you paste is all digits.
 
-The compose form has a "Notify the configured Discord roles" checkbox that decides,
-per announcement, whether the prefix is sent. It is checked by default for `critical`
-announcements and unchecked otherwise, and the author can change it either way before
-requesting or publishing. When the checkbox is off, the Discord post carries no
-prefix and no mentions; every other channel is unaffected either way.
+The name is a label for this tool's own interface only; Discord resolves the
+mention from the id. Renaming the role in Discord later leaves the label
+here stale until someone re-runs `setup:channel` to update it — cosmetic,
+not functional, since the id still resolves correctly either way.
+
+`@everyone` and `@here` need no id. They are offered as built-in choices
+alongside the configured named roles, since Discord resolves them from
+literal text rather than a role id.
+
+The compose form's role checkboxes decide, per announcement, which roles a
+Discord post mentions. Critical announcements select every configured role
+(including the built-ins) by default; other severities select none. The
+author can check or uncheck any of them before requesting or publishing.
+Selecting none sends the post with no mention line at all. Every other
+channel is unaffected regardless of what is selected here.
+
+**Caution, before you select `@everyone` or `@here`:** Discord's everyone
+permission has no id-list form, so selecting either one also re-enables any
+literal `@everyone` or `@here` that ends up in the message body, even though
+the body warning above told you not to put one there. Selecting only named
+roles does not have this effect — a stray literal mention in the body still
+cannot ping. Read the raw Discord preview before publishing and confirm the
+mentions shown are the ones you intend.
+
+A destination configured before named roles existed — one with only a
+`prefix` and no `roles` — keeps posting its prefix unchanged; it has no
+roles to select and the prefix carries no mention, as above.
 
 ### Composing
 
