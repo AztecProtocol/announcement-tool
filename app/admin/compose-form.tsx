@@ -296,10 +296,22 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
             <legend>Actions required</legend>
             {actionRows.map((row, i) => (
               <div className="row-repeat" key={row.key}>
-                <input type="text" name={`action.${i}`} placeholder="Action (e.g. Update your node)" defaultValue={row.action} />
-                <input type="datetime-local" name={`deadline.${i}`} defaultValue={row.deadline} />
-                <span className="hint hint-inline">UTC</span>
-                <div className="role-tags">
+                <input
+                  type="text"
+                  name={`action.${i}`}
+                  placeholder="Action (e.g. Update your node)"
+                  defaultValue={row.action}
+                  aria-label="Action"
+                />
+                <input
+                  type="datetime-local"
+                  name={`deadline.${i}`}
+                  defaultValue={row.deadline}
+                  aria-label="Deadline"
+                  aria-describedby={`deadline-utc-hint.${i}`}
+                />
+                <span id={`deadline-utc-hint.${i}`} className="hint hint-inline">UTC</span>
+                <div className="role-tags" role="group" aria-label="Applies to">
                   {ROLES.map(role => {
                     const active = parseRoles(row.appliesTo).includes(role);
                     return (
@@ -326,6 +338,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
                   type="text"
                   name={`appliesTo.${i}`}
                   placeholder="Or type roles, comma-separated"
+                  aria-label="Applies to (comma-separated roles)"
                   value={row.appliesTo}
                   onChange={e => {
                     const appliesTo = e.target.value;
