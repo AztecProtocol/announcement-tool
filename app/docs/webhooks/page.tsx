@@ -33,8 +33,7 @@ export default function WebhookDocsPage() {
     "links": [
       { "label": "GitHub release", "url": "https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0" }
     ],
-    "published_at": "2026-08-06T10:00:00Z",
-    "expires_at": "2026-08-20T14:00:00Z"
+    "published_at": "2026-08-06T10:00:00Z"
   }
 }`}</pre>
       <p><code>kind</code> is <code>publish</code>, <code>update</code>, or <code>reminder</code> for real deliveries. Registration also sends a one-off verification event with <code>kind: "test"</code> — see below.</p>

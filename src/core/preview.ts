@@ -79,7 +79,7 @@ export async function previewAnnouncement(
       id: a.id, revision: a.revision, slug: a.slug, type: a.type,
       networks: a.networks, audiences: a.audiences, severity: a.severity,
       title: a.title, body_md: a.bodyMd, actions_required: a.actionsRequired,
-      links: a.links, published_at: a.publishedAt ?? null, expires_at: a.expiresAt ?? null,
+      links: a.links, published_at: a.publishedAt ?? null,
     },
   };
 
