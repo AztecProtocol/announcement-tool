@@ -33,7 +33,6 @@ const UPGRADE: AnnouncementInput = {
   bodyMd: 'This is a **test announcement** from the announcement pipeline. It is not a real upgrade notice.\n\nSequencers and provers on mainnet would normally need to upgrade before the deadline below.',
   actionsRequired: [{ action: 'Upgrade node to v5.1.0', deadline, applies_to: ['sequencer', 'prover'] }],
   links: [{ label: 'GitHub release', url: 'https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0' }],
-  expiresAt: deadline,
 };
 
 const GOVERNANCE: AnnouncementInput = {
