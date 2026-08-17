@@ -63,7 +63,10 @@ async function main(): Promise<void> {
       }
       roles.push({ name, id });
     }
-    if (roles.length) config.roles = roles;
+    // Dedupe by id so a re-entered role cannot produce two mention tokens
+    // for the same id, e.g. <@&111> <@&111>, if the operator adds it twice.
+    const dedupedRoles = roles.filter((r, i) => roles.findIndex(x => x.id === r.id) === i);
+    if (dedupedRoles.length) config.roles = dedupedRoles;
 
     const prefix = await ask('Emoji preamble to put above every message (blank for none)', '');
     if (prefix) config.prefix = prefix;
