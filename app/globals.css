@@ -437,6 +437,25 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   align-self: center;
 }
 
+/* ── Role tags ────────────────────────────────────────────────────── */
+.role-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.role-tag {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.role-tag:hover { border-color: var(--ink-3); color: var(--ink); }
+.role-tag[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--chartreuse);
+  border-color: var(--ink);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

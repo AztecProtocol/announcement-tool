@@ -17,6 +17,7 @@ import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pa
 import { normalizeSlug, slugError } from '../../src/core/slug.js';
 import { makeSlug } from '../../src/core/ids.js';
 import { isoToUtcInput } from '../../src/core/datetime.js';
+import { ROLES, parseRoles } from '../../src/core/roles.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
@@ -298,7 +299,39 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
                 <input type="text" name={`action.${i}`} placeholder="Action (e.g. Update your node)" defaultValue={row.action} />
                 <input type="datetime-local" name={`deadline.${i}`} defaultValue={row.deadline} />
                 <span className="hint hint-inline">UTC</span>
-                <input type="text" name={`appliesTo.${i}`} placeholder="Applies to (comma-separated roles)" defaultValue={row.appliesTo} />
+                <div className="role-tags">
+                  {ROLES.map(role => {
+                    const active = parseRoles(row.appliesTo).includes(role);
+                    return (
+                      <button
+                        type="button"
+                        key={role}
+                        className="role-tag"
+                        aria-pressed={active}
+                        onClick={() => setActionRows(rows => rows.map((r, idx) => {
+                          if (idx !== i) return r;
+                          const current = parseRoles(r.appliesTo);
+                          const next = active
+                            ? current.filter(x => x !== role)
+                            : [...current, role];
+                          return { ...r, appliesTo: next.join(', ') };
+                        }))}
+                      >
+                        {role}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  type="text"
+                  name={`appliesTo.${i}`}
+                  placeholder="Or type roles, comma-separated"
+                  value={row.appliesTo}
+                  onChange={e => {
+                    const appliesTo = e.target.value;
+                    setActionRows(rows => rows.map((r, idx) => (idx === i ? { ...r, appliesTo } : r)));
+                  }}
+                />
                 <button
                   type="button"
                   className="secondary"

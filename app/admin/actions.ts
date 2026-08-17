@@ -13,6 +13,7 @@ import { saveTemplate } from '../../src/core/templates.js';
 import { normalizeNewlines } from '../../src/core/text.js';
 import { normalizeSlug } from '../../src/core/slug.js';
 import { utcInputToIso } from '../../src/core/datetime.js';
+import { parseRoles } from '../../src/core/roles.js';
 import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
 
 const GENERIC_ERROR = 'Something went wrong — check the server logs.';
@@ -47,10 +48,7 @@ function inputFromForm(formData: FormData): AnnouncementInput {
     const trimmed = String(action).trim();
     if (!trimmed) continue;
     const deadline = String(formData.get(`deadline.${i}`) ?? '').trim();
-    const appliesTo = String(formData.get(`appliesTo.${i}`) ?? '')
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
+    const appliesTo = parseRoles(String(formData.get(`appliesTo.${i}`) ?? ''));
     actionsRequired.push({
       action: trimmed,
       ...(utcInputToIso(deadline) ? { deadline: utcInputToIso(deadline)! } : {}),
