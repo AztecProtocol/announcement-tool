@@ -54,7 +54,7 @@ export async function deleteTemplate(sql: Sql, id: string): Promise<boolean> {
  * - `slug` — captured from whichever draft was open when "Save as template"
  *   was clicked, stale and meaningless for the next announcement created
  *   from that template.
- * - `mentionRoles` — a reused announcement should re-decide who gets
+ * - `mentionRoleIds` — a reused announcement should re-decide who gets
  *   pinged, not inherit the previous author's answer. The compose form
  *   re-derives this from severity like any other new draft, so it must not
  *   be pre-set from a stored template.
@@ -65,7 +65,7 @@ export async function deleteTemplate(sql: Sql, id: string): Promise<boolean> {
  * (`saveTemplateAction` in app/admin/actions.ts).
  */
 export function stripPerAnnouncementFields(input: AnnouncementInput): AnnouncementInput {
-  const { slug: _slug, mentionRoles: _mentionRoles, ...rest } = input;
+  const { slug: _slug, mentionRoleIds: _mentionRoleIds, ...rest } = input;
   return rest;
 }
 
@@ -74,7 +74,7 @@ export function stripPerAnnouncementFields(input: AnnouncementInput): Announceme
  * starting point for a new draft. Every action's `deadline` is cleared, so
  * a reused announcement can never carry a stale, already-passed deadline
  * into a new draft. Everything else (text, applies_to, links,
- * type/network/severity/audiences) is preserved. `mentionRoles` is
+ * type/network/severity/audiences) is preserved. `mentionRoleIds` is
  * deliberately NOT carried over — see stripPerAnnouncementFields above for
  * why.
  */

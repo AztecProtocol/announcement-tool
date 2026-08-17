@@ -24,14 +24,14 @@ describe('stripPerAnnouncementFields: the safety property', () => {
     expect(out.slug).toBeUndefined();
   });
 
-  it('drops mentionRoles carried on the input', () => {
-    const withMention: AnnouncementInput = { ...input, mentionRoles: true };
+  it('drops mentionRoleIds carried on the input', () => {
+    const withMention: AnnouncementInput = { ...input, mentionRoleIds: ['123'] };
     const out = stripPerAnnouncementFields(withMention);
-    expect(out.mentionRoles).toBeUndefined();
+    expect(out.mentionRoleIds).toBeUndefined();
   });
 
   it('keeps every other field untouched', () => {
-    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug', mentionRoles: true };
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug', mentionRoleIds: ['123'] };
     const out = stripPerAnnouncementFields(withSlug);
     expect(out.title).toBe(input.title);
     expect(out.bodyMd).toBe(input.bodyMd);
@@ -39,22 +39,22 @@ describe('stripPerAnnouncementFields: the safety property', () => {
     expect(out.links).toEqual(input.links);
   });
 
-  it('is a no-op when the input has no slug or mentionRoles', () => {
+  it('is a no-op when the input has no slug or mentionRoleIds', () => {
     const out = stripPerAnnouncementFields(input);
     expect(out.slug).toBeUndefined();
-    expect(out.mentionRoles).toBeUndefined();
+    expect(out.mentionRoleIds).toBeUndefined();
   });
 });
 
 describe('templates: save/list/get roundtrip', () => {
-  it('a saved template stores no slug or mentionRoles even when the compose form input carried them', async () => {
-    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug', mentionRoles: true };
+  it('a saved template stores no slug or mentionRoleIds even when the compose form input carried them', async () => {
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug', mentionRoleIds: ['123'] };
     const t = await saveTemplate(sql, { name: 'No slug leak', input: stripPerAnnouncementFields(withSlug), createdBy: 'yev@aztec.foundation' });
     expect(t.input.slug).toBeUndefined();
-    expect(t.input.mentionRoles).toBeUndefined();
+    expect(t.input.mentionRoleIds).toBeUndefined();
     const got = await getTemplate(sql, t.id);
     expect(got!.input.slug).toBeUndefined();
-    expect(got!.input.mentionRoles).toBeUndefined();
+    expect(got!.input.mentionRoleIds).toBeUndefined();
   });
 
   it('saves, lists, and gets a template', async () => {
