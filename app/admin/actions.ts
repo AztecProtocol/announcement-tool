@@ -4,34 +4,14 @@
 // for that specifier).
 import { headers } from 'next/dist/server/request/headers.js';
 import { redirect } from 'next/navigation';
-import { ZodError } from 'zod';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
-import { createDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, FourEyesError } from '../../src/core/announcements.js';
+import { createDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
-import { saveTemplate, stripSlugForTemplate } from '../../src/core/templates.js';
+import { saveTemplate, stripPerAnnouncementFields } from '../../src/core/templates.js';
 import { inputFromForm } from './input-from-form.js';
+import { safeErrorMessage } from './safe-error-message.js';
 import type { Announcement, AnnouncementInput, Template } from '../../src/core/types.js';
-
-const GENERIC_ERROR = 'Something went wrong — check the server logs.';
-
-/**
- * Maps a caught error to a message safe to send to the browser.
- *
- * ZodError and FourEyesError (and any other plain Error thrown deliberately
- * by core modules, e.g. "announcement not found: <id>") carry messages that
- * are safe and useful to show. Anything else — most importantly a raw
- * postgres driver error — may embed connection strings, hostnames, or query
- * fragments, so it's logged server-side and replaced with a generic message
- * before it ever reaches the client.
- */
-function safeErrorMessage(err: unknown, context: string): string {
-  if (err instanceof ZodError) return err.issues.map(i => i.message).join('; ');
-  if (err instanceof FourEyesError) return err.message;
-  if (err instanceof Error && err.name === 'Error') return err.message;
-  console.error(`[admin/actions] ${context}:`, err);
-  return GENERIC_ERROR;
-}
 
 export async function createDraftAction(formData: FormData): Promise<{ id?: string; error?: string }> {
   const db = getDb();
@@ -75,9 +55,9 @@ export async function saveTemplateAction(formData: FormData): Promise<{ template
   }
 
   try {
-    // Templates are reusable; the current draft's slug is announcement-specific
-    // and must not be persisted into the template — see stripSlugForTemplate.
-    const template = await saveTemplate(db, { name, input: stripSlugForTemplate(input), createdBy: identity.email });
+    // Templates are reusable; slug and mentionRoles are announcement-specific
+    // and must not be persisted into the template — see stripPerAnnouncementFields.
+    const template = await saveTemplate(db, { name, input: stripPerAnnouncementFields(input), createdBy: identity.email });
     return { template };
   } catch (err) {
     return { error: safeErrorMessage(err, 'saveTemplate') };

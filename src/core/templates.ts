@@ -48,14 +48,24 @@ export async function deleteTemplate(sql: Sql, id: string): Promise<boolean> {
 }
 
 /**
- * Strips the slug from an AnnouncementInput before it is stored as a
- * template. Templates are reusable by definition, so a slug captured from
- * whichever draft was open when "Save as template" was clicked is stale and
- * meaningless for the next announcement created from that template — the
- * same reasoning templateFromAnnouncement below already applies to dates.
+ * Strips the fields from an AnnouncementInput that are specific to a single
+ * announcement and must not be persisted into a reusable template:
+ *
+ * - `slug` — captured from whichever draft was open when "Save as template"
+ *   was clicked, stale and meaningless for the next announcement created
+ *   from that template.
+ * - `mentionRoles` — a reused announcement should re-decide who gets
+ *   pinged, not inherit the previous author's answer. The compose form
+ *   re-derives this from severity like any other new draft, so it must not
+ *   be pre-set from a stored template.
+ *
+ * `templateFromAnnouncement` below applies the same reasoning (plus
+ * clearing dates) when building a template's input from a past
+ * announcement; this function is what actually runs on the save path
+ * (`saveTemplateAction` in app/admin/actions.ts).
  */
-export function stripSlugForTemplate(input: AnnouncementInput): AnnouncementInput {
-  const { slug: _slug, ...rest } = input;
+export function stripPerAnnouncementFields(input: AnnouncementInput): AnnouncementInput {
+  const { slug: _slug, mentionRoles: _mentionRoles, ...rest } = input;
   return rest;
 }
 
@@ -65,9 +75,8 @@ export function stripSlugForTemplate(input: AnnouncementInput): AnnouncementInpu
  * a reused announcement can never carry a stale, already-passed deadline
  * into a new draft. Everything else (text, applies_to, links,
  * type/network/severity/audiences) is preserved. `mentionRoles` is
- * deliberately NOT carried over — a reused announcement should re-decide
- * who gets pinged, not inherit the previous author's answer, so the
- * compose form re-derives it from severity like any other new draft.
+ * deliberately NOT carried over — see stripPerAnnouncementFields above for
+ * why.
  */
 export function templateFromAnnouncement(a: Announcement): AnnouncementInput {
   return {

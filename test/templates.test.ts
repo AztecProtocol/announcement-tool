@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { saveTemplate, listTemplates, getTemplate, deleteTemplate, templateFromAnnouncement, stripSlugForTemplate } from '../src/core/templates.js';
+import { saveTemplate, listTemplates, getTemplate, deleteTemplate, templateFromAnnouncement, stripPerAnnouncementFields } from '../src/core/templates.js';
 import { createDraft } from '../src/core/announcements.js';
 import type { AnnouncementInput, Announcement } from '../src/core/types.js';
 
@@ -17,35 +17,44 @@ const input: AnnouncementInput = {
   links: [{ label: 'GitHub release', url: 'https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0' }],
 };
 
-describe('stripSlugForTemplate: the safety property', () => {
+describe('stripPerAnnouncementFields: the safety property', () => {
   it('drops a slug carried on the input', () => {
     const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug' };
-    const out = stripSlugForTemplate(withSlug);
+    const out = stripPerAnnouncementFields(withSlug);
     expect(out.slug).toBeUndefined();
   });
 
+  it('drops mentionRoles carried on the input', () => {
+    const withMention: AnnouncementInput = { ...input, mentionRoles: true };
+    const out = stripPerAnnouncementFields(withMention);
+    expect(out.mentionRoles).toBeUndefined();
+  });
+
   it('keeps every other field untouched', () => {
-    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug' };
-    const out = stripSlugForTemplate(withSlug);
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug', mentionRoles: true };
+    const out = stripPerAnnouncementFields(withSlug);
     expect(out.title).toBe(input.title);
     expect(out.bodyMd).toBe(input.bodyMd);
     expect(out.actionsRequired).toEqual(input.actionsRequired);
     expect(out.links).toEqual(input.links);
   });
 
-  it('is a no-op when the input has no slug', () => {
-    const out = stripSlugForTemplate(input);
+  it('is a no-op when the input has no slug or mentionRoles', () => {
+    const out = stripPerAnnouncementFields(input);
     expect(out.slug).toBeUndefined();
+    expect(out.mentionRoles).toBeUndefined();
   });
 });
 
 describe('templates: save/list/get roundtrip', () => {
-  it('a saved template stores no slug even when the compose form input carried one', async () => {
-    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug' };
-    const t = await saveTemplate(sql, { name: 'No slug leak', input: stripSlugForTemplate(withSlug), createdBy: 'yev@aztec.foundation' });
+  it('a saved template stores no slug or mentionRoles even when the compose form input carried them', async () => {
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug', mentionRoles: true };
+    const t = await saveTemplate(sql, { name: 'No slug leak', input: stripPerAnnouncementFields(withSlug), createdBy: 'yev@aztec.foundation' });
     expect(t.input.slug).toBeUndefined();
+    expect(t.input.mentionRoles).toBeUndefined();
     const got = await getTemplate(sql, t.id);
     expect(got!.input.slug).toBeUndefined();
+    expect(got!.input.mentionRoles).toBeUndefined();
   });
 
   it('saves, lists, and gets a template', async () => {
