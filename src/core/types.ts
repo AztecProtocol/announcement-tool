@@ -46,6 +46,11 @@ export interface Announcement extends AnnouncementInput {
   publishRejectedReason?: string;
 }
 
+export interface DiscordRole {
+  name: string;
+  id: string;
+}
+
 export interface DeliveryTarget {
   channel: string;
   target: string;
