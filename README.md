@@ -280,13 +280,13 @@ The announcement body is shared by every channel. Only Discord turns `@everyone`
 `@here` or a role mention into a notification — on Telegram, Signal, email and
 webhook the same text arrives as literal characters a reader cannot act on.
 
-Configure mentions as part of the Discord channel prefix instead, with
-`npm run setup:channel`. The prefix is stored per Discord channel and is read
-only by the Discord adapter, so it reaches no other channel. The compose form
-warns if it finds a mention in the body.
+Discord messages post with role and everyone mentions enabled. Read the raw
+Discord preview before publishing and confirm the prefix is the one you intend.
 
-Read the raw Discord preview before publishing to confirm the prefix is the one
-you intend.
+Configure mentions as part of the Discord channel prefix with `npm run setup:channel`.
+The prefix is stored per Discord channel and is read only by the Discord adapter,
+so it reaches no other channel. The compose form warns if it finds a mention in
+the body.
 
 3. **Publish:**
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
