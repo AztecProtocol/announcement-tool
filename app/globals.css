@@ -599,3 +599,8 @@ button.destructive {
   border: 1px solid var(--critical-line);
 }
 button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
+
+/* ── Pending queue: withdraw control ──────────────────────────────── */
+.pending-controls { display: flex; align-items: center; gap: 8px; flex: none; }
+.pending-controls button.destructive { font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 6px; }
+.pending-error { font-size: 12.5px; color: var(--critical); }

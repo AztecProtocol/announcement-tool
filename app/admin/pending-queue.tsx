@@ -1,3 +1,5 @@
+import WithdrawButton from './withdraw-button.js';
+
 export interface PendingItem {
   id: string;
   title: string;
@@ -36,9 +38,12 @@ export default function PendingQueue({ items, viewer }: { items: PendingItem[]; 
                   {blockedBySelfConfirm ? ' — you cannot confirm your own request' : ''}
                 </span>
               </div>
-              <a className="pending-action" href={`/admin/review/${item.id}`}>
-                {isRequester ? 'View' : 'Review'}
-              </a>
+              <span className="pending-controls">
+                <a className="pending-action" href={`/admin/review/${item.id}`}>
+                  {isRequester ? 'View' : 'Review'}
+                </a>
+                {isRequester && <WithdrawButton id={item.id} />}
+              </span>
             </li>
           );
         })}
