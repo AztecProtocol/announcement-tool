@@ -16,6 +16,7 @@ import type { PreviewSet } from '../../src/core/preview.js';
 import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pane.js';
 import { normalizeSlug, slugError } from '../../src/core/slug.js';
 import { makeSlug } from '../../src/core/ids.js';
+import { isoToUtcInput } from '../../src/core/datetime.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
@@ -54,15 +55,6 @@ const PREVIEW_CHANNELS: PreviewChannel[] = ['discord', 'telegram', 'signal', 'em
 
 type PreviewResult = { preview?: PreviewSet; error?: string };
 
-/** ISO string -> value for an <input type="datetime-local">, or '' if unset. */
-function toLocalInput(iso: string | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 export type ComposeFormProps = {
   templates?: { id: string; name: string }[];
   recentAnnouncements?: { id: string; title: string; slug: string }[];
@@ -86,7 +78,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
     (prefill?.actionsRequired ?? []).map((ar, i) => ({
       key: i,
       action: ar.action,
-      deadline: toLocalInput(ar.deadline),
+      deadline: isoToUtcInput(ar.deadline),
       appliesTo: ar.applies_to.join(', '),
     })),
   );
@@ -305,6 +297,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
               <div className="row-repeat" key={row.key}>
                 <input type="text" name={`action.${i}`} placeholder="Action (e.g. Update your node)" defaultValue={row.action} />
                 <input type="datetime-local" name={`deadline.${i}`} defaultValue={row.deadline} />
+                <span className="hint hint-inline">UTC</span>
                 <input type="text" name={`appliesTo.${i}`} placeholder="Applies to (comma-separated roles)" defaultValue={row.appliesTo} />
                 <button
                   type="button"
@@ -362,8 +355,8 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
             </button>
           </fieldset>
 
-          <label htmlFor="expiresAt">Expires (optional)</label>
-          <input id="expiresAt" type="datetime-local" name="expiresAt" defaultValue={toLocalInput(prefill?.expiresAt)} />
+          <label htmlFor="expiresAt">Expires (optional, UTC)</label>
+          <input id="expiresAt" type="datetime-local" name="expiresAt" defaultValue={isoToUtcInput(prefill?.expiresAt)} />
 
           <div>
             <button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save draft'}</button>

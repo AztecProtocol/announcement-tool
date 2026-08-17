@@ -12,6 +12,7 @@ import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js'
 import { saveTemplate } from '../../src/core/templates.js';
 import { normalizeNewlines } from '../../src/core/text.js';
 import { normalizeSlug } from '../../src/core/slug.js';
+import { utcInputToIso } from '../../src/core/datetime.js';
 import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
 
 const GENERIC_ERROR = 'Something went wrong — check the server logs.';
@@ -52,7 +53,7 @@ function inputFromForm(formData: FormData): AnnouncementInput {
       .filter(Boolean);
     actionsRequired.push({
       action: trimmed,
-      ...(deadline ? { deadline: new Date(deadline).toISOString() } : {}),
+      ...(utcInputToIso(deadline) ? { deadline: utcInputToIso(deadline)! } : {}),
       applies_to: appliesTo,
     });
   }
@@ -79,7 +80,7 @@ function inputFromForm(formData: FormData): AnnouncementInput {
     bodyMd: multiline('bodyMd'),
     actionsRequired,
     links,
-    ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
+    ...(utcInputToIso(expiresAt) ? { expiresAt: utcInputToIso(expiresAt)! } : {}),
     ...(submittedSlug ? { slug: normalizeSlug(submittedSlug) } : {}),
   };
 }
