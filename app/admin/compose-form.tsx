@@ -11,13 +11,14 @@ import { useActionState } from 'react';
 import { useRouter } from 'next/dist/client/components/navigation.js';
 import { createDraftAction, previewAction, saveTemplateAction } from './actions.js';
 import { GH_RELEASE } from '../../src/core/validate.js';
-import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
+import type { AnnouncementInput, AnnouncementType, Audience, DiscordRole, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
 import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pane.js';
 import { normalizeSlug, slugError } from '../../src/core/slug.js';
 import { makeSlug } from '../../src/core/ids.js';
 import { isoToUtcInput } from '../../src/core/datetime.js';
 import { parseRoles } from '../../src/core/roles.js';
+import { BUILTIN_ROLES } from '../../src/core/discord-mentions.js';
 import { ActionRowFields, type ActionRow } from './action-row.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
@@ -59,10 +60,11 @@ type PreviewResult = { preview?: PreviewSet; error?: string };
 export type ComposeFormProps = {
   templates?: { id: string; name: string }[];
   recentAnnouncements?: { id: string; title: string; slug: string }[];
+  discordRoles?: DiscordRole[];
   prefill?: AnnouncementInput;
 };
 
-export default function ComposeForm({ templates = [], recentAnnouncements = [], prefill }: ComposeFormProps) {
+export default function ComposeForm({ templates = [], recentAnnouncements = [], discordRoles = [], prefill }: ComposeFormProps) {
   const router = useRouter();
   const [result, formAction, pending] = useActionState<Result | undefined, FormData>(action, undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -91,8 +93,13 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   );
   const nextActionKey = useRef(actionRows.length);
   const nextLinkKey = useRef(linkRows.length);
-  const [mentionRoles, setMentionRoles] = useState(severity === 'critical');
-  const [mentionTouched, setMentionTouched] = useState(false);
+  // Every offered role: built-ins first (see the placement note below), then
+  // the configured roles gathered across all Discord destinations.
+  const allRoles: DiscordRole[] = [...BUILTIN_ROLES, ...discordRoles];
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>(
+    prefill?.mentionRoleIds ?? (severity === 'critical' ? allRoles.map(r => r.id) : []),
+  );
+  const [rolesTouched, setRolesTouched] = useState(false);
   const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
   const [previewMode, setPreviewMode] = useState<PreviewMode>('rendered');
   const [previewResult, setPreviewResult] = useState<PreviewResult | undefined>(undefined);
@@ -108,11 +115,15 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
     setSlug(title.trim() ? makeSlug(new Date(), type, title) : '');
   }, [title, type, slugTouched]);
 
-  // Mirrors slugTouched: the checkbox tracks severity until the author
-  // overrides it themselves, after which their choice stands.
+  // Mirrors slugTouched: the role selection tracks severity — all roles for
+  // critical, none otherwise — until the author overrides it themselves,
+  // after which their choice stands.
   useEffect(() => {
-    if (!mentionTouched) setMentionRoles(severity === 'critical');
-  }, [severity, mentionTouched]);
+    if (!rolesTouched) setSelectedRoleIds(severity === 'critical' ? allRoles.map(r => r.id) : []);
+    // allRoles is derived fresh from props each render; only severity and the
+    // touched flag should re-run this, matching the slugTouched effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [severity, rolesTouched]);
 
   function goto(from: string) {
     router.push(from ? `/admin?from=${encodeURIComponent(from)}` : '/admin');
@@ -161,6 +172,10 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
       el.setRangeText(op.prefix, start, start, 'end');
     }
     el.focus();
+  }
+
+  function toggleMentionRole(id: string, checked: boolean) {
+    setSelectedRoleIds(ids => (checked ? [...ids, id] : ids.filter(x => x !== id)));
   }
 
   function toggleRole(index: number, role: string) {
@@ -281,17 +296,41 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
             ))}
           </fieldset>
 
-          <label className="check">
-            <input
-              type="checkbox"
-              name="mentionRoles"
-              checked={mentionRoles}
-              onChange={e => { setMentionTouched(true); setMentionRoles(e.target.checked); }}
-            /> Notify the configured Discord roles
-          </label>
-          <p className="hint">
-            On by default for critical announcements. Other channels are unaffected.
-          </p>
+          <fieldset className="role-select">
+            <legend>Notify Discord roles</legend>
+            {BUILTIN_ROLES.map(r => (
+              <label className="check role-select-builtin" key={r.id}>
+                <input
+                  type="checkbox"
+                  name="mentionRoleIds"
+                  value={r.id}
+                  checked={selectedRoleIds.includes(r.id)}
+                  onChange={e => { setRolesTouched(true); toggleMentionRole(r.id, e.target.checked); }}
+                />
+                @{r.name}
+              </label>
+            ))}
+            {discordRoles.length === 0 ? (
+              <p className="hint">No named roles are configured for any Discord destination.</p>
+            ) : (
+              discordRoles.map(r => (
+                <label className="check" key={r.id}>
+                  <input
+                    type="checkbox"
+                    name="mentionRoleIds"
+                    value={r.id}
+                    checked={selectedRoleIds.includes(r.id)}
+                    onChange={e => { setRolesTouched(true); toggleMentionRole(r.id, e.target.checked); }}
+                  />
+                  @{r.name}
+                </label>
+              ))
+            )}
+            <p className="hint">
+              Selected roles are notified on Discord. Other channels are unaffected.
+              Check the Discord preview to confirm. On by default for critical announcements.
+            </p>
+          </fieldset>
 
           <fieldset>
             <legend>Networks</legend>

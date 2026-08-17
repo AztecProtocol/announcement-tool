@@ -598,6 +598,13 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
 .pending-controls button.destructive { font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 6px; }
 .pending-error { font-size: 12.5px; color: var(--critical); }
 
+/* ── Discord role selection (compose form) ────────────────────────── */
+/* .role-select is a fieldset, so the bare `fieldset` rule already sets its
+   border/padding/margin — no override needed here, same specificity (0,0,1,0)
+   either way. */
+.role-select-builtin { color: var(--critical); }
+.role-select-builtin input[type="checkbox"] { accent-color: var(--critical); }
+
 /* Kept at the end of the file, where a media query conventionally belongs —
    it was previously stranded mid-file with sections appended after it,
    which invites a future addition to wrongly assume it's motion-scoped. */

@@ -9,7 +9,9 @@ import { listTemplates, templateFromAnnouncement } from '../../src/core/template
 import { getLatest } from '../../src/core/announcements.js';
 import { resolveIdentity } from '../../src/core/identity.js';
 import { listPublished, listAwaitingConfirmation } from '../../src/core/queries.js';
-import type { AnnouncementInput } from '../../src/core/types.js';
+import { rowToSetting } from '../../src/core/outbox.js';
+import { parseDiscordRoles } from '../../src/core/discord-mentions.js';
+import type { AnnouncementInput, DiscordRole } from '../../src/core/types.js';
 
 export const metadata = {
   title: 'Compose — Admin',
@@ -27,6 +29,23 @@ function parseFrom(from: string | undefined): { kind: 'template' | 'announcement
   return undefined;
 }
 
+/**
+ * The union of named roles across every Discord destination, deduplicated by
+ * id. If two destinations give the same id different names, the first one
+ * wins — that is a config error on the operator's part, not something the
+ * form should try to reconcile.
+ */
+function distinctDiscordRoles(settings: { channel: string; config: Record<string, unknown> }[]): DiscordRole[] {
+  const byId = new Map<string, DiscordRole>();
+  for (const s of settings) {
+    if (s.channel !== 'discord') continue;
+    for (const r of parseDiscordRoles(s.config)) {
+      if (!byId.has(r.id)) byId.set(r.id, r);
+    }
+  }
+  return [...byId.values()];
+}
+
 export default async function AdminComposePage({
   searchParams,
 }: {
@@ -36,11 +55,13 @@ export default async function AdminComposePage({
   const db = getDb();
   const identity = resolveIdentity(await headers());
 
-  const [templates, recentAnnouncements, pending] = await Promise.all([
+  const [templates, recentAnnouncements, pending, channelSettingRows] = await Promise.all([
     listTemplates(db),
     listPublished(db, 20),
     listAwaitingConfirmation(db),
+    db`select * from channel_settings`,
   ]);
+  const discordRoles = distinctDiscordRoles(channelSettingRows.map(rowToSetting));
 
   let prefill: AnnouncementInput | undefined;
   const parsed = parseFrom(from);
@@ -63,6 +84,7 @@ export default async function AdminComposePage({
       <ComposeForm
         templates={templates.map(t => ({ id: t.id, name: t.name }))}
         recentAnnouncements={recentAnnouncements.map(a => ({ id: a.id, title: a.title, slug: a.slug }))}
+        discordRoles={discordRoles}
         prefill={prefill}
       />
     </>
