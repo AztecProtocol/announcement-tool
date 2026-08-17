@@ -139,7 +139,8 @@ export async function withdrawPublish(sql: Sql, id: string, actor: string): Prom
       throw new Error('only the publisher who requested this can withdraw it');
     }
     const [row] = await tx`update announcements
-      set status = 'draft', publish_requested_by = null
+      set status = 'draft', publish_requested_by = null,
+          publish_rejected_by = null, publish_rejected_reason = null
       where id = ${id} and revision = ${a.revision} returning *`;
     await tx`insert into audit_log (actor, action, target, detail)
       values (${actor}, 'publish_withdrawn', ${id}, ${tx.json({ revision: a.revision })})`;

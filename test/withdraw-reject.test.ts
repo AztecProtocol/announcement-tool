@@ -68,6 +68,15 @@ describe('withdrawPublish', () => {
     const out = await requestPublish(sql, a.id, 'alice@test.local');
     expect(out.status).toBe('publish_requested');
   });
+
+  it('clears a stale rejection banner when withdrawing a later re-request', async () => {
+    const a = await requested('Rejected, re-requested, then withdrawn');
+    await rejectPublish(sql, a.id, 'bob@test.local', 'wrong version number');
+    await requestPublish(sql, a.id, 'alice@test.local');
+    const out = await withdrawPublish(sql, a.id, 'alice@test.local');
+    expect(out.publishRejectedBy).toBeUndefined();
+    expect(out.publishRejectedReason).toBeUndefined();
+  });
 });
 
 describe('rejectPublish', () => {
