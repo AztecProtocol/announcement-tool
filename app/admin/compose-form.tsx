@@ -68,6 +68,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [type, setType] = useState<AnnouncementType>(prefill?.type ?? 'upgrade');
+  const [severity, setSeverity] = useState<Severity>(prefill?.severity ?? 'recommended');
   const [title, setTitle] = useState(prefill?.title ?? '');
   // A prefilled draft (from a template or a past announcement) must never
   // inherit the source's slug — slugs are unique, so starting blank and
@@ -90,6 +91,8 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   );
   const nextActionKey = useRef(actionRows.length);
   const nextLinkKey = useRef(linkRows.length);
+  const [mentionRoles, setMentionRoles] = useState(severity === 'critical');
+  const [mentionTouched, setMentionTouched] = useState(false);
   const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
   const [previewMode, setPreviewMode] = useState<PreviewMode>('rendered');
   const [previewResult, setPreviewResult] = useState<PreviewResult | undefined>(undefined);
@@ -104,6 +107,12 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
     if (slugTouched) return;
     setSlug(title.trim() ? makeSlug(new Date(), type, title) : '');
   }, [title, type, slugTouched]);
+
+  // Mirrors slugTouched: the checkbox tracks severity until the author
+  // overrides it themselves, after which their choice stands.
+  useEffect(() => {
+    if (!mentionTouched) setMentionRoles(severity === 'critical');
+  }, [severity, mentionTouched]);
 
   function goto(from: string) {
     router.push(from ? `/admin?from=${encodeURIComponent(from)}` : '/admin');
@@ -265,11 +274,24 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
                   type="radio"
                   name="severity"
                   value={v}
-                  defaultChecked={v === (prefill?.severity ?? 'recommended')}
+                  checked={v === severity}
+                  onChange={() => setSeverity(v)}
                 /> {v}
               </label>
             ))}
           </fieldset>
+
+          <label className="check">
+            <input
+              type="checkbox"
+              name="mentionRoles"
+              checked={mentionRoles}
+              onChange={e => { setMentionTouched(true); setMentionRoles(e.target.checked); }}
+            /> Notify the configured Discord roles
+          </label>
+          <p className="hint">
+            On by default for critical announcements. Other channels are unaffected.
+          </p>
 
           <fieldset>
             <legend>Networks</legend>

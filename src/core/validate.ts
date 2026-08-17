@@ -19,6 +19,7 @@ const schema = z.object({
     url: z.string().url().refine(u => /^https?:$/.test(new URL(u).protocol), 'link must be http or https'),
   })),
   supersedes: z.string().optional(),
+  mentionRoles: z.boolean().optional(),
 });
 
 // Exported so the compose form can mirror this check live in the UI —

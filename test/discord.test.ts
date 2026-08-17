@@ -38,7 +38,7 @@ describe('discord adapter', () => {
       ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
 
     const adapter = makeDiscordAdapter(sql);
-    await adapter.deliver(ann, 'discord:mainnet-updates', 'publish');
+    await adapter.deliver({ ...ann, mentionRoles: true }, 'discord:mainnet-updates', 'publish');
     server.close();
 
     const payload = JSON.parse(body);
@@ -61,6 +61,38 @@ describe('discord adapter', () => {
     await makeDiscordAdapter(sql).deliver(ann, 'discord:testnet-updates', 'publish');
     server.close();
     expect(JSON.parse(body).content.startsWith('[MAINNET]')).toBe(true);
+  });
+
+  it('omits the configured prefix when mentionRoles is false', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoles: false }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).content).not.toContain('<@&');
+  });
+
+  it('includes the configured prefix when mentionRoles is true', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoles: true }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).content).toContain('<@&');
   });
 
   it('throws on unknown target so the worker retries', async () => {

@@ -30,6 +30,7 @@ export interface AnnouncementInput {
   links: Link[];
   supersedes?: string;
   slug?: string;
+  mentionRoles?: boolean;
 }
 
 export interface Announcement extends AnnouncementInput {

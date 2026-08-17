@@ -64,5 +64,6 @@ export function inputFromForm(formData: FormData): AnnouncementInput {
     actionsRequired,
     links,
     ...(submittedSlug ? { slug: normalizedSlug } : {}),
+    mentionRoles: formData.get('mentionRoles') === 'on',
   };
 }

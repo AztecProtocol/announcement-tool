@@ -21,7 +21,7 @@ export function makeDiscordAdapter(
       const webhookUrl = cfg.webhook_url as string | undefined;
       if (!webhookUrl) throw new Error(`discord setting ${target} has no webhook_url`);
 
-      const prefix = (cfg.prefix as string | undefined)?.trim();
+      const prefix = a.mentionRoles ? (cfg.prefix as string | undefined)?.trim() : undefined;
       const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
 
       const res = await doFetch(webhookUrl, {

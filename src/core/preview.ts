@@ -61,7 +61,7 @@ export async function previewAnnouncement(
   const discordTargets = targets.filter(t => t.channel === 'discord');
   const discord = discordTargets.map(t => {
     const cfg = settings.find(s => s.key === t.target)!.config;
-    const prefix = (cfg.prefix as string | undefined)?.trim();
+    const prefix = a.mentionRoles ? (cfg.prefix as string | undefined)?.trim() : undefined;
     const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
     return { target: t.target, content, ...(prefix ? { prefix } : {}) };
   });

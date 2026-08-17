@@ -32,7 +32,7 @@ describe('previewAnnouncement', () => {
         networks: ['testnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook2', prefix: 'other',
       })})`;
 
-    const preview = await previewAnnouncement(sql, input);
+    const preview = await previewAnnouncement(sql, { ...input, mentionRoles: true });
 
     expect(preview.discord).toHaveLength(1);
     expect(preview.discord![0].target).toBe('discord:mainnet-updates');
@@ -153,7 +153,7 @@ describe('previewAnnouncement', () => {
         networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook', prefix,
       })})`;
 
-    const res = await previewAnnouncement(sql, input);
+    const res = await previewAnnouncement(sql, { ...input, mentionRoles: true });
     const entry = res.discord?.[0];
     expect(entry).toBeDefined();
     expect(entry!.prefix).toBe(prefix);
@@ -168,7 +168,7 @@ describe('previewAnnouncement', () => {
         networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook', prefix,
       })})`;
 
-    const res = await previewAnnouncement(sql, input);
+    const res = await previewAnnouncement(sql, { ...input, mentionRoles: true });
     const entry = res.discord?.[0];
     expect(entry).toBeDefined();
     // The adapter composes exactly this: prefix + '\n' + renderMarkdown(a, kind),
@@ -183,6 +183,31 @@ describe('previewAnnouncement', () => {
     const parsed = JSON.parse(preview.webhook!);
     expect(parsed.announcement.slug).toBe('author-chosen-slug');
     expect(preview.email!.html).toContain('author-chosen-slug');
+  });
+
+  it('omits the discord prefix in the preview when mentionRoles is false', async () => {
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({
+        networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook', prefix,
+      })})`;
+
+    const res = await previewAnnouncement(sql, { ...input, mentionRoles: false });
+    const entry = res.discord?.[0];
+    expect(entry?.prefix).toBeUndefined();
+    expect(entry?.content).not.toContain('<@&');
+  });
+
+  it('includes the discord prefix in the preview when mentionRoles is true', async () => {
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({
+        networks: ['mainnet'], types: ['upgrade'], webhook_url: 'https://example.com/hook', prefix,
+      })})`;
+
+    const res = await previewAnnouncement(sql, { ...input, mentionRoles: true });
+    const entry = res.discord?.[0];
+    expect(entry?.prefix).toBe(prefix);
   });
 
   it('does not treat the "update"-kind tag line as a discord prefix', async () => {
