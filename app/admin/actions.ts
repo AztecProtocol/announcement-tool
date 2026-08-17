@@ -9,12 +9,9 @@ import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
 import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
-import { saveTemplate } from '../../src/core/templates.js';
-import { normalizeNewlines } from '../../src/core/text.js';
-import { normalizeSlug } from '../../src/core/slug.js';
-import { utcInputToIso } from '../../src/core/datetime.js';
-import { parseRoles } from '../../src/core/roles.js';
-import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
+import { saveTemplate, stripSlugForTemplate } from '../../src/core/templates.js';
+import { inputFromForm } from './input-from-form.js';
+import type { Announcement, AnnouncementInput, Template } from '../../src/core/types.js';
 
 const GENERIC_ERROR = 'Something went wrong — check the server logs.';
 
@@ -36,53 +33,6 @@ function safeErrorMessage(err: unknown, context: string): string {
   return GENERIC_ERROR;
 }
 
-function inputFromForm(formData: FormData): AnnouncementInput {
-  const pick = (name: string): string[] => formData.getAll(name).map(String);
-  const str = (name: string): string => String(formData.get(name) ?? '').trim();
-  const multiline = (name: string): string => normalizeNewlines(String(formData.get(name) ?? ''));
-
-  const actionsRequired = [];
-  for (let i = 0; ; i++) {
-    const action = formData.get(`action.${i}`);
-    if (action === null) break;
-    const trimmed = String(action).trim();
-    if (!trimmed) continue;
-    const deadline = String(formData.get(`deadline.${i}`) ?? '').trim();
-    const appliesTo = parseRoles(String(formData.get(`appliesTo.${i}`) ?? ''));
-    actionsRequired.push({
-      action: trimmed,
-      ...(utcInputToIso(deadline) ? { deadline: utcInputToIso(deadline)! } : {}),
-      applies_to: appliesTo,
-    });
-  }
-
-  const links = [];
-  for (let i = 0; ; i++) {
-    const label = formData.get(`linkLabel.${i}`);
-    if (label === null) break;
-    const trimmedLabel = String(label).trim();
-    const url = String(formData.get(`linkUrl.${i}`) ?? '').trim();
-    if (!trimmedLabel || !url) continue;
-    links.push({ label: trimmedLabel, url });
-  }
-
-  const expiresAt = str('expiresAt');
-  const submittedSlug = str('slug');
-
-  return {
-    type: str('type') as AnnouncementType,
-    networks: pick('networks') as Network[],
-    audiences: pick('audiences') as Audience[],
-    severity: str('severity') as Severity,
-    title: str('title'),
-    bodyMd: multiline('bodyMd'),
-    actionsRequired,
-    links,
-    ...(utcInputToIso(expiresAt) ? { expiresAt: utcInputToIso(expiresAt)! } : {}),
-    ...(submittedSlug ? { slug: normalizeSlug(submittedSlug) } : {}),
-  };
-}
-
 export async function createDraftAction(formData: FormData): Promise<{ id?: string; error?: string }> {
   const db = getDb();
   const identity = resolveIdentity(await headers());
@@ -93,8 +43,8 @@ export async function createDraftAction(formData: FormData): Promise<{ id?: stri
   let input: AnnouncementInput;
   try {
     input = inputFromForm(formData);
-  } catch {
-    return { error: 'could not read form data' };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'inputFromForm') };
   }
 
   let draft;
@@ -120,12 +70,14 @@ export async function saveTemplateAction(formData: FormData): Promise<{ template
   let input: AnnouncementInput;
   try {
     input = inputFromForm(formData);
-  } catch {
-    return { error: 'could not read form data' };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'inputFromForm') };
   }
 
   try {
-    const template = await saveTemplate(db, { name, input, createdBy: identity.email });
+    // Templates are reusable; the current draft's slug is announcement-specific
+    // and must not be persisted into the template — see stripSlugForTemplate.
+    const template = await saveTemplate(db, { name, input: stripSlugForTemplate(input), createdBy: identity.email });
     return { template };
   } catch (err) {
     return { error: safeErrorMessage(err, 'saveTemplate') };
@@ -142,8 +94,8 @@ export async function previewAction(formData: FormData): Promise<{ preview?: Pre
   let input: AnnouncementInput;
   try {
     input = inputFromForm(formData);
-  } catch {
-    return { error: 'could not read form data' };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'inputFromForm') };
   }
 
   try {

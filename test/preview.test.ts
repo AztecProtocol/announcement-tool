@@ -176,6 +176,15 @@ describe('previewAnnouncement', () => {
     expect(entry!.content.startsWith(`${prefix}\n`)).toBe(true);
   });
 
+  it('honours a supplied slug in the canonical URL instead of generating one', async () => {
+    const withSlug: AnnouncementInput = { ...input, slug: 'author-chosen-slug' };
+    const preview = await previewAnnouncement(sql, withSlug);
+    expect(preview.webhook).toBeDefined();
+    const parsed = JSON.parse(preview.webhook!);
+    expect(parsed.announcement.slug).toBe('author-chosen-slug');
+    expect(preview.email!.html).toContain('author-chosen-slug');
+  });
+
   it('does not treat the "update"-kind tag line as a discord prefix', async () => {
     await sql`insert into channel_settings (key, channel, config) values
       ('discord:mainnet-updates', 'discord', ${sql.json({

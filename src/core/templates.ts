@@ -48,6 +48,18 @@ export async function deleteTemplate(sql: Sql, id: string): Promise<boolean> {
 }
 
 /**
+ * Strips the slug from an AnnouncementInput before it is stored as a
+ * template. Templates are reusable by definition, so a slug captured from
+ * whichever draft was open when "Save as template" was clicked is stale and
+ * meaningless for the next announcement created from that template — the
+ * same reasoning templateFromAnnouncement below already applies to dates.
+ */
+export function stripSlugForTemplate(input: AnnouncementInput): AnnouncementInput {
+  const { slug: _slug, ...rest } = input;
+  return rest;
+}
+
+/**
  * Builds a fresh AnnouncementInput from a past announcement, for use as a
  * starting point for a new draft. Every date is cleared — `expiresAt` and
  * every action's `deadline` — so a reused announcement can never carry a

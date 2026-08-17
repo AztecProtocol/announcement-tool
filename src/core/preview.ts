@@ -34,7 +34,7 @@ function toPreviewAnnouncement(input: AnnouncementInput): Announcement {
     ...input,
     id: 'ann_preview',
     revision: 1,
-    slug: makeSlug(now, input.type, input.title || 'untitled'),
+    slug: input.slug || makeSlug(now, input.type, input.title || 'untitled'),
     status: 'published',
     createdBy: 'preview',
     publishedAt: now.toISOString(),

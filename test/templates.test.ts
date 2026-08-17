@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { saveTemplate, listTemplates, getTemplate, deleteTemplate, templateFromAnnouncement } from '../src/core/templates.js';
+import { saveTemplate, listTemplates, getTemplate, deleteTemplate, templateFromAnnouncement, stripSlugForTemplate } from '../src/core/templates.js';
 import { createDraft } from '../src/core/announcements.js';
 import type { AnnouncementInput, Announcement } from '../src/core/types.js';
 
@@ -18,7 +18,38 @@ const input: AnnouncementInput = {
   expiresAt: '2026-09-15T00:00:00Z',
 };
 
+describe('stripSlugForTemplate: the safety property', () => {
+  it('drops a slug carried on the input', () => {
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug' };
+    const out = stripSlugForTemplate(withSlug);
+    expect(out.slug).toBeUndefined();
+  });
+
+  it('keeps every other field untouched', () => {
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug' };
+    const out = stripSlugForTemplate(withSlug);
+    expect(out.title).toBe(input.title);
+    expect(out.bodyMd).toBe(input.bodyMd);
+    expect(out.actionsRequired).toEqual(input.actionsRequired);
+    expect(out.links).toEqual(input.links);
+    expect(out.expiresAt).toBe(input.expiresAt);
+  });
+
+  it('is a no-op when the input has no slug', () => {
+    const out = stripSlugForTemplate(input);
+    expect(out.slug).toBeUndefined();
+  });
+});
+
 describe('templates: save/list/get roundtrip', () => {
+  it('a saved template stores no slug even when the compose form input carried one', async () => {
+    const withSlug: AnnouncementInput = { ...input, slug: 'a-specific-announcements-slug' };
+    const t = await saveTemplate(sql, { name: 'No slug leak', input: stripSlugForTemplate(withSlug), createdBy: 'yev@aztec.foundation' });
+    expect(t.input.slug).toBeUndefined();
+    const got = await getTemplate(sql, t.id);
+    expect(got!.input.slug).toBeUndefined();
+  });
+
   it('saves, lists, and gets a template', async () => {
     const t = await saveTemplate(sql, { name: 'Upgrade boilerplate', input, createdBy: 'yev@aztec.foundation' });
     expect(t.name).toBe('Upgrade boilerplate');
