@@ -11,6 +11,7 @@ import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../.
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate } from '../../src/core/templates.js';
 import { normalizeNewlines } from '../../src/core/text.js';
+import { normalizeSlug } from '../../src/core/slug.js';
 import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
 
 const GENERIC_ERROR = 'Something went wrong — check the server logs.';
@@ -67,6 +68,7 @@ function inputFromForm(formData: FormData): AnnouncementInput {
   }
 
   const expiresAt = str('expiresAt');
+  const submittedSlug = str('slug');
 
   return {
     type: str('type') as AnnouncementType,
@@ -78,6 +80,7 @@ function inputFromForm(formData: FormData): AnnouncementInput {
     actionsRequired,
     links,
     ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
+    ...(submittedSlug ? { slug: normalizeSlug(submittedSlug) } : {}),
   };
 }
 

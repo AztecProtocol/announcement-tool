@@ -16,9 +16,9 @@ describe('ids', () => {
     expect(newSubscriptionId()).toMatch(/^sub_[0-9A-Z]{26}$/);
     expect(newSecret()).toMatch(/^whsec_[0-9a-f]{48}$/);
   });
-  it('makes url-safe slugs: yyyy-mm-type-first-words', () => {
+  it('makes url-safe slugs: yyyy-mm-type-first-words, no redundant type prefix', () => {
     const s = makeSlug(new Date('2026-08-06T10:00:00Z'), 'upgrade', 'Upgrade to v5.1.0 required by 2026-08-20 14:00 UTC');
-    expect(s).toBe('2026-08-upgrade-upgrade-to-v5-1-0-required-by');
+    expect(s).toBe('2026-08-upgrade-to-v5-1-0-required');
   });
 });
 

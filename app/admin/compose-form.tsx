@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useActionState } from 'react';
 // Deep import, not `next/navigation` — see tsconfig.json's `paths` comment.
 // The `paths` mapping there fixes `tsc`/NodeNext resolution for the public
@@ -14,6 +14,8 @@ import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementInput, AnnouncementType, Audience, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
 import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pane.js';
+import { normalizeSlug, slugError } from '../../src/core/slug.js';
+import { makeSlug } from '../../src/core/ids.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
@@ -73,6 +75,13 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [type, setType] = useState<AnnouncementType>(prefill?.type ?? 'upgrade');
+  const [title, setTitle] = useState(prefill?.title ?? '');
+  // A prefilled draft (from a template or a past announcement) must never
+  // inherit the source's slug — slugs are unique, so starting blank and
+  // letting this effect derive a fresh one from the title is correct even
+  // when prefill.slug is present on the source AnnouncementInput.
+  const [slug, setSlug] = useState('');
+  const [slugTouched, setSlugTouched] = useState(false);
   const [actionRows, setActionRows] = useState<ActionRow[]>(
     (prefill?.actionsRequired ?? []).map((ar, i) => ({
       key: i,
@@ -95,6 +104,13 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   const [templateName, setTemplateName] = useState('');
   const [saveTemplateResult, setSaveTemplateResult] = useState<{ ok?: true; error?: string } | undefined>(undefined);
   const [saveTemplatePending, setSaveTemplatePending] = useState(false);
+
+  // Track the title until the author edits the slug themselves; from then on the
+  // typed value stands, because a slug they chose should not silently change.
+  useEffect(() => {
+    if (slugTouched) return;
+    setSlug(title.trim() ? makeSlug(new Date(), type, title) : '');
+  }, [title, type, slugTouched]);
 
   function goto(from: string) {
     router.push(from ? `/admin?from=${encodeURIComponent(from)}` : '/admin');
@@ -188,7 +204,31 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
 
         <form action={formAction} ref={formRef}>
           <label htmlFor="title">Title</label>
-          <input id="title" type="text" name="title" placeholder="v5.1.0 release" defaultValue={prefill?.title ?? ''} required />
+          <input
+            id="title"
+            type="text"
+            name="title"
+            placeholder="v5.1.0 release"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            required
+          />
+
+          <div className="field-row">
+            <label htmlFor="slug">Public URL</label>
+            <input
+              id="slug"
+              name="slug"
+              value={slug}
+              onChange={e => { setSlugTouched(true); setSlug(e.target.value); }}
+              onBlur={e => setSlug(normalizeSlug(e.target.value))}
+              aria-describedby="slug-hint"
+            />
+            <p id="slug-hint" className="hint">
+              <code>/a/{slug || '…'}</code> — permanent once published.
+              {slugTouched && slugError(slug) ? ` ${slugError(slug)}` : ''}
+            </p>
+          </div>
 
           <fieldset>
             <legend>Type</legend>

@@ -30,6 +30,7 @@ export interface AnnouncementInput {
   links: Link[];
   expiresAt?: string;
   supersedes?: string;
+  slug?: string;
 }
 
 export interface Announcement extends AnnouncementInput {

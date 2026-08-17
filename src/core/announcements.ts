@@ -51,7 +51,7 @@ async function insertRevision(
 export async function createDraft(sql: Sql, input: AnnouncementInput, actor: string): Promise<Announcement> {
   validateAnnouncement(input);
   const id = newAnnouncementId();
-  const base = makeSlug(new Date(), input.type, input.title);
+  const base = input.slug || makeSlug(new Date(), input.type, input.title);
   return sql.begin(async tx => {
     let slug: string | undefined;
     for (let i = 1; i <= 20; i++) {
