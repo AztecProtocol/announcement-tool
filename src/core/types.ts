@@ -42,6 +42,8 @@ export interface Announcement extends AnnouncementInput {
   publishRequestedBy?: string;
   publishConfirmedBy?: string;
   publishedAt?: string;
+  publishRejectedBy?: string;
+  publishRejectedReason?: string;
 }
 
 export interface DeliveryTarget {

@@ -26,6 +26,8 @@ export function rowToAnnouncement(r: Record<string, unknown>): Announcement {
     publishRequestedBy: (r.publish_requested_by as string | null) ?? undefined,
     publishConfirmedBy: (r.publish_confirmed_by as string | null) ?? undefined,
     publishedAt: r.published_at ? new Date(r.published_at as string).toISOString() : undefined,
+    publishRejectedBy: (r.publish_rejected_by as string | null) ?? undefined,
+    publishRejectedReason: (r.publish_rejected_reason as string | null) ?? undefined,
   };
 }
 
@@ -117,5 +119,60 @@ export async function confirmPublish(sql: Sql, id: string, actor: string): Promi
     if (a.status !== 'publish_requested') throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
     if (a.severity === 'critical' && a.publishRequestedBy === actor) throw new FourEyesError();
     return performPublish(tx, a, actor);
+  });
+}
+
+/**
+ * The requester takes back their own request. Returns to draft and clears the
+ * requester, so publishing again needs a fresh request and still needs a second
+ * confirmer — withdrawal must never become a way around four-eyes.
+ */
+export async function withdrawPublish(sql: Sql, id: string, actor: string): Promise<Announcement> {
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'publish_requested') {
+      throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
+    }
+    if (a.publishRequestedBy !== actor) {
+      throw new Error('only the publisher who requested this can withdraw it');
+    }
+    const [row] = await tx`update announcements
+      set status = 'draft', publish_requested_by = null
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'publish_withdrawn', ${id}, ${tx.json({ revision: a.revision })})`;
+    return rowToAnnouncement(row);
+  });
+}
+
+/**
+ * A second publisher declines the request, with a reason the author will see.
+ * Returns to draft. The reason is the point: four-eyes is a review, and a
+ * reviewer who cannot say what is wrong can only veto silently.
+ */
+export async function rejectPublish(
+  sql: Sql, id: string, actor: string, reason: string,
+): Promise<Announcement> {
+  const trimmed = reason.trim();
+  if (!trimmed) throw new Error('a reason is required to reject a publication');
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'publish_requested') {
+      throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
+    }
+    if (a.publishRequestedBy === actor) {
+      throw new Error('you requested this publication — withdraw it instead of rejecting it');
+    }
+    const [row] = await tx`update announcements
+      set status = 'draft', publish_requested_by = null,
+          publish_rejected_by = ${actor}, publish_rejected_reason = ${trimmed}
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'publish_rejected', ${id}, ${tx.json({ revision: a.revision, reason: trimmed })})`;
+    return rowToAnnouncement(row);
   });
 }
