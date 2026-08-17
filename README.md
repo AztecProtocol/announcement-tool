@@ -274,6 +274,20 @@ Markdown headings render differently per channel, because the platforms differ:
 | Signal | `WHAT CHANGES` (plain text only) |
 | Email | a real heading in the HTML part, `WHAT CHANGES` in the text part |
 
+### Where mentions belong
+
+The announcement body is shared by every channel. Only Discord turns `@everyone`,
+`@here` or a role mention into a notification — on Telegram, Signal, email and
+webhook the same text arrives as literal characters a reader cannot act on.
+
+Configure mentions as part of the Discord channel prefix instead, with
+`npm run setup:channel`. The prefix is stored per Discord channel and is read
+only by the Discord adapter, so it reaches no other channel. The compose form
+warns if it finds a mention in the body.
+
+Read the raw Discord preview before publishing to confirm the prefix is the one
+you intend.
+
 3. **Publish:**
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
    - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any *other* publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError` and the review page shows it as an inline error, not a crash.
