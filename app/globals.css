@@ -577,3 +577,17 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ── Withdraw and reject ──────────────────────────────────────────── */
+.notice-reject { border-color: var(--critical-line); background: var(--critical-bg); }
+.notice-reject strong { color: var(--critical); }
+
+.reject-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-width: 480px; }
+.reject-form textarea { min-height: 72px; }
+
+button.destructive {
+  background: transparent;
+  color: var(--critical);
+  border: 1px solid var(--critical-line);
+}
+button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
