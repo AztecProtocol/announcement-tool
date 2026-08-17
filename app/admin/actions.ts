@@ -10,6 +10,7 @@ import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
 import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate } from '../../src/core/templates.js';
+import { normalizeNewlines } from '../../src/core/text.js';
 import type { Announcement, AnnouncementInput, AnnouncementType, Audience, Network, Severity, Template } from '../../src/core/types.js';
 
 const GENERIC_ERROR = 'Something went wrong — check the server logs.';
@@ -35,6 +36,7 @@ function safeErrorMessage(err: unknown, context: string): string {
 function inputFromForm(formData: FormData): AnnouncementInput {
   const pick = (name: string): string[] => formData.getAll(name).map(String);
   const str = (name: string): string => String(formData.get(name) ?? '').trim();
+  const multiline = (name: string): string => normalizeNewlines(String(formData.get(name) ?? ''));
 
   const actionsRequired = [];
   for (let i = 0; ; i++) {
@@ -72,7 +74,7 @@ function inputFromForm(formData: FormData): AnnouncementInput {
     audiences: pick('audiences') as Audience[],
     severity: str('severity') as Severity,
     title: str('title'),
-    bodyMd: str('bodyMd'),
+    bodyMd: multiline('bodyMd'),
     actionsRequired,
     links,
     ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
