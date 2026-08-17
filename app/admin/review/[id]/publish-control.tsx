@@ -75,7 +75,7 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             <strong>Publication was rejected</strong> by {announcement.publishRejectedBy}:
             {' '}{announcement.publishRejectedReason}
           </p>
-          <p className="muted">Edit the announcement, then request publication again.</p>
+          <p className="muted">Start a new draft with the corrected text. This draft has no edit path.</p>
         </div>
       )}
 
