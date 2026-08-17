@@ -93,11 +93,12 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   );
   const nextActionKey = useRef(actionRows.length);
   const nextLinkKey = useRef(linkRows.length);
-  // Every offered role: built-ins first (see the placement note below), then
-  // the configured roles gathered across all Discord destinations.
-  const allRoles: DiscordRole[] = [...BUILTIN_ROLES, ...discordRoles];
+  // Built-ins (@everyone / @here) default OFF even for critical: notifying an
+  // entire server must be an affirmative click, since selecting a built-in is
+  // the one selection this tool cannot narrow with allowed_mentions. Named
+  // roles default ON for critical, same as before.
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>(
-    prefill?.mentionRoleIds ?? (severity === 'critical' ? allRoles.map(r => r.id) : []),
+    prefill?.mentionRoleIds ?? (severity === 'critical' ? discordRoles.map(r => r.id) : []),
   );
   const [rolesTouched, setRolesTouched] = useState(false);
   const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
@@ -115,13 +116,13 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
     setSlug(title.trim() ? makeSlug(new Date(), type, title) : '');
   }, [title, type, slugTouched]);
 
-  // Mirrors slugTouched: the role selection tracks severity — all roles for
-  // critical, none otherwise — until the author overrides it themselves,
-  // after which their choice stands.
+  // Mirrors slugTouched: the role selection tracks severity — named roles for
+  // critical, none otherwise, built-ins never pre-selected — until the author
+  // overrides it themselves, after which their choice stands.
   useEffect(() => {
-    if (!rolesTouched) setSelectedRoleIds(severity === 'critical' ? allRoles.map(r => r.id) : []);
-    // allRoles is derived fresh from props each render; only severity and the
-    // touched flag should re-run this, matching the slugTouched effect above.
+    if (!rolesTouched) setSelectedRoleIds(severity === 'critical' ? discordRoles.map(r => r.id) : []);
+    // discordRoles is derived fresh from props each render; only severity and
+    // the touched flag should re-run this, matching the slugTouched effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [severity, rolesTouched]);
 
@@ -328,7 +329,9 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
             )}
             <p className="hint">
               Selected roles are notified on Discord. Other channels are unaffected.
-              Check the Discord preview to confirm. On by default for critical announcements.
+              Check the Discord preview to confirm. Named roles are on by default for
+              critical announcements; @everyone and @here are never on by default —
+              select them yourself when a critical announcement needs the whole server.
             </p>
           </fieldset>
 
