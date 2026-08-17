@@ -14,9 +14,28 @@ export function utcInputToIso(value: string): string | undefined {
   const m = INPUT_RE.exec(value.trim());
   if (!m) return undefined;
   const [, y, mo, d, h, mi, s] = m;
-  const ms = Date.UTC(+y, +mo - 1, +d, +h, +mi, s ? +s : 0);
+  const year = +y, month = +mo, day = +d, hour = +h, minute = +mi, second = s ? +s : 0;
+  const ms = Date.UTC(year, month - 1, day, hour, minute, second);
   if (Number.isNaN(ms)) return undefined;
-  return new Date(ms).toISOString();
+  // Date.UTC normalises out-of-range components instead of rejecting them
+  // (e.g. day 32 becomes the 1st of the next month, month 13 becomes next
+  // January, 31 February becomes 3 March) — a plausible-looking but wrong
+  // instant stored without complaint. Comparing the constructed date's UTC
+  // components back against what was parsed catches every such rollover
+  // (day, month, hour) with one check, and correctly handles month-length
+  // and leap years since the rollover is exactly what changes the readback.
+  const check = new Date(ms);
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day ||
+    check.getUTCHours() !== hour ||
+    check.getUTCMinutes() !== minute ||
+    check.getUTCSeconds() !== second
+  ) {
+    return undefined;
+  }
+  return check.toISOString();
 }
 
 /** ISO instant -> a datetime-local value showing the UTC wall-clock time. */
