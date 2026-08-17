@@ -1,21 +1,3 @@
-// Deep import, not `next/link`. tsc/NodeNext can't resolve the public
-// specifier (next@16.2.12 has no "exports" map — see tsconfig.json's `paths`
-// comment for the same failure mode on `next/navigation`/`next/headers`).
-// Unlike those two, `Link` is a genuine runtime component export rather than
-// something erased or resolved elsewhere, so a `paths` mapping to the .d.ts
-// would risk the same `(void 0) is not a function` Turbopack failure that
-// mapping caused for `useRouter`. The deep import sidesteps both problems.
-import type { ComponentType, AnchorHTMLAttributes } from 'react';
-import * as NextLink from 'next/dist/client/link.js';
-// `esModuleInterop`'s default-import synthesis for this CJS `.d.ts` resolves
-// inconsistently once a second module imports this file's default export —
-// TS then re-widens `NextLink.default` to the whole module namespace instead
-// of the `Link` component it exports at runtime (verified: `require()` at
-// runtime always returns the component itself, see link.js's CJS interop
-// tail). The `unknown` hop is TS's own suggested escape for this exact
-// "types don't sufficiently overlap" situation; the runtime shape is correct.
-const Link = NextLink.default as unknown as ComponentType<AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }>;
-
 export interface PendingItem {
   id: string;
   title: string;
@@ -36,18 +18,27 @@ export default function PendingQueue({ items, viewer }: { items: PendingItem[]; 
       <ul>
         {items.map(item => {
           const isRequester = item.requestedBy === viewer;
+          // Only `severity === 'critical'` actually blocks self-confirmation
+          // server-side (src/core/announcements.ts's confirmPublish). Today
+          // every row here is critical anyway — listAwaitingConfirmation can
+          // only return critical announcements, since a non-critical one
+          // publishes immediately and never reaches publish_requested — but
+          // that's a fact about the current caller, not this component. Gate
+          // the message on the same condition the server enforces so the
+          // component stays correct if it's ever fed a broader status list.
+          const blockedBySelfConfirm = isRequester && item.severity === 'critical';
           return (
             <li key={item.id}>
               <div className="pending-main">
                 <span className="pending-title">{item.title}</span>
                 <span className="pending-meta">
                   {item.severity} · requested by {item.requestedBy ?? 'unknown'}
-                  {isRequester ? ' — you cannot confirm your own request' : ''}
+                  {blockedBySelfConfirm ? ' — you cannot confirm your own request' : ''}
                 </span>
               </div>
-              <Link className="pending-action" href={`/admin/review/${item.id}`}>
+              <a className="pending-action" href={`/admin/review/${item.id}`}>
                 {isRequester ? 'View' : 'Review'}
-              </Link>
+              </a>
             </li>
           );
         })}
