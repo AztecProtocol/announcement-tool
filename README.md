@@ -311,18 +311,19 @@ literal text rather than a role id.
 
 The compose form's role checkboxes decide, per announcement, which roles a
 Discord post mentions. Critical announcements select every configured role
-(including the built-ins) by default; other severities select none. The
-author can check or uncheck any of them before requesting or publishing.
-Selecting none sends the post with no mention line at all. Every other
-channel is unaffected regardless of what is selected here.
+(including the built-ins) by default; other severities select none.
 
-**Caution, before you select `@everyone` or `@here`:** Discord's everyone
+**Caution before selecting `@everyone` or `@here`:** Discord's everyone
 permission has no id-list form, so selecting either one also re-enables any
 literal `@everyone` or `@here` that ends up in the message body, even though
 the body warning above told you not to put one there. Selecting only named
 roles does not have this effect — a stray literal mention in the body still
 cannot ping. Read the raw Discord preview before publishing and confirm the
 mentions shown are the ones you intend.
+
+With that in mind, the author can check or uncheck any of the roles before
+requesting or publishing. Selecting none sends the post with no mention line
+at all. Every other channel is unaffected regardless of what is selected here.
 
 A destination configured before named roles existed — one with only a
 `prefix` and no `roles` — keeps posting its prefix unchanged; it has no
