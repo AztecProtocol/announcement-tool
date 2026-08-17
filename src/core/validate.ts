@@ -37,7 +37,7 @@ export function validateAnnouncement(input: AnnouncementInput): { warnings: stri
     warnings.push(
       `The body contains ${mentions.join(', ')}. Every channel receives the same body, `
       + `but only Discord turns a mention into a notification — elsewhere it appears as `
-      + `plain text. Put mentions in the Discord channel prefix instead.`,
+      + `plain text. Select the roles to notify on the compose form instead.`,
     );
   }
   return { warnings };
