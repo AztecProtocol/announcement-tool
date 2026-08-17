@@ -213,7 +213,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
         </form>
         {prefill && (
           <div className="notice">
-            <p>Prefilled from a saved template or past announcement. Dates (deadlines, expiry) are cleared — set new ones below.</p>
+            <p>Prefilled from a saved template or past announcement. Deadlines are cleared — set new ones below.</p>
           </div>
         )}
 
