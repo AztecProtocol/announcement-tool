@@ -55,7 +55,7 @@ export async function saveTemplateAction(formData: FormData): Promise<{ template
   }
 
   try {
-    // Templates are reusable; slug and mentionRoles are announcement-specific
+    // Templates are reusable; slug and mentionRoleIds are announcement-specific
     // and must not be persisted into the template — see stripPerAnnouncementFields.
     const template = await saveTemplate(db, { name, input: stripPerAnnouncementFields(input), createdBy: identity.email });
     return { template };
