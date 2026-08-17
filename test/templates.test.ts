@@ -15,7 +15,6 @@ const input: AnnouncementInput = {
   title: 'Upgrade to v5.1.0', bodyMd: 'Do it.',
   actionsRequired: [{ action: 'Update your node', deadline: '2026-09-01T00:00:00Z', applies_to: ['sequencers'] }],
   links: [{ label: 'GitHub release', url: 'https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0' }],
-  expiresAt: '2026-09-15T00:00:00Z',
 };
 
 describe('stripSlugForTemplate: the safety property', () => {
@@ -32,7 +31,6 @@ describe('stripSlugForTemplate: the safety property', () => {
     expect(out.bodyMd).toBe(input.bodyMd);
     expect(out.actionsRequired).toEqual(input.actionsRequired);
     expect(out.links).toEqual(input.links);
-    expect(out.expiresAt).toBe(input.expiresAt);
   });
 
   it('is a no-op when the input has no slug', () => {
@@ -96,13 +94,12 @@ describe('templates: save/list/get roundtrip', () => {
 });
 
 describe('templateFromAnnouncement: the safety property', () => {
-  it('clears expiresAt and every action deadline while keeping everything else', async () => {
+  it('clears every action deadline while keeping everything else', async () => {
     const created = await createDraft(sql, input, 'yev@aztec.foundation');
     const a = created as Announcement;
 
     const out = templateFromAnnouncement(a);
 
-    expect(out.expiresAt).toBeUndefined();
     expect(out.actionsRequired.length).toBeGreaterThan(0);
     for (const ar of out.actionsRequired) {
       expect(ar.deadline).toBeUndefined();
@@ -131,11 +128,9 @@ describe('templateFromAnnouncement: the safety property', () => {
         { action: 'A3', applies_to: [] },
       ],
       links: [],
-      expiresAt: '2026-03-01T00:00:00Z',
     };
     const out = templateFromAnnouncement(a);
     expect(out.actionsRequired.every(ar => ar.deadline === undefined)).toBe(true);
-    expect(out.expiresAt).toBeUndefined();
     expect(out.actionsRequired.map(ar => ar.action)).toEqual(['A1', 'A2', 'A3']);
   });
 
@@ -146,10 +141,8 @@ describe('templateFromAnnouncement: the safety property', () => {
       title: 'T', bodyMd: 'B',
       actionsRequired: [{ action: 'A1', deadline: '2026-01-01T00:00:00Z', applies_to: ['sequencers'] }],
       links: [],
-      expiresAt: '2026-03-01T00:00:00Z',
     };
     templateFromAnnouncement(a);
-    expect(a.expiresAt).toBe('2026-03-01T00:00:00Z');
     expect(a.actionsRequired[0].deadline).toBe('2026-01-01T00:00:00Z');
   });
 });

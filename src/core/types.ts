@@ -28,7 +28,6 @@ export interface AnnouncementInput {
   bodyMd: string;
   actionsRequired: ActionRequired[];
   links: Link[];
-  expiresAt?: string;
   supersedes?: string;
   slug?: string;
 }

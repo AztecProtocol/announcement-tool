@@ -38,7 +38,6 @@ export function inputFromForm(formData: FormData): AnnouncementInput {
     links.push({ label: trimmedLabel, url });
   }
 
-  const expiresAt = str('expiresAt');
   const submittedSlug = str('slug');
   // Reject rather than coerce: normalizeSlug can turn a punctuation-only or
   // otherwise-invalid slug into a different, unrelated string (e.g. '!!!' ->
@@ -64,7 +63,6 @@ export function inputFromForm(formData: FormData): AnnouncementInput {
     bodyMd: multiline('bodyMd'),
     actionsRequired,
     links,
-    ...(utcInputToIso(expiresAt) ? { expiresAt: utcInputToIso(expiresAt)! } : {}),
     ...(submittedSlug ? { slug: normalizedSlug } : {}),
   };
 }

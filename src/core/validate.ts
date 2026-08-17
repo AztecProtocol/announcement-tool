@@ -18,7 +18,6 @@ const schema = z.object({
     label: z.string().min(1),
     url: z.string().url().refine(u => /^https?:$/.test(new URL(u).protocol), 'link must be http or https'),
   })),
-  expiresAt: z.string().datetime({ offset: true }).optional(),
   supersedes: z.string().optional(),
 });
 

@@ -21,7 +21,6 @@ export function rowToAnnouncement(r: Record<string, unknown>): Announcement {
     links: r.links as Announcement['links'],
     status: r.status as Announcement['status'],
     supersedes: (r.supersedes as string | null) ?? undefined,
-    expiresAt: r.expires_at ? new Date(r.expires_at as string).toISOString() : undefined,
     createdBy: r.created_by as string,
     publishRequestedBy: (r.publish_requested_by as string | null) ?? undefined,
     publishConfirmedBy: (r.publish_confirmed_by as string | null) ?? undefined,
@@ -39,11 +38,11 @@ async function insertRevision(
 ): Promise<Announcement> {
   const [row] = await tx`insert into announcements
     (id, revision, slug, type, networks, audiences, severity, title, body_md,
-     actions_required, links, status, supersedes, expires_at, created_by)
+     actions_required, links, status, supersedes, created_by)
     values (${id}, ${revision}, ${slug}, ${input.type}, ${input.networks}, ${input.audiences},
             ${input.severity}, ${input.title}, ${input.bodyMd},
             ${tx.json(asJson(input.actionsRequired))}, ${tx.json(asJson(input.links))},
-            ${status}, ${input.supersedes ?? null}, ${input.expiresAt ?? null}, ${actor})
+            ${status}, ${input.supersedes ?? null}, ${actor})
     returning *`;
   await tx`insert into audit_log (actor, action, target, detail)
     values (${actor}, ${auditAction}, ${id}, ${tx.json({ revision })})`;

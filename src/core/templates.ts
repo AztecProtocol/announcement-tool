@@ -61,10 +61,10 @@ export function stripSlugForTemplate(input: AnnouncementInput): AnnouncementInpu
 
 /**
  * Builds a fresh AnnouncementInput from a past announcement, for use as a
- * starting point for a new draft. Every date is cleared — `expiresAt` and
- * every action's `deadline` — so a reused announcement can never carry a
- * stale, already-passed deadline into a new draft. Everything else
- * (text, applies_to, links, type/network/severity/audiences) is preserved.
+ * starting point for a new draft. Every action's `deadline` is cleared, so
+ * a reused announcement can never carry a stale, already-passed deadline
+ * into a new draft. Everything else (text, applies_to, links,
+ * type/network/severity/audiences) is preserved.
  */
 export function templateFromAnnouncement(a: Announcement): AnnouncementInput {
   return {
@@ -80,6 +80,5 @@ export function templateFromAnnouncement(a: Announcement): AnnouncementInput {
       // deadline intentionally omitted — see doc comment above.
     })),
     links: a.links.map(l => ({ ...l })),
-    // expiresAt intentionally omitted — see doc comment above.
   };
 }

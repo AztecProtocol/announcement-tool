@@ -368,9 +368,6 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
             </button>
           </fieldset>
 
-          <label htmlFor="expiresAt">Expires (optional, UTC)</label>
-          <input id="expiresAt" type="datetime-local" name="expiresAt" defaultValue={isoToUtcInput(prefill?.expiresAt)} />
-
           <div>
             <button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save draft'}</button>
           </div>
