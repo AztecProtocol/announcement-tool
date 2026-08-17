@@ -175,8 +175,9 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
             name="from"
             defaultValue=""
             onChange={e => goto(e.target.value)}
+            className="select-styled"
           >
-            <option value="">Blank</option>
+            <option value="">Start from blank</option>
             {templates.length > 0 && (
               <optgroup label="Saved templates">
                 {templates.map(t => (
