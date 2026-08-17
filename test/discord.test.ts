@@ -95,6 +95,26 @@ describe('discord adapter', () => {
     expect(JSON.parse(body).content).toContain('<@&');
   });
 
+  it('does not apply the prefix to an announcement authored before the column existed', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const prefix = '@here <:AztecDiscordEmoji_A:1> <@&Mainnet> <@&Genesis>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, username: 'Aztec Announcements' })})`;
+
+    // A row written before migration 010 maps to mentionRoles: undefined — the
+    // property genuinely absent, not present-and-false. That's the code path
+    // `rowToAnnouncement` actually produces for legacy rows via `?? undefined`.
+    const { mentionRoles: _omitted, ...legacy } = { ...ann, mentionRoles: true };
+    await makeDiscordAdapter(sql).deliver(legacy, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    expect(JSON.parse(body).content).not.toContain('<@&');
+  });
+
   it('throws on unknown target so the worker retries', async () => {
     await expect(makeDiscordAdapter(sql).deliver(ann, 'discord:nope', 'publish'))
       .rejects.toThrow(/discord:nope/);

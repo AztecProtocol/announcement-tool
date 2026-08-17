@@ -64,7 +64,10 @@ export function stripSlugForTemplate(input: AnnouncementInput): AnnouncementInpu
  * starting point for a new draft. Every action's `deadline` is cleared, so
  * a reused announcement can never carry a stale, already-passed deadline
  * into a new draft. Everything else (text, applies_to, links,
- * type/network/severity/audiences) is preserved.
+ * type/network/severity/audiences) is preserved. `mentionRoles` is
+ * deliberately NOT carried over — a reused announcement should re-decide
+ * who gets pinged, not inherit the previous author's answer, so the
+ * compose form re-derives it from severity like any other new draft.
  */
 export function templateFromAnnouncement(a: Announcement): AnnouncementInput {
   return {
