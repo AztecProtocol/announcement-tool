@@ -8,13 +8,17 @@
  * authoring warning, not a block: the author may have a reason.
  */
 
-// (?<![\w.@-]) keeps ops@everyone.example.com and similar from matching: it
+// (?<![\w.@\-/]) keeps ops@everyone.example.com and similar from matching: it
 // requires the character before '@' to not be a word char, dot, '@', or
 // hyphen, so the '@' in an email's domain (preceded by a letter) is rejected.
+// The '/' is excluded for the same reason: a URL path segment like
+// example.com/@everyone/status is ordinary announcement content, not a
+// mention, and would otherwise trip the same false-positive class as an
+// email address — do not drop it as a "simplification".
 // \b after the alternation keeps @everyonesomething / @hereafter from
 // matching, since \b requires a non-word character (or end of string) to
 // follow "everyone"/"here".
-const MENTION_RE = /(?<![\w.@-])@(?:everyone|here)\b|<@[&!]?\d+>/g;
+const MENTION_RE = /(?<![\w.@\-/])@(?:everyone|here)\b|<@[&!]?\d+>/g;
 
 export function findMentions(body: string): string[] {
   const seen = new Set<string>();

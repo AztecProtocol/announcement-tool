@@ -43,8 +43,14 @@ describe('findMentions', () => {
     expect(findMentions('run `notify @everyone` in the console')).toEqual(['@everyone']);
   });
 
-  it('matches @everyone appearing inside a URL path segment', () => {
-    expect(findMentions('see https://example.com/@everyone/status')).toEqual(['@everyone']);
+  it('does not match @everyone appearing inside a URL path segment', () => {
+    // Same false-positive class as the email case: an ordinary link in an
+    // announcement body should not trip the warning.
+    expect(findMentions('see https://example.com/@everyone/status')).toEqual([]);
+  });
+
+  it('matches @everyone followed by a comma mid-sentence', () => {
+    expect(findMentions('Please upgrade, @everyone')).toEqual(['@everyone']);
   });
 
   it('does not match a different word that merely starts with @everyone', () => {
