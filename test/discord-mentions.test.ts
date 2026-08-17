@@ -65,6 +65,26 @@ describe('composeMentionLine', () => {
   it('puts built-ins before configured roles', () => {
     expect(composeMentionLine(withRoles, [A.id, 'here'])).toBe(`@here <@&${A.id}>`);
   });
+
+  it('strips a role mention pasted into the prefix', () => {
+    const cfg = { roles: [A], prefix: '<@&999999999999999999> 🇦🇿' };
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}> 🇦🇿`);
+  });
+
+  it('does not permit a role mention pasted into the prefix', () => {
+    const cfg = { roles: [], prefix: '<@&999999999999999999> 🇦🇿' };
+    expect(mentionedRoleIds(cfg as Record<string, unknown>, ['everyone'])).toEqual([]);
+  });
+
+  it('strips user mentions from the prefix too', () => {
+    const cfg = { roles: [A], prefix: '<@123> <@!456> 🇦🇿' };
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}> 🇦🇿`);
+  });
+
+  it('omits a prefix that is only a mention', () => {
+    const cfg = { roles: [A], prefix: '<@&999999999999999999>' };
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}>`);
+  });
 });
 
 describe('mentionedRoleIds', () => {
@@ -78,6 +98,10 @@ describe('mentionedRoleIds', () => {
 
   it('reports nothing when no mention will be sent', () => {
     expect(mentionedRoleIds(withRoles, [])).toEqual([]);
+  });
+
+  it('reports nothing when the selection is undefined', () => {
+    expect(mentionedRoleIds(withRoles, undefined)).toEqual([]);
   });
 });
 

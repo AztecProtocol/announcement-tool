@@ -26,6 +26,26 @@ export const BUILTIN_ROLES: DiscordRole[] = [
 
 const BUILTIN_IDS = new Set(BUILTIN_ROLES.map(r => r.id));
 
+/**
+ * The prefix is the emoji preamble, not a mention field. An operator can paste
+ * a role or user mention into it — Discord's UI autocompletes them in any text
+ * box — and it would otherwise be posted AND permitted despite never being
+ * selected. Mentions come only from the selection, so strip any that appear
+ * here. Covers <@&123> (role), <@123> and <@!123> (user) — all three resolve
+ * as pings in Discord.
+ *
+ * A literal @everyone / @here typed into the prefix is stripped too: they are
+ * selectable entries now, so a literal one in the preamble is the same
+ * bypass in spirit, even though it cannot ping today without the built-in
+ * also being selected (parse: ['everyone'] is only sent then).
+ */
+const stripRoleMentions = (s: string) =>
+  s
+    .replace(/<@[&!]?\d+>/g, '')
+    .replace(/@(?:everyone|here)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 export function parseDiscordRoles(config: Record<string, unknown>): DiscordRole[] {
   const raw = config.roles;
   if (!Array.isArray(raw)) return [];
@@ -44,7 +64,7 @@ export function composeMentionLine(
 ): string | undefined {
   if (!selectedIds || selectedIds.length === 0) return undefined;
 
-  const prefix = (cfg.prefix as string | undefined)?.trim();
+  const prefix = stripRoleMentions((cfg.prefix as string | undefined) ?? '');
 
   // Built-ins first, then configured roles in config order — not selection
   // order — so the line reads the same however the author clicked.
