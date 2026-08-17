@@ -579,7 +579,15 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 }
 
 /* ── Withdraw and reject ──────────────────────────────────────────── */
-.notice-reject { border-color: var(--critical-line); background: var(--critical-bg); }
+/* border-left-color is restated explicitly (not left to win on declaration
+   order against .notice's `border-left: 3px solid var(--link)`) so this rule
+   stays correct even if a .notice-adjacent rule is later inserted between
+   the two in this file. Matches the .actions.sev-recommended pattern above. */
+.notice-reject {
+  border-color: var(--critical-line);
+  border-left-color: var(--critical-line);
+  background: var(--critical-bg);
+}
 .notice-reject strong { color: var(--critical); }
 
 .reject-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-width: 480px; }
