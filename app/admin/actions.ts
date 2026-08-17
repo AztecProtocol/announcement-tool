@@ -7,7 +7,7 @@ import { redirect } from 'next/navigation';
 import { ZodError } from 'zod';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
-import { createDraft, requestPublish, confirmPublish, FourEyesError } from '../../src/core/announcements.js';
+import { createDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, FourEyesError } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate, stripSlugForTemplate } from '../../src/core/templates.js';
 import { inputFromForm } from './input-from-form.js';
@@ -146,5 +146,35 @@ export async function confirmPublishAction(id: string): Promise<PublishResult> {
     return { announcement };
   } catch (err) {
     return { error: safeErrorMessage(err, 'confirmPublish') };
+  }
+}
+
+export async function withdrawPublishAction(id: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await withdrawPublish(db, id, identity.email);
+    return { announcement };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'withdrawPublish') };
+  }
+}
+
+export async function rejectPublishAction(id: string, reason: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await rejectPublish(db, id, identity.email, reason);
+    return { announcement };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'rejectPublish') };
   }
 }
