@@ -38,13 +38,24 @@ const BUILTIN_IDS = new Set(BUILTIN_ROLES.map(r => r.id));
  * selectable entries now, so a literal one in the preamble is the same
  * bypass in spirit, even though it cannot ping today without the built-in
  * also being selected (parse: ['everyone'] is only sent then).
+ *
+ * The strip runs to a fixed point rather than a single pass. A single pass
+ * is bypassable by splicing: `<@&<@&123>456>` has no match for the mention
+ * regex as a whole, but stripping the inner `<@&123>` first collapses the
+ * remainder to `<@&456>` — a live mention that was never typed as such and
+ * never selected. Looping until a pass changes nothing closes this, because
+ * each pass either removes something (making the string strictly shorter)
+ * or leaves it unchanged (which ends the loop). Do not "simplify" this back
+ * to one pass — that reopens the splice bypass.
  */
-const stripRoleMentions = (s: string) =>
-  s
-    .replace(/<@[&!]?\d+>/g, '')
-    .replace(/@(?:everyone|here)\b/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+const stripRoleMentions = (s: string) => {
+  let prev: string;
+  do {
+    prev = s;
+    s = s.replace(/<@[&!]?\d+>/g, '').replace(/@(?:everyone|here)\b/g, '');
+  } while (s !== prev);
+  return s.replace(/\s+/g, ' ').trim();
+};
 
 export function parseDiscordRoles(config: Record<string, unknown>): DiscordRole[] {
   const raw = config.roles;

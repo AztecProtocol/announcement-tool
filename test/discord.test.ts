@@ -184,7 +184,7 @@ describe('discord adapter', () => {
     await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['everyone'] }, 'discord:mainnet-updates', 'publish');
     server.close();
 
-    expect(JSON.parse(body).allowed_mentions.parse).toEqual(['everyone']);
+    expect(JSON.parse(body).allowed_mentions).toEqual({ parse: ['everyone'], roles: [] });
   });
 
   it('combines a built-in with a named role', async () => {
@@ -201,6 +201,28 @@ describe('discord adapter', () => {
     server.close();
 
     expect(JSON.parse(body).allowed_mentions).toEqual({ parse: ['everyone'], roles: ['111'] });
+  });
+
+  it('does not let a spliced prefix reconstruct into a posted, permitted mention', async () => {
+    let body = '';
+    const { server, url } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(204); res.end(); });
+    });
+    const roles = [{ name: 'role-a', id: '111' }];
+    // This prefix has no whole match for the mention regex, but stripping the
+    // inner <@&123> first would collapse the remainder into a live <@&456>
+    // mention that was never configured and never selected.
+    const prefix = '<@&<@&123>456>';
+    await sql`insert into channel_settings (key, channel, config) values
+      ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, roles })})`;
+
+    await makeDiscordAdapter(sql).deliver({ ...ann, mentionRoleIds: ['111'] }, 'discord:mainnet-updates', 'publish');
+    server.close();
+
+    const payload = JSON.parse(body);
+    expect(payload.content).not.toContain('<@&456>');
+    expect(payload.allowed_mentions.roles).not.toContain('456');
   });
 
   it('throws on unknown target so the worker retries', async () => {

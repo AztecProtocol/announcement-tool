@@ -85,6 +85,23 @@ describe('composeMentionLine', () => {
     const cfg = { roles: [A], prefix: '<@&999999999999999999>' };
     expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}>`);
   });
+
+  it('strips a spliced mention that would reconstruct after one pass', () => {
+    const cfg = { roles: [A], prefix: '<@&<@&123>456> 🇦🇿' };
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}> 🇦🇿`);
+  });
+
+  it('does not permit a spliced mention from the prefix', () => {
+    const cfg = { roles: [A], prefix: '<@&<@&123>456>' };
+    expect(mentionedRoleIds(cfg as Record<string, unknown>, [A.id])).toEqual([A.id]);
+  });
+
+  it('strips other splice shapes', () => {
+    for (const p of ['<@&1<@&2>11>', '<@<@&1>&456>', '<@&12<@123>34>']) {
+      const cfg = { roles: [A], prefix: p };
+      expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}>`);
+    }
+  });
 });
 
 describe('mentionedRoleIds', () => {
