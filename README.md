@@ -80,8 +80,7 @@ Webhook subscribers receive a POST with this JSON body:
     "links": [
       { "label": "GitHub release", "url": "https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0" }
     ],
-    "published_at": "2026-08-06T10:00:00Z",
-    "expires_at": "2026-08-20T14:00:00Z"
+    "published_at": "2026-08-06T10:00:00Z"
   }
 }
 ```
@@ -252,7 +251,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 
 ### Compose, preview, publish
 
-1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, repeatable "actions required" and "links" fields, and an optional expiry date. Submitting creates a draft (`createDraft`) and redirects to its review page.
+1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, and repeatable "actions required" and "links" fields. Submitting creates a draft (`createDraft`) and redirects to its review page.
 2. **Review** (`/admin/review/<id>`) — shows a live per-channel preview (webhook JSON, Discord/Telegram/Signal message text including any configured Discord role-mention prefix, email rendering) and the publish control.
 
 ### Preview modes
@@ -288,11 +287,18 @@ The prefix is stored per Discord channel and is read only by the Discord adapter
 so it reaches no other channel. The compose form warns if it finds a mention in
 the body.
 
+The compose form has a "Notify the configured Discord roles" checkbox that decides,
+per announcement, whether the prefix is sent. It is checked by default for `critical`
+announcements and unchecked otherwise, and the author can change it either way before
+requesting or publishing. Before relying on this to suppress a ping, confirm the
+setting in the raw Discord preview — when the checkbox is off, the Discord post
+carries no prefix and no mentions, but every other channel is unaffected either way.
+
 ### Composing
 
 **Public URL.** The slug is generated from the month, type and title, and is editable before the first save. It becomes the permanent public path (`/a/<slug>`) and is unique across announcements, so changing it after publication breaks links that are already distributed. The generation step skips the type word if the title already starts with it (for example, a title "Upgrade to v5.3.0" with type "upgrade" produces no repeated word). The slug is capped at 5 title words (after the type word is removed, if applicable).
 
-**Times are UTC.** Deadline and expiry fields are entered and displayed in UTC, matching how announcements state deadlines to operators. What you type is what operators receive, regardless of where you are. Out-of-range values — day 32, month 13, hour 25 — are rejected rather than silently rolling over into the next month.
+**Times are UTC.** Deadline fields are entered and displayed in UTC, matching how announcements state deadlines to operators. What you type is what operators receive, regardless of where you are. Out-of-range values — day 32, month 13, hour 25 — are rejected rather than silently rolling over into the next month.
 
 **Applies to.** Select from the common operator roles (`sequencer`, `prover`, `full-node`), or type a role the tags do not cover — the vocabulary is curated, not closed.
 
@@ -302,6 +308,31 @@ the body.
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
    - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any *other* publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError` and the review page shows it as an inline error, not a crash.
 
+### Withdrawing and rejecting
+
+A critical announcement waiting for confirmation can go back to draft two ways:
+`withdrawPublish` and `rejectPublish` (`src/core/announcements.ts`). Both are
+available from the review page, and a withdraw control also appears on the
+pending queue for the requester's own requests.
+
+**Withdraw** — only the publisher who requested it can take the request back.
+Use this after spotting a mistake before a second person confirms. The
+announcement returns to `draft`, the requester field is cleared, and any
+earlier rejection recorded on it is cleared too, so a withdrawn-and-reopened
+draft carries no stale rejection banner. A fresh request still needs a second
+person to confirm.
+
+**Reject** — only a publisher *other than* the requester can reject, and a
+reason is required; an empty or whitespace-only reason is refused. The
+announcement returns to `draft` with `publishRejectedBy` and
+`publishRejectedReason` recorded, and the review page shows the reason on the
+draft so the author sees the objection when they reopen it.
+
+Both actions run inside the same database transaction as the audit log entry
+they write (`publish_withdrawn` or `publish_rejected`, with actor and
+timestamp; the rejection reason is recorded too). Neither deletes anything —
+an announcement row is never removed.
+
 ### Templates and starting points
 
 The compose page (`/admin?from=template:<id>` or `?from=announcement:<id>`) can prefill the form three ways:
@@ -310,7 +341,7 @@ The compose page (`/admin?from=template:<id>` or `?from=announcement:<id>`) can 
 - **Saved template** — pick from the "Saved templates" dropdown, sourced from the `templates` table. Any draft can be saved as a template from the compose form ("Save as template").
 - **Past announcement** — start from a previously published announcement (`listPublished`), reusing its text, type, networks, audiences, and severity.
 
-In both prefill cases, **all dates are cleared** — `expiresAt` and every action's `deadline` — so a reused announcement can never carry a stale, already-past deadline into a new draft. The form shows a note when prefilled: "Dates (deadlines, expiry) are cleared — set new ones below."
+In both prefill cases, **all dates are cleared** — every action's `deadline` — so a reused announcement can never carry a stale, already-past deadline into a new draft. The form shows a note when prefilled: "Dates (deadlines, expiry) are cleared — set new ones below." (The wording still mentions expiry; the field itself is gone.)
 
 ### Running admin locally
 
