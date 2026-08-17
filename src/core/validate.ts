@@ -20,6 +20,7 @@ const schema = z.object({
   })),
   supersedes: z.string().optional(),
   mentionRoles: z.boolean().optional(),
+  mentionRoleIds: z.array(z.string()).optional(),
 });
 
 // Exported so the compose form can mirror this check live in the UI —

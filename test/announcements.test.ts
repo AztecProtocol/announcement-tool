@@ -41,6 +41,18 @@ describe('announcement lifecycle', () => {
   it('rejects invalid input', async () => {
     await expect(createDraft(sql, { ...input, networks: [] }, 'yev@aztec.foundation')).rejects.toThrow();
   });
+
+  it('round-trips the selected discord role ids', async () => {
+    const a = await createDraft(sql, { ...input, mentionRoleIds: ['123', '456'] }, 'a@x');
+    const out = await getLatest(sql, a.id);
+    expect(out?.mentionRoleIds).toEqual(['123', '456']);
+  });
+
+  it('leaves the selection undefined when none was made', async () => {
+    const a = await createDraft(sql, input, 'a@x');
+    const out = await getLatest(sql, a.id);
+    expect(out?.mentionRoleIds).toBeUndefined();
+  });
 });
 
 describe('jsonb columns store real arrays, not double-encoded strings', () => {

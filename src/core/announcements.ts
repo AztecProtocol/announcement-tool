@@ -28,6 +28,7 @@ export function rowToAnnouncement(r: Record<string, unknown>): Announcement {
     publishRejectedBy: (r.publish_rejected_by as string | null) ?? undefined,
     publishRejectedReason: (r.publish_rejected_reason as string | null) ?? undefined,
     mentionRoles: (r.mention_roles as boolean | null) ?? undefined,
+    mentionRoleIds: (r.mention_role_ids as string[] | null) ?? undefined,
   };
 }
 
@@ -39,11 +40,12 @@ async function insertRevision(
 ): Promise<Announcement> {
   const [row] = await tx`insert into announcements
     (id, revision, slug, type, networks, audiences, severity, title, body_md,
-     actions_required, links, status, supersedes, created_by, mention_roles)
+     actions_required, links, status, supersedes, created_by, mention_roles, mention_role_ids)
     values (${id}, ${revision}, ${slug}, ${input.type}, ${input.networks}, ${input.audiences},
             ${input.severity}, ${input.title}, ${input.bodyMd},
             ${tx.json(asJson(input.actionsRequired))}, ${tx.json(asJson(input.links))},
-            ${status}, ${input.supersedes ?? null}, ${actor}, ${input.mentionRoles ?? false})
+            ${status}, ${input.supersedes ?? null}, ${actor}, ${input.mentionRoles ?? false},
+            ${input.mentionRoleIds ?? null})
     returning *`;
   await tx`insert into audit_log (actor, action, target, detail)
     values (${actor}, ${auditAction}, ${id}, ${tx.json({ revision })})`;

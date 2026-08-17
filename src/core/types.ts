@@ -31,6 +31,7 @@ export interface AnnouncementInput {
   supersedes?: string;
   slug?: string;
   mentionRoles?: boolean;
+  mentionRoleIds?: string[];
 }
 
 export interface Announcement extends AnnouncementInput {
