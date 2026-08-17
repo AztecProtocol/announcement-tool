@@ -296,7 +296,7 @@ the body.
 
 **Applies to.** Select from the common operator roles (`sequencer`, `prover`, `full-node`), or type a role the tags do not cover — the vocabulary is curated, not closed.
 
-**Awaiting confirmation.** Critical announcements need a second publisher. Any announcement whose publication has been requested appears at the top of the admin page for every publisher, so the second person does not need a link sent to them. The requester cannot confirm their own critical announcement — only a different publisher may confirm it.
+**Awaiting confirmation.** Critical announcements need a second publisher. When a critical announcement's publication is requested, it appears at the top of the admin page for every publisher, so the second person does not need a link sent to them. The requester cannot confirm their own request. Non-critical announcements publish immediately on request.
 
 3. **Publish:**
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
