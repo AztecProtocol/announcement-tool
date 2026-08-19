@@ -254,7 +254,7 @@ export async function withdrawPublish(sql: Sql, id: string, actor: string): Prom
       throw new Error('only the publisher who requested this can withdraw it');
     }
     const [row] = await tx`update announcements
-      set status = 'draft', publish_requested_by = null,
+      set status = 'draft', publish_requested_by = null, scheduled_for = null,
           publish_rejected_by = null, publish_rejected_reason = null
       where id = ${id} and revision = ${a.revision} returning *`;
     await tx`insert into audit_log (actor, action, target, detail)
@@ -284,7 +284,7 @@ export async function rejectPublish(
       throw new Error('you requested this publication — withdraw it instead of rejecting it');
     }
     const [row] = await tx`update announcements
-      set status = 'draft', publish_requested_by = null,
+      set status = 'draft', publish_requested_by = null, scheduled_for = null,
           publish_rejected_by = ${actor}, publish_rejected_reason = ${trimmed}
       where id = ${id} and revision = ${a.revision} returning *`;
     await tx`insert into audit_log (actor, action, target, detail)

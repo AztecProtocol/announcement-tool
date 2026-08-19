@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import {
-  createDraft, confirmPublish, schedulePublish, confirmSchedule, cancelSchedule, FourEyesError,
+  createDraft, confirmPublish, requestPublish, withdrawPublish, rejectPublish,
+  schedulePublish, confirmSchedule, cancelSchedule, FourEyesError,
 } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
@@ -73,16 +74,18 @@ describe('cancelSchedule', () => {
     expect(c.scheduledFor).toBeUndefined();
   });
 
-  it('clears the requester so re-scheduling needs a fresh second confirmation', async () => {
+  it('clears the requester and confirmer so re-scheduling needs a fresh second confirmation', async () => {
     const a = await createDraft(sql, draftInput({ severity: 'critical' }), 'one@example.com');
     await schedulePublish(sql, a.id, FUTURE, 'one@example.com');
     await confirmSchedule(sql, a.id, 'two@example.com');
-    await cancelSchedule(sql, a.id, 'two@example.com');
+    const cancelled = await cancelSchedule(sql, a.id, 'two@example.com');
+    expect(cancelled.publishConfirmedBy).toBeUndefined();
 
     // Re-scheduling starts over: it must land in publish_requested again, not scheduled.
     const again = await schedulePublish(sql, a.id, FUTURE, 'one@example.com');
     expect(again.status).toBe('publish_requested');
     expect(again.publishRequestedBy).toBe('one@example.com');
+    expect(again.publishConfirmedBy).toBeUndefined();
   });
 
   it('refuses to cancel something that is not scheduled', async () => {
@@ -96,5 +99,33 @@ describe('confirmPublish on a scheduled request', () => {
     const a = await createDraft(sql, draftInput({ severity: 'critical' }), 'one@example.com');
     await schedulePublish(sql, a.id, FUTURE, 'one@example.com');
     await expect(confirmPublish(sql, a.id, 'two@example.com')).rejects.toThrow(/schedul/i);
+  });
+});
+
+describe('a stale scheduled_for must not survive the pre-existing exits to draft', () => {
+  it('withdrawing a scheduled critical request clears the schedule and leaves it publishable again', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'critical' }), 'one@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'one@example.com');
+    const withdrawn = await withdrawPublish(sql, a.id, 'one@example.com');
+    expect(withdrawn.status).toBe('draft');
+    expect(withdrawn.scheduledFor).toBeUndefined();
+
+    // The property that matters: the row is publishable again through the normal path.
+    await requestPublish(sql, a.id, 'one@example.com');
+    const published = await confirmPublish(sql, a.id, 'two@example.com');
+    expect(published.status).toBe('published');
+  });
+
+  it('rejecting a scheduled critical request clears the schedule and leaves it publishable again', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'critical' }), 'one@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'one@example.com');
+    const rejected = await rejectPublish(sql, a.id, 'two@example.com', 'not ready yet');
+    expect(rejected.status).toBe('draft');
+    expect(rejected.scheduledFor).toBeUndefined();
+
+    // The property that matters: the row is publishable again through the normal path.
+    await requestPublish(sql, a.id, 'one@example.com');
+    const published = await confirmPublish(sql, a.id, 'two@example.com');
+    expect(published.status).toBe('published');
   });
 });
