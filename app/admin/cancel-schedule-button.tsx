@@ -49,7 +49,7 @@ export default function CancelScheduleButton({ id }: { id: string }) {
       </button>
       {armed && !pending && (
         <button type="button" className="draft-discard-cancel" onClick={() => setArmed(false)}>
-          Cancel
+          Keep scheduled
         </button>
       )}
       {error && <span className="pending-error">{error}</span>}
