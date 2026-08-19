@@ -146,8 +146,94 @@ export async function confirmPublish(sql: Sql, id: string, actor: string): Promi
     if (!rows[0]) throw new Error(`announcement not found: ${id}`);
     const a = rowToAnnouncement(rows[0]);
     if (a.status !== 'publish_requested') throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
+    if (a.scheduledFor) throw new Error('this announcement is scheduled; use confirmSchedule');
     if (a.severity === 'critical' && a.publishRequestedBy === actor) throw new FourEyesError();
     return performPublish(tx, a, actor);
+  });
+}
+
+/**
+ * Set a future send time. Four-eyes is satisfied here, BEFORE the wait: a
+ * critical announcement stops at publish_requested and needs a second
+ * publisher's confirmSchedule, exactly as an immediate publish needs
+ * confirmPublish. The worker later moves an already-approved row from
+ * 'scheduled' to 'published'; it never approves anything itself.
+ */
+export async function schedulePublish(
+  sql: Sql, id: string, whenIso: string, actor: string,
+): Promise<Announcement> {
+  const when = new Date(whenIso);
+  if (Number.isNaN(when.getTime())) throw new Error('scheduled time is not a valid date');
+  if (when.getTime() <= Date.now()) throw new Error('scheduled time is in the past');
+
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'draft') throw new Error(`only a draft can be scheduled (status ${a.status})`);
+
+    const next = a.severity === 'critical' ? 'publish_requested' : 'scheduled';
+    const [row] = await tx`update announcements
+      set status = ${next}, scheduled_for = ${when.toISOString()},
+          publish_requested_by = ${a.severity === 'critical' ? actor : null}
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'publish_scheduled', ${id},
+              ${tx.json({ revision: a.revision, scheduledFor: when.toISOString(), status: next })})`;
+    return rowToAnnouncement(row);
+  });
+}
+
+/**
+ * The second publisher approves a scheduled critical announcement. The
+ * scheduled twin of confirmPublish: identical four-eyes guard, but it lands in
+ * 'scheduled' instead of publishing now.
+ */
+export async function confirmSchedule(sql: Sql, id: string, actor: string): Promise<Announcement> {
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'publish_requested') throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
+    if (!a.scheduledFor) throw new Error('announcement has no scheduled time; use confirmPublish');
+    if (a.severity === 'critical' && a.publishRequestedBy === actor) throw new FourEyesError();
+
+    const [row] = await tx`update announcements
+      set status = 'scheduled', publish_confirmed_by = ${actor}
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'schedule_confirmed', ${id}, ${tx.json({ revision: a.revision, scheduledFor: a.scheduledFor })})`;
+    return rowToAnnouncement(row);
+  });
+}
+
+/**
+ * Stop a pending send and return the announcement to draft.
+ *
+ * ANY publisher may cancel — not only the one who scheduled it. Approval was
+ * given before the wait, so the only protection against circumstances changing
+ * during the wait is that somebody present can stop it; requiring one specific
+ * person to be available would defeat that.
+ *
+ * Clears publish_requested_by and publish_confirmed_by along with the time, so
+ * re-scheduling needs a fresh request AND a fresh second confirmation.
+ * Cancelling must never become a way around four-eyes.
+ */
+export async function cancelSchedule(sql: Sql, id: string, actor: string): Promise<Announcement> {
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'scheduled' && !(a.status === 'publish_requested' && a.scheduledFor)) {
+      throw new Error(`announcement is not scheduled (status ${a.status})`);
+    }
+    const [row] = await tx`update announcements
+      set status = 'draft', scheduled_for = null, publish_requested_by = null,
+          publish_confirmed_by = null, publish_rejected_by = null, publish_rejected_reason = null
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'schedule_cancelled', ${id}, ${tx.json({ revision: a.revision, scheduledFor: a.scheduledFor })})`;
+    return rowToAnnouncement(row);
   });
 }
 
