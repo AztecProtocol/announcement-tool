@@ -8,8 +8,10 @@ import { resolveIdentity } from '../../../../src/core/identity.js';
 import { getLatest } from '../../../../src/core/announcements.js';
 import { countFanoutTargets } from '../../../../src/core/outbox.js';
 import { renderBodyHtml, formatDeadline } from '../../../../src/core/render.js';
+import { previewStored } from '../../../../src/core/preview.js';
 import type { Network } from '../../../../src/core/types.js';
 import PublishControl from './publish-control.js';
+import ChannelPreview from './channel-preview.js';
 
 export const metadata = {
   title: 'Review — Admin',
@@ -49,6 +51,12 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
 
   const targets = await countFanoutTargets(db, a);
   const summary = fanoutSummary(targets);
+
+  // Built server-side so the confirming publisher sees exactly what the server
+  // will send, with no client round-trip that could show something else.
+  // Suppressed for a discarded announcement for the same reason the
+  // destination card is: it will never send.
+  const preview = a.status === 'discarded' ? undefined : await previewStored(db, a);
 
   const sevClass = a.severity === 'critical' ? '' : ` sev-${a.severity}`;
 
@@ -108,6 +116,13 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
           ) : (
             <p>{summary.join(' · ')}</p>
           )}
+        </div>
+      )}
+
+      {preview && (
+        <div className="card">
+          <h2>What each channel receives</h2>
+          <ChannelPreview preview={preview} />
         </div>
       )}
 
