@@ -90,14 +90,20 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
         )}
       </div>
 
-      <div className="card">
-        <h2>Will send to</h2>
-        {summary.length === 0 ? (
-          <p className="muted">No destinations match this announcement&apos;s network and type.</p>
-        ) : (
-          <p>{summary.join(' · ')}</p>
-        )}
-      </div>
+      {/* A discarded announcement will never send, so a destination list under
+          any heading reads as a pending send. Suppress the card entirely rather
+          than relabel it. For a published one the send already happened, so the
+          heading is past tense; for anything else it is still ahead. */}
+      {a.status !== 'discarded' && (
+        <div className="card">
+          <h2>{a.status === 'published' ? 'Sent to' : 'Will send to'}</h2>
+          {summary.length === 0 ? (
+            <p className="muted">No destinations match this announcement&apos;s network and type.</p>
+          ) : (
+            <p>{summary.join(' · ')}</p>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <h2>Publish</h2>

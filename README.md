@@ -398,8 +398,10 @@ UI path back from a discarded draft to a draft.
 confirms. `discardDraft` sets the announcement's status to `discarded` and
 writes an audit log entry. The row and its audit trail are not deleted —
 only its status changes — but a discarded announcement appears in no list.
-Its review page still opens by direct link and shows it as discarded, with
-no publish or edit controls. Discarding is terminal: a discarded draft
+Its review page still opens by direct link. That page shows the announcement
+body and marks it as discarded, with no publish or edit controls and no
+destination list — a discarded announcement will never send, so showing where
+it would have gone would be misleading. Discarding is terminal: a discarded draft
 cannot be edited, requested for publication, or discarded again. It also
 keeps its slug, so that public URL is never reused.
 
