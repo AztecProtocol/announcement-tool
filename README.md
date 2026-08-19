@@ -368,6 +368,39 @@ they write (`publish_withdrawn` or `publish_rejected`, with actor and
 timestamp; the rejection reason is recorded too). Neither deletes anything —
 an announcement row is never removed.
 
+### Drafts, editing and discarding
+
+The admin page (`/admin`) lists every draft, including one returned by a
+withdrawal or a rejection (`listDrafts` in `src/core/queries.ts`). Without
+this list a rejected draft would be unreachable: not on the archive
+(published only), not on the pending queue (awaiting confirmation only). A
+rejected draft's row shows who rejected it and why, taken from the same
+`publishRejectedBy` / `publishRejectedReason` fields described above.
+
+Each row offers **Edit** and **Discard**.
+
+**Edit** (`/admin?from=edit:<id>`) continues the same announcement rather
+than starting a new one. Saving creates a new revision under the same id;
+the slug and the public URL (`/a/<slug>`) do not change. The slug field is
+read-only in edit mode for this reason.
+
+**Only a draft can be edited.** `reviseDraft` (`src/core/announcements.ts`)
+checks the current status and refuses anything else. A published
+announcement has no edit control on its review page — publish a correction
+as a new announcement instead.
+
+**Caution: discarding cannot be undone through the UI.** Before discarding,
+confirm the draft is not needed — check whether editing and resubmitting is
+the better option. Discarding removes the draft from every list; there is no
+UI path back from a discarded draft to a draft.
+
+**Discard** is a two-step control: the first click arms it, the second
+confirms. `discardDraft` sets the announcement's status to `discarded` and
+writes an audit log entry. The row and its audit trail are not deleted —
+only its status changes — but a discarded announcement appears in no list
+and has no review page. Discarding is terminal: a discarded draft cannot be
+edited, requested for publication, or discarded again.
+
 ### Templates and starting points
 
 The compose page (`/admin?from=template:<id>` or `?from=announcement:<id>`) can prefill the form three ways:

@@ -75,7 +75,7 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             <strong>Publication was rejected</strong> by {announcement.publishRejectedBy}:
             {' '}{announcement.publishRejectedReason}
           </p>
-          <p className="muted">Start a new draft with the corrected text. This draft has no edit path.</p>
+          <p className="muted">Find this draft in the drafts list on the admin page to edit and resubmit it, or discard it.</p>
         </div>
       )}
 
