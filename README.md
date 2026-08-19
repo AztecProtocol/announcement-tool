@@ -148,7 +148,7 @@ insert into channel_settings (key, channel, config) values
 
 - `webhook_url` (required) — the Discord incoming webhook URL for the target channel.
 - `roles` (optional) — named roles this destination can mention, as `{ name, id }` pairs. Set with `npm run setup:channel`, not by hand — see "Where mentions belong" below.
-- `prefix` (optional) — an emoji preamble prepended to the message body, on its own line. It is text only: any mention typed into it (a pasted `<@&ROLE_ID>` / `<@ID>`, or a literal `@everyone` / `@here`) is stripped before sending, never posted and never permitted. Use the role selection below for mentions.
+- `prefix` (optional) — an emoji preamble prepended to the message body, on its own line. It is text only: any mention typed into it (a pasted `<@&ROLE_ID>` / `<@ID>`, or a literal `@everyone` / `@here`) is stripped before sending, never posted and never permitted. Use the role selection below for mentions. Prefix text is limited to 512 characters; `npm run setup:channel` refuses a longer prefix and prompts again, because the mention-stripping pass is quadratic on nested input and accidental large pastes would otherwise impact every preview and delivery.
 - `username` (optional) — overrides the webhook's default display name.
 - `networks` / `types` — used by the fan-out matcher to decide whether an announcement routes to this destination; not read by the adapter itself.
 - **Env vars:** none — the webhook URL carries its own auth.
