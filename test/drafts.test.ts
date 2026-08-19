@@ -79,8 +79,9 @@ describe('discardDraft', () => {
   });
 
   it('refuses to discard an announcement awaiting confirmation', async () => {
-    // Withdraw it first; discarding out from under a pending review would
-    // remove it from the other publisher's queue without their knowledge.
+    // Discarding out from under a pending review would remove the announcement
+    // from the other publisher's queue without their knowledge, so it is refused:
+    // withdraw or reject it first, then discard the resulting draft.
     const a = await createDraft(sql, critical('Awaiting'), 'alice@test.local');
     await requestPublish(sql, a.id, 'alice@test.local');
     await expect(discardDraft(sql, a.id, 'alice@test.local')).rejects.toThrow();
