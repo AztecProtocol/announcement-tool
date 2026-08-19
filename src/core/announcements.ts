@@ -70,8 +70,12 @@ export async function createDraft(sql: Sql, input: AnnouncementInput, actor: str
 export async function reviseDraft(sql: Sql, id: string, input: AnnouncementInput, actor: string): Promise<Announcement> {
   validateAnnouncement(input);
   return sql.begin(async tx => {
-    const [prev] = await tx`select revision, slug from announcements where id = ${id} order by revision desc limit 1`;
+    const [prev] = await tx`select revision, slug, status from announcements
+      where id = ${id} order by revision desc limit 1 for update`;
     if (!prev) throw new Error(`announcement not found: ${id}`);
+    if (prev.status !== 'draft') {
+      throw new Error(`only a draft can be edited (status ${prev.status as string})`);
+    }
     return insertRevision(tx, id, (prev.revision as number) + 1, prev.slug as string, input, 'draft', actor, 'edited');
   });
 }
@@ -79,6 +83,29 @@ export async function reviseDraft(sql: Sql, id: string, input: AnnouncementInput
 export async function getLatest(sql: Sql, id: string): Promise<Announcement | undefined> {
   const rows = await sql`select * from announcements where id = ${id} order by revision desc limit 1`;
   return rows[0] ? rowToAnnouncement(rows[0]) : undefined;
+}
+
+/**
+ * Bin a draft that will never be published. The row and its audit trail stay —
+ * the tables are the audit source of truth and never delete rows — but the
+ * announcement leaves every view. Terminal: a discarded draft cannot be
+ * revised, requested or discarded again.
+ */
+export async function discardDraft(sql: Sql, id: string, actor: string): Promise<Announcement> {
+  return sql.begin(async tx => {
+    const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
+    if (!rows[0]) throw new Error(`announcement not found: ${id}`);
+    const a = rowToAnnouncement(rows[0]);
+    if (a.status !== 'draft') {
+      throw new Error(`only a draft can be discarded (status ${a.status})`);
+    }
+    const [row] = await tx`update announcements
+      set status = 'discarded'
+      where id = ${id} and revision = ${a.revision} returning *`;
+    await tx`insert into audit_log (actor, action, target, detail)
+      values (${actor}, 'draft_discarded', ${id}, ${tx.json({ revision: a.revision })})`;
+    return rowToAnnouncement(row);
+  });
 }
 
 export class FourEyesError extends Error {

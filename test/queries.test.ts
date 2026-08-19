@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { listPublished, getPublishedBySlug, listAwaitingConfirmation } from '../src/core/queries.js';
-import { createDraft, requestPublish, confirmPublish, reviseDraft } from '../src/core/announcements.js';
+import { createDraft, requestPublish, confirmPublish } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
@@ -33,7 +33,17 @@ describe('published queries', () => {
   it('a draft revision on top of a published one does not hide or resurface it wrongly', async () => {
     const one = await createDraft(sql, input('Original'), 'a@x');
     await requestPublish(sql, one.id, 'a@x');
-    await reviseDraft(sql, one.id, input('Edited draft'), 'a@x'); // rev 2, status draft
+    // reviseDraft refuses a non-draft status (see drafts.test.ts), so this
+    // out-of-band state — a later draft revision layered on a published one —
+    // is fabricated directly at the SQL level, exactly as the guarded function
+    // used to allow it to happen. The query layer must still treat it as
+    // "not currently published" regardless of how the row came to exist.
+    await sql`insert into announcements
+      (id, revision, slug, type, networks, audiences, severity, title, body_md,
+       actions_required, links, status, created_by)
+      values (${one.id}, ${one.revision + 1}, ${one.slug}, ${one.type}, ${one.networks}, ${one.audiences},
+              ${one.severity}, 'Edited draft', ${one.bodyMd},
+              ${sql.json([])}, ${sql.json([])}, 'draft', 'a@x')`;
     // Latest revision is a draft → the announcement is not currently published.
     expect(await listPublished(sql)).toEqual([]);
     expect(await getPublishedBySlug(sql, one.slug)).toBeUndefined();
