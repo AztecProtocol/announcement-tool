@@ -37,13 +37,15 @@ export interface Announcement extends AnnouncementInput {
   id: string;
   revision: number;
   slug: string;
-  status: 'draft' | 'publish_requested' | 'published' | 'superseded' | 'discarded';
+  status: 'draft' | 'publish_requested' | 'scheduled' | 'published' | 'superseded' | 'discarded';
   createdBy: string;
   publishRequestedBy?: string;
   publishConfirmedBy?: string;
   publishedAt?: string;
   publishRejectedBy?: string;
   publishRejectedReason?: string;
+  /** When a scheduled announcement is due, ISO-8601 UTC. Set only while status is 'scheduled'. */
+  scheduledFor?: string;
 }
 
 export interface DiscordRole {

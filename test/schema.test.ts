@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
+import { rowToAnnouncement } from '../src/core/announcements.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
@@ -42,5 +43,14 @@ describe('schema', () => {
     await expect(sql`insert into announcements (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by)
       values ('ann_dup1', 2, 'dup-slug', 'upgrade', '{mainnet}', '{operators}', 'critical', 't', 'b', 'draft', 'a@x')`)
       .resolves.toBeDefined();
+  });
+
+  it('accepts the scheduled status and stores a scheduled_for time', async () => {
+    const when = '2026-12-01T09:00:00.000Z';
+    await sql`insert into announcements (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by, scheduled_for)
+      values ('ann_sched', 1, 'sched-slug', 'info', '{mainnet}', '{operators}', 'info', 'T', 'B', 'scheduled', 'a@example.com', ${when})`;
+    const [row] = await sql`select * from announcements where id = 'ann_sched'`;
+    expect(rowToAnnouncement(row).status).toBe('scheduled');
+    expect(rowToAnnouncement(row).scheduledFor).toBe(when);
   });
 });

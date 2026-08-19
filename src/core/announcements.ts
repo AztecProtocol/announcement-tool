@@ -25,6 +25,7 @@ export function rowToAnnouncement(r: Record<string, unknown>): Announcement {
     publishRequestedBy: (r.publish_requested_by as string | null) ?? undefined,
     publishConfirmedBy: (r.publish_confirmed_by as string | null) ?? undefined,
     publishedAt: r.published_at ? new Date(r.published_at as string).toISOString() : undefined,
+    scheduledFor: r.scheduled_for ? new Date(r.scheduled_for as string).toISOString() : undefined,
     publishRejectedBy: (r.publish_rejected_by as string | null) ?? undefined,
     publishRejectedReason: (r.publish_rejected_reason as string | null) ?? undefined,
     mentionRoleIds: (r.mention_role_ids as string[] | null) ?? undefined,
