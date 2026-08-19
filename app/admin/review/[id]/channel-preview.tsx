@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { PreviewPane, type PreviewChannel, type PreviewMode } from '../../preview-pane.js';
+import { parseMentions } from '../../preview-render.js';
 import type { PreviewSet } from '../../../../src/core/preview.js';
 
 const CHANNEL_ORDER: PreviewChannel[] = ['discord', 'telegram', 'signal', 'email', 'webhook'];
@@ -29,10 +30,29 @@ export function availableChannels(preview: PreviewSet): PreviewChannel[] {
   });
 }
 
+/**
+ * Every distinct mention across all Discord destinations, drawn from the same
+ * parseMentions the preview pills use — so this summary cannot name a role the
+ * payload does not mention, or miss one it does. Order is first-seen, which
+ * follows the configured prefix order.
+ */
+export function mentionedRoleNames(preview: PreviewSet): string[] {
+  const names: string[] = [];
+  for (const d of preview.discord ?? []) {
+    if (!d.prefix) continue;
+    for (const span of parseMentions(d.prefix, d.roles)) {
+      if (span.kind !== 'bold') continue;
+      if (!names.includes(span.text)) names.push(span.text);
+    }
+  }
+  return names;
+}
+
 export default function ChannelPreview({ preview }: { preview: PreviewSet }) {
   const channels = availableChannels(preview);
   const [channel, setChannel] = useState<PreviewChannel>(channels[0] ?? 'webhook');
   const [mode, setMode] = useState<PreviewMode>('rendered');
+  const mentions = mentionedRoleNames(preview);
 
   if (channels.length === 0) {
     return <p className="muted">No channel will receive this announcement.</p>;
@@ -40,6 +60,17 @@ export default function ChannelPreview({ preview }: { preview: PreviewSet }) {
 
   return (
     <div>
+      {mentions.length > 0 && (
+        <p className="mention-summary" data-state="mention-summary">
+          <strong>Discord will notify:</strong>{' '}
+          {mentions.map((m, i) => (
+            <span key={i} className="pv-mention">{m}</span>
+          ))}
+          {' '}
+          <span className="muted">Open the Discord tab in Raw to see the exact bytes.</span>
+        </p>
+      )}
+
       {/* The stylesheet keys off aria-selected / aria-pressed on bare buttons
           inside .preview-tabs and .preview-mode (app/globals.css). Do not add
           an is-active class — there is no rule for one. */}

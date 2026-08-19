@@ -583,6 +583,20 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 }
 .notice-reject strong { color: var(--critical); }
 
+/* Named above the channel tabs so a confirming publisher sees the mention set
+   without opening the Discord tab. Reuses the critical tokens rather than
+   introducing a new colour; .pv-mention keeps its own Discord-blurple pill
+   styling, which this rule must not override. */
+.mention-summary {
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  background: var(--critical-bg);
+  border: 1px solid var(--critical-line);
+  border-left: 4px solid var(--critical);
+  border-radius: 4px;
+  line-height: 1.9;
+}
+
 .reject-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-width: 480px; }
 .reject-form textarea { min-height: 72px; }
 
