@@ -4,6 +4,8 @@ import { testSql, resetDb } from './helpers.js';
 import {
   createDraft, requestPublish, reviseDraft, discardDraft, getLatest,
 } from '../src/core/announcements.js';
+import { safeErrorMessage } from '../app/admin/safe-error-message.js';
+import { editPrefillFromAnnouncement } from '../app/admin/parse-from.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
@@ -63,6 +65,44 @@ describe('reviseDraft status guard', () => {
     expect(out.id).toBe(a.id);
     expect(out.slug).toBe(a.slug);
     expect(out.revision).toBe(a.revision + 1);
+  });
+
+  // saveRevisionAction (app/admin/actions.ts) is the four-eyes backstop at the
+  // action layer for the edit route: it calls reviseDraft inside a try/catch
+  // and surfaces the guard's error through safeErrorMessage, so an author who
+  // reaches it on a non-draft (e.g. a stale edit link to something published
+  // in another tab) sees a real message instead of an unhandled throw.
+  // saveRevisionAction itself cannot be called directly from a plain vitest
+  // test — it calls headers() via next/dist/server/request/headers.js, which
+  // requires a Next.js request context this test runner doesn't provide. That
+  // is the same reason no other app/admin/actions.ts export has a direct
+  // unit test in this suite (see safe-error-message.test.ts, which tests the
+  // mapping function in isolation instead). This test exercises the same two
+  // pieces saveRevisionAction composes — reviseDraft's guard and
+  // safeErrorMessage's mapping of it — end to end, without the Next.js
+  // request context saveRevisionAction additionally needs.
+  it('maps reviseDraft\'s guard on a published announcement to a real message via safeErrorMessage, as saveRevisionAction does', async () => {
+    const a = await createDraft(sql, info('Goes out'), 'alice@test.local');
+    await requestPublish(sql, a.id, 'alice@test.local'); // info publishes immediately
+    let caught: unknown;
+    try {
+      await reviseDraft(sql, a.id, info('Sneaky edit'), 'alice@test.local');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const message = safeErrorMessage(caught, 'reviseDraft');
+    expect(message).toMatch(/only a draft can be edited/);
+    expect(message).not.toBe('Something went wrong — check the server logs.');
+  });
+
+  it('retains mentionRoleIds through editPrefillFromAnnouncement for a real stored draft, so edit mode seeds the same selection it was saved with', async () => {
+    const withRoles: AnnouncementInput = { ...critical('Needs roles'), mentionRoleIds: ['role-a', 'role-b'] };
+    const a = await createDraft(sql, withRoles, 'alice@test.local');
+    const latest = await getLatest(sql, a.id);
+    expect(latest).toBeDefined();
+    const prefill = editPrefillFromAnnouncement(latest!);
+    expect(prefill.mentionRoleIds).toEqual(['role-a', 'role-b']);
   });
 });
 

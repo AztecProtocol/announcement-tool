@@ -3,6 +3,7 @@
 // for that specifier).
 import { headers } from 'next/dist/server/request/headers.js';
 import ComposeForm from './compose-form.js';
+import { parseFrom, editPrefillFromAnnouncement } from './parse-from.js';
 import PendingQueue from './pending-queue.js';
 import DraftsList from './drafts-list.js';
 import { getDb } from '../../src/web/db.js';
@@ -19,16 +20,6 @@ export const metadata = {
 };
 
 export const dynamic = 'force-dynamic';
-
-/** Parses `?from=template:<id>` / `?from=announcement:<id>` / `?from=edit:<id>` into a kind + id, or undefined. */
-function parseFrom(from: string | undefined): { kind: 'template' | 'announcement' | 'edit'; id: string } | undefined {
-  if (!from) return undefined;
-  const [kind, ...rest] = from.split(':');
-  const id = rest.join(':');
-  if (!id) return undefined;
-  if (kind === 'template' || kind === 'announcement' || kind === 'edit') return { kind, id };
-  return undefined;
-}
 
 /**
  * The union of named roles across every Discord destination, deduplicated by
@@ -83,18 +74,7 @@ export default async function AdminComposePage({
       // but an author should not even reach a form that cannot save.
       const a = await getLatest(db, parsed.id);
       if (a && a.status === 'draft') {
-        prefill = {
-          type: a.type,
-          networks: [...a.networks],
-          audiences: [...a.audiences],
-          severity: a.severity,
-          title: a.title,
-          bodyMd: a.bodyMd,
-          actionsRequired: a.actionsRequired.map(ar => ({ ...ar, applies_to: [...ar.applies_to] })),
-          links: a.links.map(l => ({ ...l })),
-          slug: a.slug,
-          mentionRoleIds: a.mentionRoleIds ? [...a.mentionRoleIds] : undefined,
-        };
+        prefill = editPrefillFromAnnouncement(a);
         editingId = a.id;
       }
     }

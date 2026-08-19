@@ -124,13 +124,21 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
 
   // Mirrors slugTouched: the role selection tracks severity — named roles for
   // critical, none otherwise, built-ins never pre-selected — until the author
-  // overrides it themselves, after which their choice stands.
+  // overrides it themselves, after which their choice stands. In edit mode
+  // the initial selection is seeded from the announcement's own
+  // mentionRoleIds (see useState above) and must not be overwritten by
+  // severity on mount — a critical draft rejected specifically over its
+  // mention list must not have every named role silently re-armed, and a
+  // non-critical draft's chosen roles must not be silently cleared. So this
+  // effect is skipped entirely in edit mode, matching the slug effect above.
   useEffect(() => {
+    if (editingId) return;
     if (!rolesTouched) setSelectedRoleIds(severity === 'critical' ? discordRoles.map(r => r.id) : []);
-    // discordRoles is derived fresh from props each render; only severity and
-    // the touched flag should re-run this, matching the slugTouched effect above.
+    // discordRoles is derived fresh from props each render; only severity,
+    // the touched flag, and editingId should re-run this, matching the
+    // slugTouched effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [severity, rolesTouched]);
+  }, [severity, rolesTouched, editingId]);
 
   function goto(from: string) {
     router.push(from ? `/admin?from=${encodeURIComponent(from)}` : '/admin');
@@ -236,6 +244,14 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
         {editingId ? (
           <div className="notice">
             <p>Editing announcement {editingId}. Saving creates a new revision; its public URL will not change.</p>
+            <p>
+              {selectedRoleIds.length > 0
+                ? `Currently notifying: ${selectedRoleIds
+                    .map(id => [...BUILTIN_ROLES, ...discordRoles].find(r => r.id === id)?.name ?? id)
+                    .map(name => `@${name}`)
+                    .join(', ')}.`
+                : 'No roles are currently selected to be notified.'}
+            </p>
           </div>
         ) : prefill && (
           <div className="notice">
