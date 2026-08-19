@@ -42,19 +42,18 @@ function toPreviewAnnouncement(input: AnnouncementInput): Announcement {
   };
 }
 
-export async function previewAnnouncement(
-  sql: Sql, input: AnnouncementInput, kind: DeliveryKind = 'publish',
+/**
+ * Renders one already-built Announcement to every channel. Shared by
+ * previewAnnouncement (which synthesizes its subject from unsaved form input)
+ * and previewStored (which passes a real row through untouched).
+ *
+ * `warnings` is threaded in rather than computed here because the two callers
+ * obtain it differently: previewAnnouncement must catch a ZodError and return
+ * it as `error`, while previewStored lets it throw.
+ */
+async function renderPreviewSet(
+  sql: Sql, a: Announcement, kind: DeliveryKind, warnings: string[],
 ): Promise<PreviewSet> {
-  let warnings: string[];
-  try {
-    ({ warnings } = validateAnnouncement(input));
-  } catch (err) {
-    if (err instanceof ZodError) return { error: err.issues.map(i => i.message).join('; ') };
-    throw err;
-  }
-
-  const a = toPreviewAnnouncement(input);
-
   const rows = await sql`select * from channel_settings`;
   const settings = rows.map(rowToSetting);
   const targets = broadcastTargetsFor(a, settings);
@@ -92,4 +91,39 @@ export async function previewAnnouncement(
     email: { subject, text, html },
     webhook: JSON.stringify(webhookPayload, null, 2),
   };
+}
+
+export async function previewAnnouncement(
+  sql: Sql, input: AnnouncementInput, kind: DeliveryKind = 'publish',
+): Promise<PreviewSet> {
+  let warnings: string[];
+  try {
+    ({ warnings } = validateAnnouncement(input));
+  } catch (err) {
+    if (err instanceof ZodError) return { error: err.issues.map(i => i.message).join('; ') };
+    throw err;
+  }
+
+  return renderPreviewSet(sql, toPreviewAnnouncement(input), kind, warnings);
+}
+
+/**
+ * Previews an announcement that is already in the database, for the review
+ * page. Unlike previewAnnouncement it does NOT re-derive identity: the stored
+ * id, revision and slug go through untouched, so the webhook event_id and the
+ * canonical link shown here are the ones that will actually be sent.
+ *
+ * `published_at` is the single field this preview cannot know — confirmPublish
+ * sets it with `now()` inside the publishing transaction — so it renders as
+ * null. The review page states that; do not substitute a plausible timestamp.
+ *
+ * A ZodError is deliberately NOT caught. Stored rows were validated when they
+ * were saved, so a failure here is a real fault a reviewer must see, not an
+ * empty preview pane.
+ */
+export async function previewStored(
+  sql: Sql, a: Announcement, kind: DeliveryKind = 'publish',
+): Promise<PreviewSet> {
+  const { warnings } = validateAnnouncement(a);
+  return renderPreviewSet(sql, a, kind, warnings);
 }

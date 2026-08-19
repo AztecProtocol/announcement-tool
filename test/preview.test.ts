@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { previewAnnouncement } from '../src/core/preview.js';
-import type { AnnouncementInput } from '../src/core/types.js';
+import { previewAnnouncement, previewStored } from '../src/core/preview.js';
+import type { Announcement, AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
@@ -251,5 +251,55 @@ describe('previewAnnouncement', () => {
     expect(entry).toBeDefined();
     expect(entry!.prefix).toBeUndefined();
     expect(entry!.content.startsWith('UPDATED: [MAINNET]')).toBe(true);
+  });
+});
+
+/** A stored announcement whose title would derive a slug different from the stored one. */
+const stored = (over: Partial<Announcement> = {}): Announcement => ({
+  ...input,
+  id: 'ann_01STORED',
+  revision: 3,
+  slug: '2026-08-a-real-stored-slug',
+  status: 'draft',
+  createdBy: 'author@example.com',
+  title: 'A title that would derive a completely different slug',
+  ...over,
+});
+
+describe('previewStored', () => {
+  it('keeps the stored id, revision and slug in the webhook payload', async () => {
+    const payload = JSON.parse((await previewStored(sql, stored())).webhook!);
+
+    expect(payload.event_id).toBe('ann_01STORED.3.publish');
+    expect(payload.announcement.id).toBe('ann_01STORED');
+    expect(payload.announcement.revision).toBe(3);
+    expect(payload.announcement.slug).toBe('2026-08-a-real-stored-slug');
+  });
+
+  it('puts the stored slug in the canonical link of every rendered channel', async () => {
+    // Telegram and Signal only render when a matching channel_settings row exists.
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:mainnet', 'telegram', ${sql.json({ networks: ['mainnet'], types: ['upgrade'] })})`;
+    await sql`insert into channel_settings (key, channel, config) values
+      ('signal:mainnet', 'signal', ${sql.json({ networks: ['mainnet'], types: ['upgrade'] })})`;
+
+    const preview = await previewStored(sql, stored({ revision: 1 }));
+
+    expect(preview.telegram).toContain('2026-08-a-real-stored-slug');
+    expect(preview.signal).toContain('2026-08-a-real-stored-slug');
+    expect(preview.email!.text).toContain('2026-08-a-real-stored-slug');
+  });
+
+  it('reports published_at as null for an announcement that has not published yet', async () => {
+    const payload = JSON.parse((await previewStored(sql, stored())).webhook!);
+
+    expect(payload.announcement.published_at).toBeNull();
+  });
+
+  it('still surfaces validation warnings for a stored draft', async () => {
+    // type 'upgrade' with no GitHub release link is the existing warning case.
+    const preview = await previewStored(sql, stored({ type: 'upgrade', links: [] }));
+
+    expect(preview.warnings?.length).toBeGreaterThan(0);
   });
 });
