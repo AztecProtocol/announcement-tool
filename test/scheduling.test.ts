@@ -3,7 +3,7 @@ import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import {
   createDraft, confirmPublish, requestPublish, withdrawPublish, rejectPublish,
-  schedulePublish, confirmSchedule, cancelSchedule, FourEyesError,
+  schedulePublish, confirmSchedule, cancelSchedule, publishDueScheduled, getLatest, FourEyesError,
 } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
@@ -127,5 +127,58 @@ describe('a stale scheduled_for must not survive the pre-existing exits to draft
     await requestPublish(sql, a.id, 'one@example.com');
     const published = await confirmPublish(sql, a.id, 'two@example.com');
     expect(published.status).toBe('published');
+  });
+});
+
+describe('publishDueScheduled', () => {
+  it('publishes an announcement whose time has passed', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'info' }), 'author@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'author@example.com');
+    // Move the due time into the past directly; schedulePublish refuses one.
+    await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+
+    const sent = await publishDueScheduled(sql);
+    expect(sent.map(x => x.id)).toContain(a.id);
+    expect((await getLatest(sql, a.id))!.status).toBe('published');
+  });
+
+  it('leaves an announcement that is not due yet', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'info' }), 'author@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'author@example.com');
+    expect(await publishDueScheduled(sql)).toHaveLength(0);
+    expect((await getLatest(sql, a.id))!.status).toBe('scheduled');
+  });
+
+  it('never publishes a draft or an unconfirmed critical request', async () => {
+    const d = await createDraft(sql, draftInput(), 'author@example.com');
+    const c = await createDraft(sql, draftInput({ severity: 'critical' }), 'one@example.com');
+    await schedulePublish(sql, c.id, FUTURE, 'one@example.com');   // stops at publish_requested
+    await sql`update announcements set scheduled_for = now() - interval '1 minute'
+      where id in (${c.id})`;
+
+    expect(await publishDueScheduled(sql)).toHaveLength(0);
+    expect((await getLatest(sql, d.id))!.status).toBe('draft');
+    expect((await getLatest(sql, c.id))!.status).toBe('publish_requested');
+  });
+
+  it('enqueues deliveries, so a scheduled send fans out like an immediate one', async () => {
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:mainnet', 'telegram', ${sql.json({ networks: ['mainnet'], types: ['upgrade'] })})`;
+    const a = await createDraft(sql, draftInput({ severity: 'info' }), 'author@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'author@example.com');
+    await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+
+    await publishDueScheduled(sql);
+    const led = await sql`select * from delivery_ledger where announcement_id = ${a.id}`;
+    expect(led.length).toBeGreaterThan(0);
+  });
+
+  it('is idempotent across two passes', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'info' }), 'author@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'author@example.com');
+    await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+
+    expect(await publishDueScheduled(sql)).toHaveLength(1);
+    expect(await publishDueScheduled(sql)).toHaveLength(0);
   });
 });

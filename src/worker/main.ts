@@ -3,6 +3,7 @@ import { loadEnv } from '../env.js';
 loadEnv();
 import { runFanoutOnce } from './fanout.js';
 import { dispatchHealthAlerts } from '../core/alerts.js';
+import { publishDueScheduled } from '../core/announcements.js';
 import type { ChannelAdapter } from '../adapters/types.js';
 import { makeWebhookAdapter } from '../adapters/webhook.js';
 import { makeDiscordAdapter } from '../adapters/discord.js';
@@ -23,9 +24,11 @@ const adapters: Record<string, ChannelAdapter> = {
   signal: makeSignalAdapter(sql),
 };
 
-console.log(`fan-out worker started (15s interval, esp=${sender.name}, channels=${Object.keys(adapters).join(',')})`);
+console.log(`fan-out worker started (15s interval, scheduling on, esp=${sender.name}, channels=${Object.keys(adapters).join(',')})`);
 setInterval(async () => {
   try {
+    const due = await publishDueScheduled(sql);
+    for (const a of due) console.log(`scheduled publish sent: ${a.id} (${a.slug})`);
     const { delivered, failed } = await runFanoutOnce(sql, adapters);
     if (delivered || failed) console.log(`fanout: delivered=${delivered} failed=${failed}`);
     const alerted = await dispatchHealthAlerts(sql, sender);

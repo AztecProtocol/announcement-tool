@@ -124,6 +124,47 @@ async function performPublish(tx: TransactionSql, a: Announcement, confirmer: st
   return published;
 }
 
+/**
+ * Publish every scheduled announcement whose time has come. Called on the
+ * worker's existing tick.
+ *
+ * `for update skip locked` matches the fan-out claim in src/worker/fanout.ts,
+ * so two workers never send the same announcement twice.
+ *
+ * The status filter is the safety boundary: ONLY 'scheduled' rows are taken.
+ * A draft, or a critical announcement still waiting for its second publisher,
+ * is never touched — the worker cannot approve anything, it can only carry out
+ * what two people already approved.
+ *
+ * The actor is 'scheduler' because no person performed this send. Note that
+ * performPublish overwrites publish_confirmed_by with that literal, so the
+ * audit detail below carries the humans who actually approved it.
+ */
+export async function publishDueScheduled(sql: Sql): Promise<Announcement[]> {
+  return sql.begin(async tx => {
+    const due = await tx`select * from announcements
+      where status = 'scheduled' and scheduled_for <= now()
+      order by scheduled_for
+      for update skip locked`;
+
+    const sent: Announcement[] = [];
+    for (const row of due) {
+      const a = rowToAnnouncement(row);
+      const published = await performPublish(tx, a, 'scheduler');
+      await tx`insert into audit_log (actor, action, target, detail)
+        values ('scheduler', 'scheduled_publish_sent', ${a.id},
+                ${tx.json({
+                  revision: a.revision,
+                  scheduledFor: a.scheduledFor,
+                  requestedBy: a.publishRequestedBy ?? null,
+                  confirmedBy: a.publishConfirmedBy ?? null,
+                })})`;
+      sent.push(published);
+    }
+    return sent;
+  });
+}
+
 export async function requestPublish(sql: Sql, id: string, actor: string): Promise<Announcement> {
   return sql.begin(async tx => {
     const rows = await tx`select * from announcements where id = ${id} order by revision desc limit 1 for update`;
