@@ -91,12 +91,18 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
       </div>
 
       {/* A discarded announcement will never send, so a destination list under
-          any heading reads as a pending send. Suppress the card entirely rather
-          than relabel it. For a published one the send already happened, so the
-          heading is past tense; for anything else it is still ahead. */}
+          any heading reads as a pending send. Suppress the card entirely.
+
+          The heading stays future tense for every other status, including
+          published. countFanoutTargets reads CURRENT channel settings and
+          subscribers, not the delivery_ledger written at publish time, so a
+          past-tense "Sent to" would assert history this query cannot know — a
+          channel added after publication would appear as though it had been
+          notified. The ledger holds that record; reading it here is a separate
+          change, not a label swap. */}
       {a.status !== 'discarded' && (
         <div className="card">
-          <h2>{a.status === 'published' ? 'Sent to' : 'Will send to'}</h2>
+          <h2>Will send to</h2>
           {summary.length === 0 ? (
             <p className="muted">No destinations match this announcement&apos;s network and type.</p>
           ) : (
