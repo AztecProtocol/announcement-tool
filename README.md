@@ -259,7 +259,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 ### Compose, preview, publish
 
 1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, and repeatable "actions required" and "links" fields. Submitting creates a draft (`createDraft`) and redirects to its review page.
-2. **Review** (`/admin/review/<id>`) — shows the rendered body, a summary of which destinations the announcement will fan out to, and the publish control. The review page renders the exact payload each channel will receive in the same "Rendered" and "Raw" views as the compose page (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering). The payload is built from the stored announcement, so the slug in every canonical link and the `event_id` in the webhook JSON are the ones that will actually be sent. `published_at` shows as `null` because the publishing transaction sets it.
+2. **Review** (`/admin/review/<id>`) — shows the rendered body, a summary of which destinations the announcement will fan out to, and the publish control. The review page renders the exact payload each channel will receive in the same "Rendered" and "Raw" views as the compose page (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering). The payload is built from the stored announcement, so the slug in every canonical link and the `event_id` in the webhook JSON are the ones that will actually be sent. For an announcement that has not published yet, `published_at` shows as `null` because the publishing transaction sets it.
 
 ### Preview modes
 

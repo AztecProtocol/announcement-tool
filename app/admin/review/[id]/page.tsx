@@ -122,7 +122,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
       {preview && (
         <div className="card">
           <h2>What each channel receives</h2>
-          <ChannelPreview preview={preview} />
+          <ChannelPreview preview={preview} published={a.status === 'published' || a.status === 'superseded'} />
         </div>
       )}
 

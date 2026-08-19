@@ -48,7 +48,7 @@ export function mentionedRoleNames(preview: PreviewSet): string[] {
   return names;
 }
 
-export default function ChannelPreview({ preview }: { preview: PreviewSet }) {
+export default function ChannelPreview({ preview, published = false }: { preview: PreviewSet; published?: boolean }) {
   const channels = availableChannels(preview);
   const [channel, setChannel] = useState<PreviewChannel>(channels[0] ?? 'webhook');
   const [mode, setMode] = useState<PreviewMode>('rendered');
@@ -113,8 +113,13 @@ export default function ChannelPreview({ preview }: { preview: PreviewSet }) {
       </div>
 
       <p className="muted">
-        This is what each channel receives. The publication time is set when publishing
-        happens, so the webhook payload shows <code>published_at: null</code> here.
+        This is what each channel receives.{' '}
+        {!published && (
+          <>
+            The publication time is set when publishing happens, so the webhook payload
+            shows <code>published_at: null</code> here.
+          </>
+        )}
       </p>
     </div>
   );
