@@ -6,7 +6,7 @@ import { headers } from 'next/dist/server/request/headers.js';
 import { redirect } from 'next/navigation';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
-import { createDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, discardDraft } from '../../src/core/announcements.js';
+import { createDraft, reviseDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, discardDraft } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate, stripPerAnnouncementFields } from '../../src/core/templates.js';
 import { inputFromForm } from './input-from-form.js';
@@ -35,6 +35,40 @@ export async function createDraftAction(formData: FormData): Promise<{ id?: stri
   }
 
   redirect(`/admin/review/${draft.id}`);
+}
+
+/**
+ * Saves a new revision of an existing draft (the `?from=edit:<id>` path in
+ * app/admin/page.tsx), as opposed to createDraftAction's always-create path.
+ * Kept as a separate action rather than an optional id on createDraftAction
+ * so the authorization and guard path stay obvious to a reader: this one
+ * always calls reviseDraft, which refuses any status but `draft` — that
+ * guard's error must reach the author as a real message, not a 500, since a
+ * stale edit link (e.g. a draft published in another tab) is expected to
+ * land here.
+ */
+export async function saveRevisionAction(id: string, formData: FormData): Promise<{ id?: string; error?: string }> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  let input: AnnouncementInput;
+  try {
+    input = inputFromForm(formData);
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'inputFromForm') };
+  }
+
+  let revised;
+  try {
+    revised = await reviseDraft(db, id, input, identity.email);
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'reviseDraft') };
+  }
+
+  redirect(`/admin/review/${revised.id}`);
 }
 
 export async function saveTemplateAction(formData: FormData): Promise<{ template?: Template; error?: string }> {

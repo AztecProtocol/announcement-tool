@@ -56,6 +56,14 @@ describe('reviseDraft status guard', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].actor).toBe('bob@test.local');
   });
+
+  it('keeps the id and slug across an edit', async () => {
+    const a = await createDraft(sql, info('Original'), 'alice@test.local');
+    const out = await reviseDraft(sql, a.id, { ...info('Edited'), slug: a.slug }, 'alice@test.local');
+    expect(out.id).toBe(a.id);
+    expect(out.slug).toBe(a.slug);
+    expect(out.revision).toBe(a.revision + 1);
+  });
 });
 
 describe('discardDraft', () => {

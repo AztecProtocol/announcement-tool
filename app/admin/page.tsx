@@ -20,13 +20,13 @@ export const metadata = {
 
 export const dynamic = 'force-dynamic';
 
-/** Parses `?from=template:<id>` / `?from=announcement:<id>` into a kind + id, or undefined. */
-function parseFrom(from: string | undefined): { kind: 'template' | 'announcement'; id: string } | undefined {
+/** Parses `?from=template:<id>` / `?from=announcement:<id>` / `?from=edit:<id>` into a kind + id, or undefined. */
+function parseFrom(from: string | undefined): { kind: 'template' | 'announcement' | 'edit'; id: string } | undefined {
   if (!from) return undefined;
   const [kind, ...rest] = from.split(':');
   const id = rest.join(':');
   if (!id) return undefined;
-  if (kind === 'template' || kind === 'announcement') return { kind, id };
+  if (kind === 'template' || kind === 'announcement' || kind === 'edit') return { kind, id };
   return undefined;
 }
 
@@ -66,14 +66,37 @@ export default async function AdminComposePage({
   const discordRoles = distinctDiscordRoles(channelSettingRows.map(rowToSetting));
 
   let prefill: AnnouncementInput | undefined;
+  let editingId: string | undefined;
   const parsed = parseFrom(from);
   if (parsed) {
     if (parsed.kind === 'template') {
       const t = templates.find(x => x.id === parsed.id);
       prefill = t?.input;
-    } else {
+    } else if (parsed.kind === 'announcement') {
       const a = await getLatest(db, parsed.id);
       prefill = a ? templateFromAnnouncement(a) : undefined;
+    } else {
+      // edit: continues the SAME announcement — same id, same slug, revision
+      // incremented. Must not go through templateFromAnnouncement, which
+      // deliberately strips the slug and dates for the "copy" flow above.
+      // Only a draft may be edited; reviseDraft would refuse the save anyway,
+      // but an author should not even reach a form that cannot save.
+      const a = await getLatest(db, parsed.id);
+      if (a && a.status === 'draft') {
+        prefill = {
+          type: a.type,
+          networks: [...a.networks],
+          audiences: [...a.audiences],
+          severity: a.severity,
+          title: a.title,
+          bodyMd: a.bodyMd,
+          actionsRequired: a.actionsRequired.map(ar => ({ ...ar, applies_to: [...ar.applies_to] })),
+          links: a.links.map(l => ({ ...l })),
+          slug: a.slug,
+          mentionRoleIds: a.mentionRoleIds ? [...a.mentionRoleIds] : undefined,
+        };
+        editingId = a.id;
+      }
     }
   }
 
@@ -97,6 +120,7 @@ export default async function AdminComposePage({
         recentAnnouncements={recentAnnouncements.map(a => ({ id: a.id, title: a.title, slug: a.slug }))}
         discordRoles={discordRoles}
         prefill={prefill}
+        editingId={editingId}
       />
     </>
   );

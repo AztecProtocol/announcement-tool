@@ -9,7 +9,7 @@ import { useActionState } from 'react';
 // `next/headers`, just not previously hit for `next/navigation` because no
 // admin client component had called useRouter until Task 6.
 import { useRouter } from 'next/dist/client/components/navigation.js';
-import { createDraftAction, previewAction, saveTemplateAction } from './actions.js';
+import { createDraftAction, saveRevisionAction, previewAction, saveTemplateAction } from './actions.js';
 import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementInput, AnnouncementType, Audience, DiscordRole, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
@@ -27,10 +27,6 @@ const SEVERITIES: Severity[] = ['critical', 'recommended', 'info'];
 const AUDIENCES: Audience[] = ['operators', 'ecosystem'];
 
 type Result = { id?: string; error?: string };
-
-async function action(_prev: Result | undefined, formData: FormData): Promise<Result> {
-  return createDraftAction(formData);
-}
 
 const box = (name: string, value: string, checked: boolean) => (
   <label className="check" key={value}>
@@ -62,21 +58,28 @@ export type ComposeFormProps = {
   recentAnnouncements?: { id: string; title: string; slug: string }[];
   discordRoles?: DiscordRole[];
   prefill?: AnnouncementInput;
+  /** Set when continuing an existing draft (`?from=edit:<id>`) rather than creating a new one. */
+  editingId?: string;
 };
 
-export default function ComposeForm({ templates = [], recentAnnouncements = [], discordRoles = [], prefill }: ComposeFormProps) {
+export default function ComposeForm({ templates = [], recentAnnouncements = [], discordRoles = [], prefill, editingId }: ComposeFormProps) {
   const router = useRouter();
+  const action = async (_prev: Result | undefined, formData: FormData): Promise<Result> =>
+    editingId ? saveRevisionAction(editingId, formData) : createDraftAction(formData);
   const [result, formAction, pending] = useActionState<Result | undefined, FormData>(action, undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [type, setType] = useState<AnnouncementType>(prefill?.type ?? 'upgrade');
   const [severity, setSeverity] = useState<Severity>(prefill?.severity ?? 'recommended');
   const [title, setTitle] = useState(prefill?.title ?? '');
-  // A prefilled draft (from a template or a past announcement) must never
+  // A prefilled draft from a template or a past announcement must never
   // inherit the source's slug — slugs are unique, so starting blank and
-  // letting this effect derive a fresh one from the title is correct even
-  // when prefill.slug is present on the source AnnouncementInput.
-  const [slug, setSlug] = useState('');
+  // letting the effect below derive a fresh one from the title is correct
+  // even when prefill.slug is present on the source AnnouncementInput.
+  // Edit mode is the one exception: it continues the *same* announcement,
+  // whose slug is fixed at revision 1 by a unique index, so it starts
+  // pre-set to prefill.slug and the effect below must never touch it.
+  const [slug, setSlug] = useState(editingId ? (prefill?.slug ?? '') : '');
   const [slugTouched, setSlugTouched] = useState(false);
   const [actionRows, setActionRows] = useState<ActionRow[]>(
     (prefill?.actionsRequired ?? []).map((ar, i) => ({
@@ -111,10 +114,13 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
 
   // Track the title until the author edits the slug themselves; from then on the
   // typed value stands, because a slug they chose should not silently change.
+  // In edit mode the slug field is read-only (see below) and must never be
+  // rewritten as the title changes, so this effect is skipped entirely.
   useEffect(() => {
+    if (editingId) return;
     if (slugTouched) return;
     setSlug(title.trim() ? makeSlug(new Date(), type, title) : '');
-  }, [title, type, slugTouched]);
+  }, [title, type, slugTouched, editingId]);
 
   // Mirrors slugTouched: the role selection tracks severity — named roles for
   // critical, none otherwise, built-ins never pre-selected — until the author
@@ -227,7 +233,11 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
           </select>
           <noscript><button type="submit">Go</button></noscript>
         </form>
-        {prefill && (
+        {editingId ? (
+          <div className="notice">
+            <p>Editing announcement {editingId}. Saving creates a new revision; its public URL will not change.</p>
+          </div>
+        ) : prefill && (
           <div className="notice">
             <p>Prefilled from a saved template or past announcement. Deadlines are cleared — set new ones below.</p>
           </div>
@@ -257,11 +267,13 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
               onBlur={e => setSlug(normalizeSlug(e.target.value))}
               aria-describedby="slug-hint"
               aria-invalid={slugTouched && !!slugError(slug)}
+              readOnly={!!editingId}
             />
             <p id="slug-hint" className="hint">
-              <code>/a/{slug || '…'}</code> — permanent once published.
+              <code>/a/{slug || '…'}</code>{' '}
+              {editingId ? '— fixed for this announcement.' : '— permanent once published.'}
             </p>
-            {slugTouched && slugError(slug) && (
+            {!editingId && slugTouched && slugError(slug) && (
               <p role="alert" className="hint">{slugError(slug)}</p>
             )}
           </div>
@@ -433,7 +445,9 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
           </fieldset>
 
           <div>
-            <button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save draft'}</button>
+            <button type="submit" disabled={pending}>
+              {pending ? 'Saving…' : editingId ? 'Save revision' : 'Save draft'}
+            </button>
           </div>
         </form>
 
