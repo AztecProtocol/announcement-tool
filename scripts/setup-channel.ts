@@ -11,6 +11,7 @@ import { loadEnv } from '../src/env.js';
 loadEnv();
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
+import { validatePrefix } from '../src/core/discord-mentions.js';
 
 const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const rl = createInterface({ input: stdin, output: stdout });
@@ -68,7 +69,13 @@ async function main(): Promise<void> {
     const dedupedRoles = roles.filter((r, i) => roles.findIndex(x => x.id === r.id) === i);
     if (dedupedRoles.length) config.roles = dedupedRoles;
 
-    const prefix = await ask('Emoji preamble to put above every message (blank for none)', '');
+    let prefix = '';
+    for (;;) {
+      prefix = await ask('Emoji preamble to put above every message (blank for none)', '');
+      const err = validatePrefix(prefix);
+      if (!err) break;
+      console.log(`  ✗ ${err} — try again`);
+    }
     if (prefix) config.prefix = prefix;
     const username = await ask('Bot display name in Discord', 'Aztec Announcements');
     if (username) config.username = username;
