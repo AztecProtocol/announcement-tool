@@ -600,6 +600,9 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 .reject-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-width: 480px; }
 .reject-form textarea { min-height: 72px; }
 
+.schedule-control { margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.schedule-control label { font-size: 12.5px; color: var(--ink-2); }
+
 button.destructive {
   background: transparent;
   color: var(--critical);

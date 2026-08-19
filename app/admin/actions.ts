@@ -6,7 +6,7 @@ import { headers } from 'next/dist/server/request/headers.js';
 import { redirect } from 'next/navigation';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
-import { createDraft, reviseDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, discardDraft } from '../../src/core/announcements.js';
+import { createDraft, reviseDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, discardDraft, schedulePublish, confirmSchedule, cancelSchedule } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate, stripPerAnnouncementFields } from '../../src/core/templates.js';
 import { inputFromForm } from './input-from-form.js';
@@ -205,5 +205,55 @@ export async function rejectPublishAction(id: string, reason: string): Promise<P
     return { announcement };
   } catch (err) {
     return { error: safeErrorMessage(err, 'rejectPublish') };
+  }
+}
+
+export async function schedulePublishAction(id: string, whenIso: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await schedulePublish(db, id, whenIso, identity.email);
+    return { announcement };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'schedulePublish') };
+  }
+}
+
+/**
+ * FourEyesError (confirmer === requester) must reach the page as a visible
+ * message, never an unhandled throw / 500 — same four-eyes control as
+ * confirmPublishAction, just for the scheduled path.
+ */
+export async function confirmScheduleAction(id: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await confirmSchedule(db, id, identity.email);
+    return { announcement };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'confirmSchedule') };
+  }
+}
+
+export async function cancelScheduleAction(id: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await cancelSchedule(db, id, identity.email);
+    return { announcement };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'cancelSchedule') };
   }
 }

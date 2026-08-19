@@ -48,6 +48,23 @@ export async function listDrafts(sql: Sql, limit = 50): Promise<Announcement[]> 
   return rows.map(rowToAnnouncement);
 }
 
+/**
+ * Announcements waiting for their send time — latest revision per id, soonest
+ * first. Same distinct-on-before-filter pattern as listDrafts: filtering
+ * without it would match a superseded revision of an announcement that has
+ * since moved on.
+ */
+export async function listScheduled(sql: Sql, limit = 50): Promise<Announcement[]> {
+  const rows = await sql`
+    select * from (
+      select distinct on (id) * from announcements order by id, revision desc
+    ) latest
+    where latest.status = 'scheduled'
+    order by latest.scheduled_for asc, latest.id asc
+    limit ${limit}`;
+  return rows.map(rowToAnnouncement);
+}
+
 export async function getPublishedBySlug(sql: Sql, slug: string): Promise<Announcement | undefined> {
   const rows = await sql`
     select * from (

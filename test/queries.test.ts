@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { listPublished, getPublishedBySlug, listAwaitingConfirmation, listDrafts } from '../src/core/queries.js';
-import { createDraft, requestPublish, confirmPublish, discardDraft, reviseDraft, rejectPublish } from '../src/core/announcements.js';
+import { listPublished, getPublishedBySlug, listAwaitingConfirmation, listDrafts, listScheduled } from '../src/core/queries.js';
+import { createDraft, requestPublish, confirmPublish, discardDraft, reviseDraft, rejectPublish, schedulePublish, confirmSchedule } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
@@ -135,5 +135,49 @@ describe('listDrafts', () => {
     await reviseDraft(sql, a.id, input('Two revisions v2'), 'a@x');
     await requestPublish(sql, a.id, 'a@x');
     expect((await listDrafts(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+});
+
+describe('listScheduled', () => {
+  const inHours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+
+  it('lists a scheduled announcement, soonest first', async () => {
+    const later = await createDraft(sql, input('Later'), 'a@x');
+    await schedulePublish(sql, later.id, inHours(48), 'a@x');
+    const sooner = await createDraft(sql, input('Sooner'), 'a@x');
+    await schedulePublish(sql, sooner.id, inHours(2), 'a@x');
+    const rows = await listScheduled(sql);
+    expect(rows.map(r => r.id)).toEqual([sooner.id, later.id]);
+  });
+
+  it('does not list a draft', async () => {
+    const a = await createDraft(sql, input('Still a draft'), 'a@x');
+    expect((await listScheduled(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('does not list a published announcement', async () => {
+    const a = await createDraft(sql, input('Published'), 'a@x');
+    await requestPublish(sql, a.id, 'a@x');
+    expect((await listScheduled(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('does not list a critical announcement still awaiting schedule confirmation', async () => {
+    const a = await createDraft(sql, criticalInput('Awaiting confirmation'), 'alice@test.local');
+    await schedulePublish(sql, a.id, inHours(5), 'alice@test.local');
+    expect((await listScheduled(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('lists a critical announcement once its schedule is confirmed', async () => {
+    const a = await createDraft(sql, criticalInput('Confirmed'), 'alice@test.local');
+    await schedulePublish(sql, a.id, inHours(5), 'alice@test.local');
+    await confirmSchedule(sql, a.id, 'bob@test.local');
+    expect((await listScheduled(sql)).map(r => r.id)).toContain(a.id);
+  });
+
+  it('reads the latest revision, not an old one', async () => {
+    const a = await createDraft(sql, input('Two revisions'), 'a@x');
+    await reviseDraft(sql, a.id, input('Two revisions v2'), 'a@x');
+    await schedulePublish(sql, a.id, inHours(5), 'a@x');
+    expect((await listScheduled(sql)).map(r => r.id)).toContain(a.id);
   });
 });
