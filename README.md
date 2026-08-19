@@ -259,7 +259,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 ### Compose, preview, publish
 
 1. **Compose** (`/admin`) — a form with type/network/audience/severity selectors, a Markdown body with a formatting toolbar, and repeatable "actions required" and "links" fields. Submitting creates a draft (`createDraft`) and redirects to its review page.
-2. **Review** (`/admin/review/<id>`) — shows the rendered body, a summary of which destinations the announcement will fan out to, and the publish control. The per-channel preview (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering) is only on the compose page — read it there, before creating the draft, since the review page does not repeat it.
+2. **Review** (`/admin/review/<id>`) — shows the rendered body, a summary of which destinations the announcement will fan out to, and the publish control. The review page renders the exact payload each channel will receive in the same "Rendered" and "Raw" views as the compose page (webhook JSON, Discord/Telegram/Signal message text including the selected Discord role mentions, email rendering). The payload is built from the stored announcement, so the slug in every canonical link and the `event_id` in the webhook JSON are the ones that will actually be sent. `published_at` shows as `null` because the publishing transaction sets it.
 
 ### Preview modes
 
@@ -318,8 +318,10 @@ permission has no id-list form, so selecting either one also re-enables any
 literal `@everyone` or `@here` that ends up in the message body, even though
 the body warning above told you not to put one there. Selecting only named
 roles does not have this effect — a stray literal mention in the body still
-cannot ping. Read the raw Discord preview before publishing and confirm the
-mentions shown are the ones you intend.
+cannot ping. The review page shows a banner above the preview tabs naming every
+role the post will notify, so a confirming publisher sees the mention set
+without opening the Discord tab. Before publishing, read the raw Discord
+preview and confirm the mentions shown are the ones you intend.
 
 With that in mind, the author can check or uncheck any of the roles before
 requesting or publishing. Selecting none sends the post with no mention line
@@ -399,9 +401,9 @@ confirms. `discardDraft` sets the announcement's status to `discarded` and
 writes an audit log entry. The row and its audit trail are not deleted —
 only its status changes — but a discarded announcement appears in no list.
 Its review page still opens by direct link. That page shows the announcement
-body and marks it as discarded, with no publish or edit controls and no
-destination list — a discarded announcement will never send, so showing where
-it would have gone would be misleading. Discarding is terminal: a discarded draft
+body and marks it as discarded, with no publish or edit controls, no
+destination list, and no preview — a discarded announcement will never send, so showing where
+it would have gone or what it would have looked like would be misleading. Discarding is terminal: a discarded draft
 cannot be edited, requested for publication, or discarded again. It also
 keeps its slug, so that public URL is never reused.
 
