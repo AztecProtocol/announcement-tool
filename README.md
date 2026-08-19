@@ -370,6 +370,44 @@ they write (`publish_withdrawn` or `publish_rejected`, with actor and
 timestamp; the rejection reason is recorded too). Neither deletes anything —
 an announcement row is never removed.
 
+### Scheduling
+
+Instead of publishing immediately, a publisher can schedule an announcement
+for a future time. The review page's schedule control (`schedulePublish` in
+`src/core/announcements.ts`) takes a date and time entered and shown in
+**UTC**, matching every other time field in this tool.
+
+**Four-eyes timing for scheduled critical announcements is different from
+immediate publishing.** For a critical announcement, the second publisher's
+approval must happen **before** the announcement becomes `scheduled`, not at
+send time. Scheduling a critical announcement moves it to
+`publish_requested`, the same waiting state as an immediate request. A
+different publisher must then confirm the schedule (`confirmSchedule`) —
+only after that confirmation does the announcement become `scheduled`. As
+with immediate publishing, the requester cannot confirm their own request.
+Non-critical announcements move straight to `scheduled` on request, since
+they need only one publisher.
+
+A background worker checks for due announcements every 15 seconds, so a
+scheduled announcement sends within about a minute of its scheduled time.
+Each check publishes at most 20 due announcements; if more than 20 are due
+at once, the rest send on a later check. **The worker never approves
+anything** — `publishDueScheduled` only moves an announcement that two
+people already approved from `scheduled` to `published`, calling the same
+`performPublish` function an immediate publish uses, so a scheduled send is
+provably identical to one a publisher sends by hand.
+
+**Cancelling.** Any publisher may cancel a scheduled announcement before it
+sends, not only the one who scheduled it (`cancelSchedule`). It returns to
+`draft`, clearing the schedule and both approvals, so re-scheduling needs a
+fresh request and a fresh second confirmation. Withdrawing or rejecting a
+critical announcement that is still awaiting its schedule confirmation also
+clears the schedule, for the same reason.
+
+**`published_at` records when the announcement actually sent**, not the time
+it was scheduled for — the publishing transaction sets it at send time,
+whether that send was immediate or carried out by the worker.
+
 ### Drafts, editing and discarding
 
 The admin page (`/admin`) lists every draft, including one returned by a
