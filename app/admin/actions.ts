@@ -6,7 +6,7 @@ import { headers } from 'next/dist/server/request/headers.js';
 import { redirect } from 'next/navigation';
 import { getDb } from '../../src/web/db.js';
 import { resolveIdentity, isPublisher } from '../../src/core/identity.js';
-import { createDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish } from '../../src/core/announcements.js';
+import { createDraft, requestPublish, confirmPublish, withdrawPublish, rejectPublish, discardDraft } from '../../src/core/announcements.js';
 import { previewAnnouncement, type PreviewSet } from '../../src/core/preview.js';
 import { saveTemplate, stripPerAnnouncementFields } from '../../src/core/templates.js';
 import { inputFromForm } from './input-from-form.js';
@@ -141,6 +141,21 @@ export async function withdrawPublishAction(id: string): Promise<PublishResult> 
     return { announcement };
   } catch (err) {
     return { error: safeErrorMessage(err, 'withdrawPublish') };
+  }
+}
+
+export async function discardDraftAction(id: string): Promise<PublishResult> {
+  const db = getDb();
+  const identity = resolveIdentity(await headers());
+  if (!identity || !(await isPublisher(db, identity.email))) {
+    return { error: 'not authorized' };
+  }
+
+  try {
+    const announcement = await discardDraft(db, id, identity.email);
+    return { announcement };
+  } catch (err) {
+    return { error: safeErrorMessage(err, 'discardDraft') };
   }
 }
 

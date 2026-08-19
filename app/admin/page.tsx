@@ -4,11 +4,12 @@
 import { headers } from 'next/dist/server/request/headers.js';
 import ComposeForm from './compose-form.js';
 import PendingQueue from './pending-queue.js';
+import DraftsList from './drafts-list.js';
 import { getDb } from '../../src/web/db.js';
 import { listTemplates, templateFromAnnouncement } from '../../src/core/templates.js';
 import { getLatest } from '../../src/core/announcements.js';
 import { resolveIdentity } from '../../src/core/identity.js';
-import { listPublished, listAwaitingConfirmation } from '../../src/core/queries.js';
+import { listPublished, listAwaitingConfirmation, listDrafts } from '../../src/core/queries.js';
 import { rowToSetting } from '../../src/core/outbox.js';
 import { parseDiscordRoles } from '../../src/core/discord-mentions.js';
 import type { AnnouncementInput, DiscordRole } from '../../src/core/types.js';
@@ -55,10 +56,11 @@ export default async function AdminComposePage({
   const db = getDb();
   const identity = resolveIdentity(await headers());
 
-  const [templates, recentAnnouncements, pending, channelSettingRows] = await Promise.all([
+  const [templates, recentAnnouncements, pending, drafts, channelSettingRows] = await Promise.all([
     listTemplates(db),
     listPublished(db, 20),
     listAwaitingConfirmation(db),
+    listDrafts(db),
     db`select * from channel_settings`,
   ]);
   const discordRoles = distinctDiscordRoles(channelSettingRows.map(rowToSetting));
@@ -80,6 +82,15 @@ export default async function AdminComposePage({
       <PendingQueue
         items={pending.map(a => ({ id: a.id, title: a.title, severity: a.severity, requestedBy: a.publishRequestedBy }))}
         viewer={identity?.email ?? ''}
+      />
+      <DraftsList
+        items={drafts.map(a => ({
+          id: a.id,
+          title: a.title,
+          severity: a.severity,
+          publishRejectedBy: a.publishRejectedBy,
+          publishRejectedReason: a.publishRejectedReason,
+        }))}
       />
       <ComposeForm
         templates={templates.map(t => ({ id: t.id, name: t.name }))}

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { listPublished, getPublishedBySlug, listAwaitingConfirmation } from '../src/core/queries.js';
-import { createDraft, requestPublish, confirmPublish } from '../src/core/announcements.js';
+import { listPublished, getPublishedBySlug, listAwaitingConfirmation, listDrafts } from '../src/core/queries.js';
+import { createDraft, requestPublish, confirmPublish, discardDraft, reviseDraft, rejectPublish } from '../src/core/announcements.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
@@ -92,5 +92,48 @@ describe('listAwaitingConfirmation', () => {
     await requestPublish(sql, a.id, 'alice@test.local');
     const row = (await listAwaitingConfirmation(sql)).find(r => r.id === a.id);
     expect(row?.publishRequestedBy).toBe('alice@test.local');
+  });
+});
+
+describe('listDrafts', () => {
+  it('lists a draft', async () => {
+    const a = await createDraft(sql, input('A draft'), 'a@x');
+    expect((await listDrafts(sql)).map(r => r.id)).toContain(a.id);
+  });
+
+  it('does not list a published announcement', async () => {
+    const a = await createDraft(sql, input('Published'), 'a@x');
+    await requestPublish(sql, a.id, 'a@x');
+    expect((await listDrafts(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('does not list one awaiting confirmation', async () => {
+    const a = await createDraft(sql, criticalInput('Awaiting'), 'a@x');
+    await requestPublish(sql, a.id, 'a@x');
+    expect((await listDrafts(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('does not list a discarded draft', async () => {
+    const a = await createDraft(sql, input('Binned'), 'a@x');
+    await discardDraft(sql, a.id, 'a@x');
+    expect((await listDrafts(sql)).map(r => r.id)).not.toContain(a.id);
+  });
+
+  it('lists a draft returned by a rejection, with its reason', async () => {
+    const a = await createDraft(sql, criticalInput('Rejected'), 'alice@test.local');
+    await requestPublish(sql, a.id, 'alice@test.local');
+    await rejectPublish(sql, a.id, 'bob@test.local', 'Wrong version');
+    const row = (await listDrafts(sql)).find(r => r.id === a.id);
+    expect(row).toBeDefined();
+    expect(row?.publishRejectedReason).toBe('Wrong version');
+  });
+
+  it('reads the latest revision, not an old one', async () => {
+    // An announcement whose r1 was a draft and whose r2 is published must not
+    // appear — the distinct-on subquery must run before the status filter.
+    const a = await createDraft(sql, input('Two revisions'), 'a@x');
+    await reviseDraft(sql, a.id, input('Two revisions v2'), 'a@x');
+    await requestPublish(sql, a.id, 'a@x');
+    expect((await listDrafts(sql)).map(r => r.id)).not.toContain(a.id);
   });
 });

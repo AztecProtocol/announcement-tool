@@ -31,6 +31,23 @@ export async function listAwaitingConfirmation(sql: Sql): Promise<Announcement[]
   return rows.map(rowToAnnouncement);
 }
 
+/**
+ * Drafts, including ones returned by a rejection — latest revision per id,
+ * newest first. Uses the same distinct-on-before-filter pattern as
+ * listAwaitingConfirmation: a `where status = 'draft'` over all rows would
+ * match a superseded revision of an announcement that has since published.
+ */
+export async function listDrafts(sql: Sql, limit = 50): Promise<Announcement[]> {
+  const rows = await sql`
+    select * from (
+      select distinct on (id) * from announcements order by id, revision desc
+    ) latest
+    where latest.status = 'draft'
+    order by latest.created_at desc, latest.id desc
+    limit ${limit}`;
+  return rows.map(rowToAnnouncement);
+}
+
 export async function getPublishedBySlug(sql: Sql, slug: string): Promise<Announcement | undefined> {
   const rows = await sql`
     select * from (

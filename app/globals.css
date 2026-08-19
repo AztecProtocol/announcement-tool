@@ -605,6 +605,48 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
 .role-select-builtin { color: var(--critical); }
 .role-select-builtin input[type="checkbox"] { accent-color: var(--critical); }
 
+/* ── Drafts list ───────────────────────────────────────────────────── */
+/* Same structural shape as .pending-queue, but neutral (line/ink-2) rather
+   than the amber recommended-* tokens — a draft isn't waiting on anyone,
+   it's just unpublished, so it shouldn't compete visually with the pending
+   queue's call to action. */
+.drafts-list {
+  border: 1px solid var(--line);
+  background: var(--parchment-raised);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 22px;
+}
+.drafts-list h2 {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 10px;
+}
+.drafts-list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.drafts-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.drafts-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.drafts-title { font-weight: 600; }
+.drafts-meta { font-size: 12.5px; color: var(--ink-2); }
+.drafts-controls { display: flex; align-items: center; gap: 8px; flex: none; }
+/* .draft-discard-cancel: a plain button element carries no framework base
+   styles here (there is no bare `button` rule in this file), so this rule's
+   specificity (0,0,1,0) is the only thing painting it — nothing to override. */
+.draft-discard { display: flex; align-items: center; gap: 6px; }
+.draft-discard button.destructive { font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 6px; }
+.draft-discard-cancel {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+}
+.draft-discard-cancel:hover { background: var(--line-soft); }
+
 /* Kept at the end of the file, where a media query conventionally belongs —
    it was previously stranded mid-file with sections appended after it,
    which invites a future addition to wrongly assume it's motion-scoped. */
