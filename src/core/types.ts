@@ -37,7 +37,7 @@ export interface Announcement extends AnnouncementInput {
   id: string;
   revision: number;
   slug: string;
-  status: 'draft' | 'publish_requested' | 'published' | 'superseded';
+  status: 'draft' | 'publish_requested' | 'published' | 'superseded' | 'discarded';
   createdBy: string;
   publishRequestedBy?: string;
   publishConfirmedBy?: string;
