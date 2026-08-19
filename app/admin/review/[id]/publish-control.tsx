@@ -29,6 +29,7 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [scheduleInput, setScheduleInput] = useState('');
+  const [cancelArmed, setCancelArmed] = useState(false);
 
   async function run(action: () => Promise<{ announcement?: Announcement; error?: string }>) {
     setPending(true);
@@ -296,10 +297,25 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             type="button"
             className="destructive"
             disabled={pending}
-            onClick={() => run(() => cancelScheduleAction(announcement.id))}
+            onClick={() => {
+              if (!cancelArmed) {
+                setCancelArmed(true);
+                return;
+              }
+              run(() => cancelScheduleAction(announcement.id));
+            }}
           >
-            {pending ? 'Cancelling…' : 'Cancel'}
+            {pending ? 'Cancelling…' : cancelArmed ? 'Confirm cancel?' : 'Cancel'}
           </button>
+          {cancelArmed && !pending && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setCancelArmed(false)}
+            >
+              Keep scheduled
+            </button>
+          )}
           <p className="muted">
             Cancelling returns this announcement to draft. Re-scheduling needs a fresh confirmation.
           </p>
