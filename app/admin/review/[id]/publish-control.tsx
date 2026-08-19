@@ -51,6 +51,14 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
     );
   }
 
+  if (announcement.status === 'discarded') {
+    return (
+      <div className="notice">
+        <p>This draft was discarded. It cannot be published or edited.</p>
+      </div>
+    );
+  }
+
   if (announcement.status === 'superseded') {
     return (
       <div className="notice">
