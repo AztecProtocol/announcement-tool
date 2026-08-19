@@ -48,6 +48,45 @@ const BUILTIN_IDS = new Set(BUILTIN_ROLES.map(r => r.id));
  * or leaves it unchanged (which ends the loop). Do not "simplify" this back
  * to one pass — that reopens the splice bypass.
  */
+
+/**
+ * Longest accepted Discord destination prefix, in UTF-16 code units.
+ *
+ * The prefix is the emoji preamble. In the wire form Discord requires for a
+ * custom emoji (`<:name:id>`) each one costs roughly 25-30 ASCII characters,
+ * so a five-emoji preamble is about 150. 512 leaves room to grow the set or
+ * add words.
+ *
+ * The cap exists because stripRoleMentions runs to a fixed point and is
+ * therefore O(n^2) on nested splice input: measured on this loop, 10 KB costs
+ * 12.5 ms, 20 KB costs 49.8 ms and 80 KB costs 764 ms. That is not an attack
+ * path — only scripts/setup-channel.ts writes a prefix, and running it needs
+ * shell access to the server, which already grants the database and the
+ * webhook URLs. It is an accident guard: without a cap, a mis-paste is stored
+ * silently and then charged to every preview render and every Discord
+ * delivery, invisibly, forever. At 512 characters the loop costs far under a
+ * millisecond.
+ */
+export const MAX_PREFIX_LENGTH = 512;
+
+/**
+ * Checks a prefix a human just entered. Returns a message to show them, or
+ * undefined when the prefix is acceptable.
+ *
+ * Deliberately NOT called from composeMentionLine. That function runs against
+ * rows already in the database, some written before this cap existed, and
+ * refusing there would break an existing destination at send time — a worse
+ * failure than the accident this prevents. Enforce at entry only.
+ *
+ * Measures the RAW string, before stripRoleMentions. That is the length the
+ * loop's cost scales with; measuring the stripped result would admit a 40 KB
+ * nested input that collapses to an empty string.
+ */
+export function validatePrefix(prefix: string): string | undefined {
+  if (prefix.length <= MAX_PREFIX_LENGTH) return undefined;
+  return `prefix is ${prefix.length} characters; the maximum is ${MAX_PREFIX_LENGTH}`;
+}
+
 const stripRoleMentions = (s: string) => {
   let prev: string;
   do {

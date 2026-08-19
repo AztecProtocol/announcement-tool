@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDiscordRoles, composeMentionLine, mentionedRoleIds, mentionsEveryone } from '../src/core/discord-mentions.js';
+import { parseDiscordRoles, composeMentionLine, mentionedRoleIds, mentionsEveryone, MAX_PREFIX_LENGTH, validatePrefix } from '../src/core/discord-mentions.js';
 
 const A = { name: 'mainnet-sequencer', id: '1538890653835075584' };
 const B = { name: 'genesis-sequencer', id: '1538890653835075585' };
@@ -131,5 +131,54 @@ describe('mentionsEveryone', () => {
   it('is false otherwise', () => {
     expect(mentionsEveryone([A.id])).toBe(false);
     expect(mentionsEveryone(undefined)).toBe(false);
+  });
+});
+
+describe('validatePrefix', () => {
+  it('accepts an empty prefix', () => {
+    expect(validatePrefix('')).toBeUndefined();
+  });
+
+  it('accepts a realistic emoji preamble', () => {
+    const preamble = ['a', 'z', 't', 'e', 'c']
+      .map((c, i) => `<:aztec_${c}:12345678901234567${i}>`)
+      .join(' ');
+    expect(preamble.length).toBeLessThan(MAX_PREFIX_LENGTH);
+    expect(validatePrefix(preamble)).toBeUndefined();
+  });
+
+  it('accepts a prefix exactly at the cap', () => {
+    expect(validatePrefix('x'.repeat(MAX_PREFIX_LENGTH))).toBeUndefined();
+  });
+
+  it('refuses a prefix one character over the cap', () => {
+    const err = validatePrefix('x'.repeat(MAX_PREFIX_LENGTH + 1));
+    expect(err).toBeDefined();
+    // The message must state both numbers, so an operator knows how much to cut.
+    expect(err).toContain(String(MAX_PREFIX_LENGTH));
+    expect(err).toContain(String(MAX_PREFIX_LENGTH + 1));
+  });
+
+  it('measures the raw input, not the stripped result', () => {
+    // Nested splice input collapses to '' under stripRoleMentions. If the cap
+    // measured the stripped value this would pass, and the expensive input
+    // would be stored — the exact accident this cap exists to refuse.
+    let nested = '<@&1>';
+    for (let i = 0; i < 200; i++) nested = `<@&${nested}2>`;
+    expect(nested.length).toBeGreaterThan(MAX_PREFIX_LENGTH);
+    expect(validatePrefix(nested)).toBeDefined();
+  });
+});
+
+describe('composeMentionLine with an over-long stored prefix', () => {
+  it('still composes, because the cap guards entry and not stored rows', () => {
+    // A destination configured before the cap existed must keep working.
+    const cfg = {
+      prefix: 'P'.repeat(MAX_PREFIX_LENGTH + 50),
+      roles: [{ name: 'Mainnet', id: '111' }],
+    };
+    const line = composeMentionLine(cfg, ['111']);
+    expect(line).toBeDefined();
+    expect(line).toContain('<@&111>');
   });
 });
