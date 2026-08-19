@@ -46,7 +46,7 @@ describe('discord adapter', () => {
     server.close();
 
     const payload = JSON.parse(body);
-    expect(payload.content.startsWith(`<@&111> ${prefix}`)).toBe(true);
+    expect(payload.content.startsWith(`${prefix} <@&111>`)).toBe(true);
     expect(payload.content).toContain('[MAINNET] [CRITICAL] [UPGRADE]');
     expect(payload.content).toContain('**Upgrade now**');
     expect(payload.content).toContain('/a/slug-d');

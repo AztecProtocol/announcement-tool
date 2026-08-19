@@ -37,7 +37,7 @@ describe('previewAnnouncement', () => {
 
     expect(preview.discord).toHaveLength(1);
     expect(preview.discord![0].target).toBe('discord:mainnet-updates');
-    expect(preview.discord![0].content.startsWith(`<@&111> ${prefix}`)).toBe(true);
+    expect(preview.discord![0].content.startsWith(`${prefix} <@&111>`)).toBe(true);
     expect(preview.discord![0].content).toContain('**Upgrade now**');
     expect(preview.discord![0].content).toContain('Body text.');
   });
@@ -158,7 +158,7 @@ describe('previewAnnouncement', () => {
     const res = await previewAnnouncement(sql, { ...input, mentionRoleIds: ['111'] });
     const entry = res.discord?.[0];
     expect(entry).toBeDefined();
-    const expectedPrefix = `<@&111> ${prefix}`;
+    const expectedPrefix = `${prefix} <@&111>`;
     expect(entry!.prefix).toBe(expectedPrefix);
     expect(entry!.content).toBe(`${expectedPrefix}\n${entry!.content.slice(expectedPrefix.length + 1)}`);
     expect(entry!.content.startsWith(expectedPrefix)).toBe(true);
@@ -178,7 +178,7 @@ describe('previewAnnouncement', () => {
     // The adapter composes exactly this: composeMentionLine(cfg, a.mentionRoleIds)
     // + '\n' + renderMarkdown(a, kind), or renderMarkdown alone when the
     // composed line is undefined.
-    expect(entry!.content.startsWith(`<@&111> ${prefix}\n`)).toBe(true);
+    expect(entry!.content.startsWith(`${prefix} <@&111>\n`)).toBe(true);
   });
 
   it('honours a supplied slug in the canonical URL instead of generating one', async () => {
@@ -214,7 +214,7 @@ describe('previewAnnouncement', () => {
 
     const res = await previewAnnouncement(sql, { ...input, mentionRoleIds: ['111'] });
     const entry = res.discord?.[0];
-    expect(entry?.prefix).toBe(`<@&111> ${prefix}`);
+    expect(entry?.prefix).toBe(`${prefix} <@&111>`);
   });
 
   it('exposes the destination roles so the form can offer them', async () => {

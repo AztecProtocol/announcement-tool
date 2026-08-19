@@ -36,8 +36,8 @@ describe('composeMentionLine', () => {
     expect(composeMentionLine(withRoles, [B.id, A.id])).toBe(`<@&${A.id}> <@&${B.id}>`);
   });
 
-  it('appends the emoji prefix after the mentions', () => {
-    expect(composeMentionLine(both, [A.id])).toBe(`<@&${A.id}> 🇦🇿🇹🇪🇨`);
+  it('puts the emoji prefix before the mentions', () => {
+    expect(composeMentionLine(both, [A.id])).toBe(`🇦🇿🇹🇪🇨 <@&${A.id}>`);
   });
 
   it('returns undefined when nothing is selected', () => {
@@ -55,7 +55,7 @@ describe('composeMentionLine', () => {
   });
 
   it('renders @everyone as a literal, not a role id', () => {
-    expect(composeMentionLine(prefixOnly, ['everyone'])).toBe('@everyone 🇦🇿');
+    expect(composeMentionLine(prefixOnly, ['everyone'])).toBe('🇦🇿 @everyone');
   });
 
   it('renders @here as a literal', () => {
@@ -68,7 +68,7 @@ describe('composeMentionLine', () => {
 
   it('strips a role mention pasted into the prefix', () => {
     const cfg = { roles: [A], prefix: '<@&999999999999999999> 🇦🇿' };
-    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}> 🇦🇿`);
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`🇦🇿 <@&${A.id}>`);
   });
 
   it('does not permit a role mention pasted into the prefix', () => {
@@ -78,7 +78,7 @@ describe('composeMentionLine', () => {
 
   it('strips user mentions from the prefix too', () => {
     const cfg = { roles: [A], prefix: '<@123> <@!456> 🇦🇿' };
-    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}> 🇦🇿`);
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`🇦🇿 <@&${A.id}>`);
   });
 
   it('omits a prefix that is only a mention', () => {
@@ -88,7 +88,7 @@ describe('composeMentionLine', () => {
 
   it('strips a spliced mention that would reconstruct after one pass', () => {
     const cfg = { roles: [A], prefix: '<@&<@&123>456> 🇦🇿' };
-    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`<@&${A.id}> 🇦🇿`);
+    expect(composeMentionLine(cfg as Record<string, unknown>, [A.id])).toBe(`🇦🇿 <@&${A.id}>`);
   });
 
   it('does not permit a spliced mention from the prefix', () => {

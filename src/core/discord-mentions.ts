@@ -88,7 +88,10 @@ export function composeMentionLine(
 
   if (builtins.length === 0 && roles.length === 0) return undefined;
 
-  return [...builtins, ...roles, ...(prefix ? [prefix] : [])].join(' ').trim() || undefined;
+  // The prefix (the emoji preamble) leads, then the mentions. Discord renders
+  // a mention as a coloured pill, so putting the emoji first keeps the branding
+  // at the start of the line where a reader's eye lands.
+  return [...(prefix ? [prefix] : []), ...builtins, ...roles].join(' ').trim() || undefined;
 }
 
 /** The snowflake role ids the composed line mentions. Excludes built-ins. */
