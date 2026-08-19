@@ -181,4 +181,23 @@ describe('publishDueScheduled', () => {
     expect(await publishDueScheduled(sql)).toHaveLength(1);
     expect(await publishDueScheduled(sql)).toHaveLength(0);
   });
+
+  it('respects the batch limit, leaving the remainder scheduled for the next pass', async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = await createDraft(sql, draftInput({ severity: 'info' }), 'author@example.com');
+      await schedulePublish(sql, a.id, FUTURE, 'author@example.com');
+      await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+      ids.push(a.id);
+    }
+
+    const sent = await publishDueScheduled(sql, 2);
+    expect(sent).toHaveLength(2);
+
+    const statuses = await Promise.all(ids.map(id => getLatest(sql, id)));
+    const publishedCount = statuses.filter(s => s!.status === 'published').length;
+    const scheduledCount = statuses.filter(s => s!.status === 'scheduled').length;
+    expect(publishedCount).toBe(2);
+    expect(scheduledCount).toBe(1);
+  });
 });

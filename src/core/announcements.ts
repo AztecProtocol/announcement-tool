@@ -139,12 +139,25 @@ async function performPublish(tx: TransactionSql, a: Announcement, confirmer: st
  * The actor is 'scheduler' because no person performed this send. Note that
  * performPublish overwrites publish_confirmed_by with that literal, so the
  * audit detail below carries the humans who actually approved it.
+ *
+ * No `distinct on (id)` here, unlike listDrafts/listAwaitingConfirmation in
+ * queries.ts: reviseDraft refuses any status but 'draft', and every other
+ * mutation targets the latest revision, so only the latest revision of a row
+ * can ever be 'scheduled' — a stale revision cannot match this filter. If
+ * reviseDraft's status guard is ever relaxed, this invariant breaks and this
+ * query needs revisiting.
+ *
+ * `batch` caps one pass, matching src/worker/fanout.ts's batch default: a
+ * large backlog (worker downtime) should not hold row locks for every due
+ * announcement in a single transaction. Remainder is picked up on the next
+ * 15s tick, well within the minute-level precision this feature promises.
  */
-export async function publishDueScheduled(sql: Sql): Promise<Announcement[]> {
+export async function publishDueScheduled(sql: Sql, batch = 20): Promise<Announcement[]> {
   return sql.begin(async tx => {
     const due = await tx`select * from announcements
       where status = 'scheduled' and scheduled_for <= now()
       order by scheduled_for
+      limit ${batch}
       for update skip locked`;
 
     const sent: Announcement[] = [];
