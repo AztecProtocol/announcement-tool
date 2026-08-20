@@ -66,6 +66,16 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <div>
+      <header className="site-header">
+        <a href="/admin" className="brand" aria-label="Admin — Aztec release announcements — home">
+          <img src="/brand/aztec-wordmark-ink.svg" alt="Aztec" width={101} height={26} />
+        </a>
+        <nav>
+          <a href="/admin">Admin</a>
+          <a href="/archive">Archive</a>
+          <a href="/">Public site</a>
+        </nav>
+      </header>
       <div className="admin-identity-bar">
         <span>{identity.email}</span>
         <span className="tag tag-info">{sourceLabel}</span>
