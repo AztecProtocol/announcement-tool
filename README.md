@@ -247,7 +247,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 - In development, set `ADMIN_EMAIL` and it is used as a fallback identity when no Tailscale header is present.
 - If neither is present, the admin layout renders an access-denied page instead of the requested content.
 
-### Production preconditions
+### Startup safety checks
 
 Because admin identity comes from a header that anyone reaching the port could forge, and that header is only safe because the app is unreachable except through `tailscale serve`, both the web app and the worker refuse to run unless all of the following hold. This is enforced code (`src/core/production-guard.ts`, wired into `instrumentation.ts` for the web app and `src/worker/main.ts` for the worker), not just documentation — a misconfigured process will not run.
 
