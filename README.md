@@ -363,7 +363,11 @@ person to confirm.
 reason is required; an empty or whitespace-only reason is refused. The
 announcement returns to `draft` with `publishRejectedBy` and
 `publishRejectedReason` recorded, and the review page shows the reason on the
-draft so the author sees the objection when they reopen it.
+draft so the author sees the objection when they reopen it. After a rejection,
+the announcement is an ordinary draft: any publisher, including the one who
+rejected it, may edit it and request publication again. Four-eyes is not
+weakened — whoever requests becomes the requester, and a different publisher
+must still confirm before it publishes.
 
 Both actions run inside the same database transaction as the audit log entry
 they write (`publish_withdrawn` or `publish_rejected`, with actor and
