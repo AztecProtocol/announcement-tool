@@ -89,7 +89,13 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             <strong>Publication was rejected</strong> by {announcement.publishRejectedBy}:
             {' '}{announcement.publishRejectedReason}
           </p>
-          <p className="muted">Find this draft in the drafts list on the admin page to edit and resubmit it, or discard it.</p>
+          <p className="muted">
+            This announcement is a draft again, so it can be edited and requested again — including by
+            the publisher who rejected it. Publishing it will still need a second publisher to confirm.
+          </p>
+          <p className="muted">
+            <a className="pending-action" href={`/admin?from=edit:${announcement.id}`}>Edit this draft</a>
+          </p>
         </div>
       )}
 
