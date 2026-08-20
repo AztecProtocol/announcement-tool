@@ -11,6 +11,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "setup:channel": "tsx scripts/setup-channel.ts",
+    "seed:publisher": "tsx scripts/seed-publisher.ts",
     "test:send": "tsx scripts/send-test-announcement.ts",
     "test:subscriber": "tsx scripts/add-email-subscriber.ts",
     "test:status": "tsx scripts/status.ts",

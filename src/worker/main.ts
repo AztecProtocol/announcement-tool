@@ -2,6 +2,7 @@ import postgres from 'postgres';
 import { loadEnv } from '../env.js';
 loadEnv();
 import { checkEnvironment } from '../core/production-guard.js';
+import { assertPublishersConfigured } from '../core/identity.js';
 import { runFanoutOnce } from './fanout.js';
 import { dispatchHealthAlerts } from '../core/alerts.js';
 import { publishDueScheduled } from '../core/announcements.js';
@@ -32,6 +33,19 @@ if (problems.length > 0) {
 
 const url = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const sql = postgres(url, { max: 4 });
+
+try {
+  await assertPublishersConfigured(sql, {
+    nodeEnv: process.env.NODE_ENV,
+    adminEmail: process.env.ADMIN_EMAIL,
+    hostname: process.env.HOSTNAME,
+    publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  });
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+}
+
 const sender = senderFromEnv();
 
 const adapters: Record<string, ChannelAdapter> = {
