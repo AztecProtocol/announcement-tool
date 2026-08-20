@@ -287,6 +287,18 @@ thead th {
   font-size: 13px;
   color: var(--ink-2);
 }
+.admin-identity-bar .admin-identity-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+}
+.admin-identity-bar .admin-identity-nav a {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.admin-identity-bar .admin-identity-nav a:hover { color: var(--ink); }
 
 /* admin */
 textarea {

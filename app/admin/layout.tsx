@@ -19,12 +19,12 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   if (!identity) {
     return (
-      <main>
+      <div>
         <h1>Admin access requires the Aztec tailnet</h1>
         <p className="muted">
           This page is reachable only over the Foundation tailnet. Join the tailnet and reload.
         </p>
-      </main>
+      </div>
     );
   }
 
@@ -45,20 +45,20 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     allowed = await isPublisher(getDb(), identity.email);
   } catch {
     return (
-      <main>
+      <div>
         <h1>Admin is unavailable</h1>
         <p className="muted">Could not verify publisher configuration.</p>
-      </main>
+      </div>
     );
   }
   if (!allowed) {
     return (
-      <main>
+      <div>
         <h1>Admin access requires publisher permissions</h1>
         <p className="muted">
           This identity ({identity.email}) is not in the publishers list. Ask an existing publisher to add you.
         </p>
-      </main>
+      </div>
     );
   }
   const bootstrapping = publishers.length === 0;
@@ -66,19 +66,14 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   return (
     <div>
-      <header className="site-header">
-        <a href="/admin" className="brand" aria-label="Admin — Aztec release announcements — home">
-          <img src="/brand/aztec-wordmark-ink.svg" alt="Aztec" width={101} height={26} />
-        </a>
-        <nav>
+      <div className="admin-identity-bar">
+        <span>{identity.email}</span>
+        <span className="tag tag-info">{sourceLabel}</span>
+        <nav className="admin-identity-nav">
           <a href="/admin">Admin</a>
           <a href="/archive">Archive</a>
           <a href="/">Public site</a>
         </nav>
-      </header>
-      <div className="admin-identity-bar">
-        <span>{identity.email}</span>
-        <span className="tag tag-info">{sourceLabel}</span>
       </div>
       {bootstrapping && (
         <div className="notice">
@@ -87,7 +82,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           </p>
         </div>
       )}
-      <main>{children}</main>
+      <div>{children}</div>
     </div>
   );
 }
