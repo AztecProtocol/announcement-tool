@@ -247,6 +247,19 @@ Every admin route resolves the caller's identity from request headers (`src/core
 - In development, set `ADMIN_EMAIL` and it is used as a fallback identity when no Tailscale header is present.
 - If neither is present, the admin layout renders an access-denied page instead of the requested content.
 
+### Production preconditions
+
+Because admin identity comes from a header that anyone reaching the port could forge, and that header is only safe because the app is unreachable except through `tailscale serve`, both the web app and the worker refuse to start in production (`NODE_ENV=production`) unless all of the following hold. This is enforced code (`src/core/production-guard.ts`, wired into `instrumentation.ts` for the web app and `src/worker/main.ts` for the worker), not just documentation — a misconfigured process will not run.
+
+- `ADMIN_EMAIL` is **unset**. It is the dev-only identity fallback; set in production, it would grant admin to any request lacking a Tailscale header.
+- `HOSTNAME` is `127.0.0.1` or `::1`. Unset or anything else, the server binds every interface, exposing the forgeable header directly.
+- `PUBLIC_BASE_URL` is set and starts with `https://`. Otherwise confirmation and unsubscribe links sent to real subscribers point at the wrong host.
+- At least one row exists in the `publishers` table — seed one with `npm run seed:publisher -- you@example.com`.
+
+**`next start` always sets `NODE_ENV=production` internally**, so any production start of the web app is subject to all four checks above, whether or not `NODE_ENV` was set explicitly by the deployer. A start that fails these checks either aborts immediately (web app) or exits non-zero after printing the problems (worker) — if the web app is ever seen running but returning 500 on every request, check these first.
+
+The two public server actions (email subscribe, webhook registration) are also rate-limited in memory, per process: 5 email-subscribe attempts and 10 webhook registrations per 10 minutes. This limit resets on process restart and is not shared across multiple instances — see `src/core/rate-limit.ts`.
+
 ### Publishers and the bootstrap rule
 
 `app/admin/layout.tsx` checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`) before rendering any admin page, so a non-publisher tailnet identity cannot read drafts, requester emails, fan-out targets, or templates either. Each mutating server action in `app/admin/actions.ts` also runs its own `isPublisher` check independently — the layout is not the only enforcement point for writes.
