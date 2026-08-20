@@ -24,6 +24,7 @@ const problems = checkEnvironment({
   adminEmail: process.env.ADMIN_EMAIL,
   hostname: process.env.HOSTNAME,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
 });
 if (problems.length > 0) {
   console.error('Refusing to start: unsafe production configuration.');
@@ -40,6 +41,7 @@ try {
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
+    allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
   });
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);

@@ -249,14 +249,16 @@ Every admin route resolves the caller's identity from request headers (`src/core
 
 ### Production preconditions
 
-Because admin identity comes from a header that anyone reaching the port could forge, and that header is only safe because the app is unreachable except through `tailscale serve`, both the web app and the worker refuse to start in production (`NODE_ENV=production`) unless all of the following hold. This is enforced code (`src/core/production-guard.ts`, wired into `instrumentation.ts` for the web app and `src/worker/main.ts` for the worker), not just documentation — a misconfigured process will not run.
+Because admin identity comes from a header that anyone reaching the port could forge, and that header is only safe because the app is unreachable except through `tailscale serve`, both the web app and the worker refuse to run unless all of the following hold. This is enforced code (`src/core/production-guard.ts`, wired into `instrumentation.ts` for the web app and `src/worker/main.ts` for the worker), not just documentation — a misconfigured process will not run.
 
 - `ADMIN_EMAIL` is **unset**. It is the dev-only identity fallback; set in production, it would grant admin to any request lacking a Tailscale header.
 - `HOSTNAME` is `127.0.0.1` or `::1`. Unset or anything else, the server binds every interface, exposing the forgeable header directly.
 - `PUBLIC_BASE_URL` is set and starts with `https://`. Otherwise confirmation and unsubscribe links sent to real subscribers point at the wrong host.
 - At least one row exists in the `publishers` table — seed one with `npm run seed:publisher -- you@example.com`.
 
-**`next start` always sets `NODE_ENV=production` internally**, so any production start of the web app is subject to all four checks above, whether or not `NODE_ENV` was set explicitly by the deployer. A start that fails these checks either aborts immediately (web app) or exits non-zero after printing the problems (worker) — if the web app is ever seen running but returning 500 on every request, check these first.
+**These checks run always, regardless of `NODE_ENV`, unless `ANNOUNCE_ALLOW_INSECURE_DEV=1` is set.** They are deliberately not keyed on `NODE_ENV=production`: `next start` only *defaults* `NODE_ENV` to production rather than overriding an existing value, so `NODE_ENV=staging next start` would otherwise leave the app in a non-production `NODE_ENV` and skip every check while still serving admin traffic. `.env.example` sets `ANNOUNCE_ALLOW_INSECURE_DEV=1` for local development; it must never be set on a deployed instance, since setting it removes the only thing enforcing that the forgeable Tailscale header is safe to trust.
+
+A start that fails these checks exits non-zero after printing the problems for the worker. For the web app, the check runs inside Next's `register()` startup hook — throwing there does **not** abort the process; Next logs the error and the server keeps running, returning 500 on every request. So if the web app is ever seen listening but every request 500s, check these first — a health check must send a real request, not just confirm the port is open, or it will report a misconfigured instance as healthy.
 
 The two public server actions (email subscribe, webhook registration) are also rate-limited in memory, per process: 5 email-subscribe attempts and 10 webhook registrations per 10 minutes. This limit resets on process restart and is not shared across multiple instances — see `src/core/rate-limit.ts`.
 

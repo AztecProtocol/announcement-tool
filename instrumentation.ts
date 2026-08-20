@@ -15,6 +15,7 @@ export async function register(): Promise<void> {
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
+    allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
   });
 
   if (problems.length > 0) {
@@ -29,5 +30,6 @@ export async function register(): Promise<void> {
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
+    allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
   });
 }

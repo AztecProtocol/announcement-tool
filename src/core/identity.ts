@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres';
-import { isProduction, type GuardEnv } from './production-guard.js';
+import { checksApply, type GuardEnv } from './production-guard.js';
 
 export interface Identity { email: string; name?: string; source: 'tailscale' | 'dev' }
 
@@ -42,7 +42,7 @@ export async function isPublisher(sql: Sql, email: string): Promise<boolean> {
  * from being reachable in production.
  */
 export async function assertPublishersConfigured(sql: Sql, env: GuardEnv): Promise<void> {
-  if (!isProduction(env)) return;
+  if (!checksApply(env)) return;
   const [{ c }] = await sql`select count(*)::int as c from publishers`;
   if (c === 0) {
     throw new Error(

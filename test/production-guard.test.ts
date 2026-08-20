@@ -1,26 +1,34 @@
 import { describe, it, expect } from 'vitest';
-import { checkEnvironment, isProduction } from '../src/core/production-guard.js';
+import { checkEnvironment, checksApply } from '../src/core/production-guard.js';
 
 const prod = { nodeEnv: 'production', hostname: '127.0.0.1', publicBaseUrl: 'https://announce.example.org' };
 
-describe('isProduction', () => {
-  it('is true only for exactly "production"', () => {
-    expect(isProduction({ nodeEnv: 'production' })).toBe(true);
-    expect(isProduction({ nodeEnv: 'development' })).toBe(false);
-    expect(isProduction({ nodeEnv: 'Production' })).toBe(false);
-    expect(isProduction({})).toBe(false);
+describe('checksApply', () => {
+  it('applies by default, whatever nodeEnv is', () => {
+    expect(checksApply({})).toBe(true);
+    expect(checksApply({ nodeEnv: 'production' })).toBe(true);
+    expect(checksApply({ nodeEnv: 'development' })).toBe(true);
+    expect(checksApply({ nodeEnv: 'staging' })).toBe(true);
+    expect(checksApply({ nodeEnv: undefined })).toBe(true);
+  });
+
+  it('is skipped only by the exact opt-out value "1"', () => {
+    expect(checksApply({ allowInsecureDev: '1' })).toBe(false);
+    expect(checksApply({ allowInsecureDev: '0' })).toBe(true);
+    expect(checksApply({ allowInsecureDev: 'true' })).toBe(true);
+    expect(checksApply({ allowInsecureDev: '' })).toBe(true);
   });
 });
 
-describe('checkEnvironment in development', () => {
-  it('never complains, whatever is set', () => {
-    expect(checkEnvironment({})).toEqual([]);
-    expect(checkEnvironment({ nodeEnv: 'development', adminEmail: 'dev@example.com' })).toEqual([]);
-    expect(checkEnvironment({ nodeEnv: 'development', hostname: '0.0.0.0' })).toEqual([]);
+describe('checkEnvironment with the insecure-dev opt-out', () => {
+  it('never complains when ANNOUNCE_ALLOW_INSECURE_DEV=1, whatever else is set', () => {
+    expect(checkEnvironment({ allowInsecureDev: '1' })).toEqual([]);
+    expect(checkEnvironment({ nodeEnv: 'development', adminEmail: 'dev@example.com', allowInsecureDev: '1' })).toEqual([]);
+    expect(checkEnvironment({ nodeEnv: 'development', hostname: '0.0.0.0', allowInsecureDev: '1' })).toEqual([]);
   });
 });
 
-describe('checkEnvironment in production', () => {
+describe('checkEnvironment applies regardless of NODE_ENV', () => {
   it('accepts a correctly configured environment', () => {
     expect(checkEnvironment(prod)).toEqual([]);
   });
@@ -60,5 +68,19 @@ describe('checkEnvironment in production', () => {
       nodeEnv: 'production', adminEmail: 'x@example.com', hostname: '0.0.0.0', publicBaseUrl: undefined,
     });
     expect(problems).toHaveLength(3);
+  });
+
+  it('applies when nodeEnv is "staging" — the regression this guard exists to close', () => {
+    // NODE_ENV=staging next start would previously leave isProduction() false,
+    // silently disabling every check while the app served admin traffic.
+    const problems = checkEnvironment({ ...prod, nodeEnv: 'staging' });
+    expect(problems).toEqual([]);
+    expect(checkEnvironment({ nodeEnv: 'staging', hostname: '0.0.0.0' })
+      .some(p => p.includes('HOSTNAME'))).toBe(true);
+  });
+
+  it('applies when nodeEnv is undefined', () => {
+    const problems = checkEnvironment({ hostname: '0.0.0.0' });
+    expect(problems.some(p => p.includes('HOSTNAME'))).toBe(true);
   });
 });

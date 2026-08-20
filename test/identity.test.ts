@@ -39,12 +39,12 @@ describe('publishers', () => {
 });
 
 describe('assertPublishersConfigured', () => {
-  it('passes in production when a publisher exists', async () => {
+  it('passes when a publisher exists', async () => {
     await sql`insert into publishers (email) values ('alice@example.com')`;
     await expect(assertPublishersConfigured(sql, { nodeEnv: 'production' })).resolves.toBeUndefined();
   });
 
-  it('throws in production when the table is empty', async () => {
+  it('throws when the table is empty', async () => {
     await expect(assertPublishersConfigured(sql, { nodeEnv: 'production' }))
       .rejects.toThrow(/publishers/i);
   });
@@ -54,8 +54,15 @@ describe('assertPublishersConfigured', () => {
       .rejects.toThrow(/seed:publisher/);
   });
 
-  it('does nothing in development, so local work is unaffected', async () => {
-    await expect(assertPublishersConfigured(sql, { nodeEnv: 'development' })).resolves.toBeUndefined();
-    await expect(assertPublishersConfigured(sql, {})).resolves.toBeUndefined();
+  it('still throws when nodeEnv is not "production" — the check does not key off NODE_ENV', async () => {
+    await expect(assertPublishersConfigured(sql, { nodeEnv: 'staging' })).rejects.toThrow(/publishers/i);
+    await expect(assertPublishersConfigured(sql, { nodeEnv: 'development' })).rejects.toThrow(/publishers/i);
+    await expect(assertPublishersConfigured(sql, {})).rejects.toThrow(/publishers/i);
+  });
+
+  it('does nothing when ANNOUNCE_ALLOW_INSECURE_DEV=1 opts out, so local work is unaffected', async () => {
+    await expect(assertPublishersConfigured(sql, { nodeEnv: 'development', allowInsecureDev: '1' }))
+      .resolves.toBeUndefined();
+    await expect(assertPublishersConfigured(sql, { allowInsecureDev: '1' })).resolves.toBeUndefined();
   });
 });

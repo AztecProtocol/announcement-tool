@@ -24,13 +24,28 @@ export interface GuardEnv {
   adminEmail?: string;
   hostname?: string;
   publicBaseUrl?: string;
+  allowInsecureDev?: string;
 }
 
 /** Loopback only. Anything else means the port is reachable off-host. */
 const LOOPBACK = new Set(['127.0.0.1', '::1']);
 
-export function isProduction(env: GuardEnv): boolean {
-  return env.nodeEnv === 'production';
+/**
+ * Whether the safety checks apply. They apply EVERYWHERE except an explicit,
+ * deliberate local opt-out.
+ *
+ * Deliberately NOT keyed on NODE_ENV === 'production'. `next start` only
+ * DEFAULTS NODE_ENV to production (node_modules/next/dist/bin/next:66 is
+ * `process.env.NODE_ENV = process.env.NODE_ENV || defaultEnv`), so
+ * `NODE_ENV=staging next start` would otherwise disable every check while the
+ * app served admin traffic. A guard that one unexpected env value switches off
+ * is not a guard.
+ *
+ * The opt-out is a named variable nobody sets by accident, and it is the ONLY
+ * way to skip the checks.
+ */
+export function checksApply(env: GuardEnv): boolean {
+  return env.allowInsecureDev !== '1';
 }
 
 /**
@@ -39,12 +54,12 @@ export function isProduction(env: GuardEnv): boolean {
  * Returns ALL problems rather than throwing on the first, so an operator fixes
  * one deployment and not three in sequence.
  *
- * Development returns an empty array unconditionally: this guard exists to stop
- * a production mistake, and a guard that obstructs local work is a guard
- * somebody switches off.
+ * Skips entirely only when checksApply(env) is false, i.e. ANNOUNCE_ALLOW_INSECURE_DEV=1
+ * was set explicitly: this guard exists to stop a production mistake, and a guard
+ * that obstructs local work is a guard somebody switches off.
  */
 export function checkEnvironment(env: GuardEnv): string[] {
-  if (!isProduction(env)) return [];
+  if (!checksApply(env)) return [];
   const problems: string[] = [];
 
   if (env.adminEmail) {
