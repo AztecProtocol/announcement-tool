@@ -69,10 +69,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       <div className="admin-identity-bar">
         <span>{identity.email}</span>
         <span className="tag tag-info">{sourceLabel}</span>
+        {/* Only the admin home. Archive and the public site are already one
+            click away in the site header directly above this bar, so
+            repeating them here is noise. */}
         <nav className="admin-identity-nav">
           <a href="/admin">Admin</a>
-          <a href="/archive">Archive</a>
-          <a href="/">Public site</a>
         </nav>
       </div>
       {bootstrapping && (
