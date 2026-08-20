@@ -62,6 +62,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
 
   return (
     <article>
+      <p><a href="/admin">← Back to admin</a></p>
       <h1 className="muted" style={{ fontFamily: 'var(--sans)', fontSize: 14 }}>Review before publishing</h1>
 
       <div className="card">
