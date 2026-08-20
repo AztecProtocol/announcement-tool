@@ -20,6 +20,14 @@
  */
 
 export interface GuardEnv {
+  /**
+   * Deliberately UNREAD. Kept on the interface so the tests can prove the gate
+   * ignores it: checksApply() must return true for 'staging', 'development' and
+   * undefined alike. Gating on NODE_ENV was the original bug — `next start` only
+   * DEFAULTS it (next/dist/bin/next: `process.env.NODE_ENV || defaultEnv`), so
+   * `NODE_ENV=staging next start` silently disabled every check while the app
+   * served admin traffic. Do not reintroduce a branch on this field.
+   */
   nodeEnv?: string;
   adminEmail?: string;
   hostname?: string;
@@ -64,7 +72,7 @@ export function checkEnvironment(env: GuardEnv): string[] {
 
   if (env.adminEmail) {
     problems.push(
-      'ADMIN_EMAIL is set in production. It is the development-only identity fallback: '
+      'ADMIN_EMAIL is set. It is the development-only identity fallback: '
       + 'with it set, any request that arrives without a Tailscale header is treated as this '
       + 'user and may publish. Unset it.',
     );
@@ -72,7 +80,7 @@ export function checkEnvironment(env: GuardEnv): string[] {
 
   if (!env.hostname || !LOOPBACK.has(env.hostname)) {
     problems.push(
-      `HOSTNAME must be 127.0.0.1 or ::1 in production (got ${env.hostname ?? 'unset'}). `
+      `HOSTNAME must be 127.0.0.1 or ::1 (got ${env.hostname ?? 'unset'}). `
       + 'Unset, the server binds every interface, so the forgeable Tailscale identity header '
       + 'could be sent by anyone who can reach the port. Bind loopback and put `tailscale serve` '
       + 'in front.',
@@ -81,12 +89,12 @@ export function checkEnvironment(env: GuardEnv): string[] {
 
   if (!env.publicBaseUrl) {
     problems.push(
-      'PUBLIC_BASE_URL must be set in production. Unset, it defaults to a compiled-in host, '
+      'PUBLIC_BASE_URL must be set. Unset, it defaults to a compiled-in host, '
       + 'so confirmation and unsubscribe links sent to real subscribers point at the wrong site.',
     );
   } else if (!env.publicBaseUrl.startsWith('https://')) {
     problems.push(
-      `PUBLIC_BASE_URL must be https in production (got ${env.publicBaseUrl}). `
+      `PUBLIC_BASE_URL must be https (got ${env.publicBaseUrl}). `
       + 'Unsubscribe and confirmation tokens travel in these links.',
     );
   }

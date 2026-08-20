@@ -20,7 +20,6 @@ import { senderFromEnv } from '../adapters/esp.js';
 // the same environment is deliberate: one check, one story, easier to reason
 // about than two different rules for two processes.
 const problems = checkEnvironment({
-  nodeEnv: process.env.NODE_ENV,
   adminEmail: process.env.ADMIN_EMAIL,
   hostname: process.env.HOSTNAME,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
@@ -37,7 +36,6 @@ const sql = postgres(url, { max: 4 });
 
 try {
   await assertPublishersConfigured(sql, {
-    nodeEnv: process.env.NODE_ENV,
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,

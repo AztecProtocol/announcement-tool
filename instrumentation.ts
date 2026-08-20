@@ -11,7 +11,6 @@ export async function register(): Promise<void> {
 
   const { checkEnvironment } = await import('./src/core/production-guard.js');
   const problems = checkEnvironment({
-    nodeEnv: process.env.NODE_ENV,
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
@@ -26,7 +25,6 @@ export async function register(): Promise<void> {
   const { assertPublishersConfigured } = await import('./src/core/identity.js');
   const { getDb } = await import('./src/web/db.js');
   await assertPublishersConfigured(getDb(), {
-    nodeEnv: process.env.NODE_ENV,
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
