@@ -66,6 +66,10 @@
     // be listed explicitly, or they are never type-checked. middleware.ts is the
     // trust boundary for admin identity, so it must not go unchecked.
     "middleware.ts",
+    // Netlify functions live outside src/ and are not covered by the "src"
+    // entry above; without an explicit entry they typecheck only when they
+    // happen to run, which has already bitten this project twice.
+    "netlify",
     "next-env.d.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"

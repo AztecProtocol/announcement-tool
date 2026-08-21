@@ -4,12 +4,7 @@ loadEnv();
 import { checkEnvironment } from '../core/production-guard.js';
 import { assertPublishersConfigured } from '../core/identity.js';
 import { runTick } from './tick.js';
-import type { ChannelAdapter } from '../adapters/types.js';
-import { makeWebhookAdapter } from '../adapters/webhook.js';
-import { makeDiscordAdapter } from '../adapters/discord.js';
-import { makeTelegramAdapter } from '../adapters/telegram.js';
-import { makeEmailAdapter } from '../adapters/email.js';
-import { makeSignalAdapter } from '../adapters/signal.js';
+import { buildAdapters } from './adapters.js';
 import { senderFromEnv } from '../adapters/esp.js';
 
 // The worker does not bind a port, so HOSTNAME is not strictly its own
@@ -46,13 +41,7 @@ try {
 
 const sender = senderFromEnv();
 
-const adapters: Record<string, ChannelAdapter> = {
-  webhook: makeWebhookAdapter(sql),
-  discord: makeDiscordAdapter(sql),
-  telegram: makeTelegramAdapter(sql),
-  email: makeEmailAdapter(sql, sender),
-  signal: makeSignalAdapter(sql),
-};
+const adapters = buildAdapters(sql, sender, ['webhook', 'discord', 'telegram', 'email', 'signal']);
 
 console.log(`fan-out worker started (15s interval, scheduling on, esp=${sender.name}, channels=${Object.keys(adapters).join(',')})`);
 setInterval(async () => {
