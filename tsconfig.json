@@ -62,6 +62,10 @@
     "test",
     "app",
     "instrumentation.ts",
+    // Root-level files are not covered by the "src"/"app" entries above and must
+    // be listed explicitly, or they are never type-checked. middleware.ts is the
+    // trust boundary for admin identity, so it must not go unchecked.
+    "middleware.ts",
     "next-env.d.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"

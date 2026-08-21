@@ -18,6 +18,7 @@
     "test:reset": "tsx scripts/reset-test-data.ts"
   },
   "dependencies": {
+    "jose": "^6.2.9",
     "next": "^16.2.12",
     "postgres": "^3.4.9",
     "react": "^19.2.8",

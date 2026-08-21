@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { resolveIdentity, isPublisher, listPublishers, assertPublishersConfigured } from '../src/core/identity.js';
+import { AUTH0_IDENTITY_HEADER } from '../src/core/auth0-claims.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
@@ -9,6 +10,28 @@ beforeEach(async () => { await resetDb(sql); await sql`delete from publishers`; 
 afterAll(async () => { await sql.end(); });
 
 describe('resolveIdentity', () => {
+  it('prefers the verified Auth0 header over every other source', () => {
+    const h = new Headers({
+      [AUTH0_IDENTITY_HEADER]: 'publisher@example.com',
+      'Tailscale-User-Login': 'someone.else@aztecprotocol.com',
+    });
+    expect(resolveIdentity(h, { devEmail: 'dev@example.com' }))
+      .toEqual({ email: 'publisher@example.com', source: 'auth0' });
+  });
+
+  it('trims the Auth0 header and ignores it when blank', () => {
+    expect(resolveIdentity(new Headers({ [AUTH0_IDENTITY_HEADER]: '  publisher@example.com ' }), {}))
+      .toEqual({ email: 'publisher@example.com', source: 'auth0' });
+    // A blank value must fall through rather than resolve to an empty identity.
+    expect(resolveIdentity(new Headers({ [AUTH0_IDENTITY_HEADER]: '   ' }), {})).toBeUndefined();
+  });
+
+  it('falls through to Tailscale when no Auth0 header is present', () => {
+    const h = new Headers({ 'Tailscale-User-Login': 'publisher@example.com' });
+    expect(resolveIdentity(h, {}))
+      .toEqual({ email: 'publisher@example.com', source: 'tailscale' });
+  });
+
   it('prefers the Tailscale header', () => {
     const h = new Headers({ 'Tailscale-User-Login': 'publisher@example.com', 'Tailscale-User-Name': 'Publisher' });
     expect(resolveIdentity(h, { devEmail: 'dev@example.com' }))
