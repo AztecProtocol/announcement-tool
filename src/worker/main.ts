@@ -3,9 +3,7 @@ import { loadEnv } from '../env.js';
 loadEnv();
 import { checkEnvironment } from '../core/production-guard.js';
 import { assertPublishersConfigured } from '../core/identity.js';
-import { runFanoutOnce } from './fanout.js';
-import { dispatchHealthAlerts } from '../core/alerts.js';
-import { publishDueScheduled } from '../core/announcements.js';
+import { runTick } from './tick.js';
 import type { ChannelAdapter } from '../adapters/types.js';
 import { makeWebhookAdapter } from '../adapters/webhook.js';
 import { makeDiscordAdapter } from '../adapters/discord.js';
@@ -58,22 +56,8 @@ const adapters: Record<string, ChannelAdapter> = {
 
 console.log(`fan-out worker started (15s interval, scheduling on, esp=${sender.name}, channels=${Object.keys(adapters).join(',')})`);
 setInterval(async () => {
-  // Scheduling gets its own try/catch: a failing scheduler must not skip
-  // fan-out or health alerting on this tick — those are the mechanisms that
-  // would tell an operator something is wrong, so they must keep running
-  // even while the scheduler is broken.
-  try {
-    const due = await publishDueScheduled(sql);
-    for (const a of due) console.log(`scheduled publish sent: ${a.id} (${a.slug})`);
-  } catch (err) {
-    console.error('scheduled publish error:', err);
-  }
-  try {
-    const { delivered, failed } = await runFanoutOnce(sql, adapters);
-    if (delivered || failed) console.log(`fanout: delivered=${delivered} failed=${failed}`);
-    const alerted = await dispatchHealthAlerts(sql, sender);
-    for (const i of alerted) console.warn(`HEALTH ${i.kind} [${i.channel}] ${i.announcementId}: ${i.detail}`);
-  } catch (err) {
-    console.error('fanout tick error:', err);
-  }
+  const { published, delivered, failed, alerted } = await runTick(sql, adapters, sender);
+  for (const id of published) console.log(`scheduled publish sent: ${id}`);
+  if (delivered || failed) console.log(`fanout: delivered=${delivered} failed=${failed}`);
+  if (alerted) console.log(`health alerts dispatched: ${alerted}`);
 }, 15_000);
