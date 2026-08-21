@@ -62,7 +62,8 @@ async function renderPreviewSet(
   const discord = discordTargets.map(t => {
     const cfg = settings.find(s => s.key === t.target)!.config;
     const prefix = composeMentionLine(cfg, a.mentionRoleIds);
-    const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
+    // Byte-identical to src/adapters/discord.ts — see the comment there.
+    const content = prefix ? `${prefix}\n\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
     return { target: t.target, content, ...(prefix ? { prefix } : {}), roles: parseDiscordRoles(cfg) };
   });
 

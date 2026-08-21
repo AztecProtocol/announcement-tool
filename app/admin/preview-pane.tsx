@@ -82,7 +82,10 @@ export function PreviewPane(
                 <div className="pv-surface pv-discord">
                   {d.prefix && <MentionPrefix prefix={d.prefix} roles={d.roles} />}
                   <Blocks blocks={parseMarkdownBlocks(
-                    d.prefix ? d.content.slice(d.prefix.length + 1) : d.content,
+                    // +2 for the blank line the adapter puts between the prefix and
+                    // the body (`${prefix}\n\n${body}`). Keep in step with the join
+                    // expression in src/adapters/discord.ts and src/core/preview.ts.
+                    d.prefix ? d.content.slice(d.prefix.length + 2) : d.content,
                   )} />
                 </div>
               )}

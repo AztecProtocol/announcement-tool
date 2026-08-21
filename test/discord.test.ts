@@ -47,6 +47,10 @@ describe('discord adapter', () => {
 
     const payload = JSON.parse(body);
     expect(payload.content.startsWith(`${prefix} <@&111>`)).toBe(true);
+    // A BLANK line separates the mention prefix from the body, so the tag line is
+    // not crowded against the role pings. startsWith alone would not catch a
+    // regression to a single newline, so pin the separator explicitly.
+    expect(payload.content.startsWith(`${prefix} <@&111>\n\n[MAINNET]`)).toBe(true);
     expect(payload.content).toContain('[MAINNET] [CRITICAL] [UPGRADE]');
     expect(payload.content).toContain('**Upgrade now**');
     expect(payload.content).toContain('/a/slug-d');

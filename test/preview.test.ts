@@ -178,7 +178,8 @@ describe('previewAnnouncement', () => {
     // The adapter composes exactly this: composeMentionLine(cfg, a.mentionRoleIds)
     // + '\n' + renderMarkdown(a, kind), or renderMarkdown alone when the
     // composed line is undefined.
-    expect(entry!.content.startsWith(`${prefix} <@&111>\n`)).toBe(true);
+    // Blank line between prefix and body — must match src/adapters/discord.ts byte for byte.
+    expect(entry!.content.startsWith(`${prefix} <@&111>\n\n`)).toBe(true);
   });
 
   it('honours a supplied slug in the canonical URL instead of generating one', async () => {

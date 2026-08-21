@@ -23,7 +23,11 @@ export function makeDiscordAdapter(
       if (!webhookUrl) throw new Error(`discord setting ${target} has no webhook_url`);
 
       const prefix = composeMentionLine(cfg, a.mentionRoleIds);
-      const content = prefix ? `${prefix}\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
+      // Blank line between the mention prefix and the body, so the tag line is not
+      // crowded against the role pings. The expression MUST stay byte-identical to
+      // the one in src/core/preview.ts — that identity is what makes the Raw preview
+      // a trustworthy record of what goes on the wire.
+      const content = prefix ? `${prefix}\n\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
 
       const res = await doFetch(webhookUrl, {
         method: 'POST',
