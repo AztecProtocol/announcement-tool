@@ -47,12 +47,19 @@ export default async (req: Request): Promise<Response | void> => {
     return new Response('Not found', { status: 404 });
   }
 
-  const problems = checkEnvironment({
+  // This function only ever runs on the Netlify deployment — the VM's
+  // equivalent is src/worker/main.ts, which sets DEPLOY_TARGET=vm. Hardcoding
+  // 'netlify' here is a fact about which binary this is, matching that.
+  const guardEnv = {
+    deployTarget: 'netlify' as const,
     adminEmail: process.env.ADMIN_EMAIL,
     hostname: process.env.HOSTNAME,
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
     allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
-  });
+    auth0Issuer: process.env.AUTH0_ISSUER ?? (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : undefined),
+    auth0Audience: process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID,
+  };
+  const problems = checkEnvironment(guardEnv);
   if (problems.length > 0) {
     console.error('tick-background: refusing to run, unsafe production configuration.');
     for (const p of problems) console.error(`  - ${p}`);
@@ -63,12 +70,7 @@ export default async (req: Request): Promise<Response | void> => {
   const sql = postgres(url, { max: 4 });
 
   try {
-    await assertPublishersConfigured(sql, {
-      adminEmail: process.env.ADMIN_EMAIL,
-      hostname: process.env.HOSTNAME,
-      publicBaseUrl: process.env.PUBLIC_BASE_URL,
-      allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
-    });
+    await assertPublishersConfigured(sql, guardEnv);
   } catch (err) {
     console.error('tick-background:', err instanceof Error ? err.message : err);
     await sql.end();

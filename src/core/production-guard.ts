@@ -33,6 +33,29 @@ export interface GuardEnv {
   hostname?: string;
   publicBaseUrl?: string;
   allowInsecureDev?: string;
+  /**
+   * Which deployment shape this process is running under. This decides which
+   * of the two mutually-exclusive identity checks below applies — it is
+   * intentionally an explicit signal (set via DEPLOY_TARGET), not something
+   * inferred from which other variables happen to be present. Inferring it
+   * would mean a half-configured Netlify environment could look enough like
+   * the VM shape to skip the Auth0 check, or vice versa. An unset or
+   * unrecognized value is treated as unsafe rather than "skip both checks":
+   * see the NODE_ENV history in checksApply's comment for why a guard that
+   * quietly no-ops on an unexpected value is not a guard.
+   *
+   * - 'vm': `main`'s Tailscale/VM deployment. Identity comes from the
+   *   forgeable `Tailscale-User-Login` header, safe only because the port is
+   *   loopback-bound behind `tailscale serve`. The HOSTNAME check applies.
+   * - 'netlify': serverless deployment. There is no host/port binding, so
+   *   HOSTNAME is meaningless; instead the Auth0 config that middleware.ts
+   *   needs to verify a bearer JWT must be present.
+   */
+  deployTarget?: 'vm' | 'netlify';
+  /** AUTH0_ISSUER, or the https://{AUTH0_DOMAIN}/ derived form middleware.ts also accepts. */
+  auth0Issuer?: string;
+  /** AUTH0_AUDIENCE, or the AUTH0_CLIENT_ID fallback middleware.ts also accepts. */
+  auth0Audience?: string;
 }
 
 /** Loopback only. Anything else means the port is reachable off-host. */
@@ -78,12 +101,29 @@ export function checkEnvironment(env: GuardEnv): string[] {
     );
   }
 
-  if (!env.hostname || !LOOPBACK.has(env.hostname)) {
+  if (env.deployTarget === 'vm') {
+    if (!env.hostname || !LOOPBACK.has(env.hostname)) {
+      problems.push(
+        `HOSTNAME must be 127.0.0.1 or ::1 (got ${env.hostname ?? 'unset'}). `
+        + 'Unset, the server binds every interface, so the forgeable Tailscale identity header '
+        + 'could be sent by anyone who can reach the port. Bind loopback and put `tailscale serve` '
+        + 'in front.',
+      );
+    }
+  } else if (env.deployTarget === 'netlify') {
+    if (!env.auth0Issuer || !env.auth0Audience) {
+      problems.push(
+        'Auth0 configuration is missing (need an issuer — AUTH0_ISSUER or AUTH0_DOMAIN — and an '
+        + 'audience — AUTH0_AUDIENCE or AUTH0_CLIENT_ID). Without it, middleware.ts cannot verify '
+        + 'a bearer token, and on Netlify there is no other authenticating proxy in front of the '
+        + 'admin routes.',
+      );
+    }
+  } else {
     problems.push(
-      `HOSTNAME must be 127.0.0.1 or ::1 (got ${env.hostname ?? 'unset'}). `
-      + 'Unset, the server binds every interface, so the forgeable Tailscale identity header '
-      + 'could be sent by anyone who can reach the port. Bind loopback and put `tailscale serve` '
-      + 'in front.',
+      `DEPLOY_TARGET must be "vm" or "netlify" (got ${env.deployTarget ?? 'unset'}). `
+      + 'This decides which identity source is trusted and which checks apply below it, so an '
+      + 'unset or unrecognized value must fail rather than silently skip both.',
     );
   }
 

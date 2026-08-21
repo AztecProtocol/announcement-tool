@@ -12,12 +12,20 @@ import { senderFromEnv } from '../adapters/esp.js';
 // HOSTNAME there means the web app is exposed. Failing both processes on
 // the same environment is deliberate: one check, one story, easier to reason
 // about than two different rules for two processes.
-const problems = checkEnvironment({
+//
+// This entry point (`npm run worker`) is only ever run as the always-on VM
+// deployment's fan-out process. Netlify's equivalent is the scheduled
+// background function (netlify/functions/tick-background.ts), which builds
+// its own GuardEnv with DEPLOY_TARGET=netlify. So 'vm' below is a fact about
+// which binary this is, not an inference from the surrounding environment.
+const guardEnv = {
+  deployTarget: 'vm' as const,
   adminEmail: process.env.ADMIN_EMAIL,
   hostname: process.env.HOSTNAME,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
   allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
-});
+};
+const problems = checkEnvironment(guardEnv);
 if (problems.length > 0) {
   console.error('Refusing to start: unsafe production configuration.');
   for (const p of problems) console.error(`  - ${p}`);
@@ -28,12 +36,7 @@ const url = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:
 const sql = postgres(url, { max: 4 });
 
 try {
-  await assertPublishersConfigured(sql, {
-    adminEmail: process.env.ADMIN_EMAIL,
-    hostname: process.env.HOSTNAME,
-    publicBaseUrl: process.env.PUBLIC_BASE_URL,
-    allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
-  });
+  await assertPublishersConfigured(sql, guardEnv);
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
