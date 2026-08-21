@@ -16,7 +16,10 @@ interface ScheduledConfig {
 
 export default async (): Promise<void> => {
   const base = process.env.URL ?? '';
-  const res = await fetch(`${base}/.netlify/functions/tick-background`, { method: 'POST' });
+  const res = await fetch(`${base}/.netlify/functions/tick-background`, {
+    method: 'POST',
+    headers: { 'x-tick-secret': process.env.TICK_SECRET ?? '' },
+  });
   if (res.status !== 202) {
     console.error(`tick-scheduled: expected 202 from tick-background, got ${res.status}`);
   }
