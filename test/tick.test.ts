@@ -23,7 +23,8 @@ describe('runTick', () => {
       values ('ann_s', 1, 's', 'upgrade', '{mainnet}', '{operators}', 'info', 't', 'b', 'scheduled', 'a@x', now() - interval '1 minute')`;
     const result = await runTick(sql, {}, sender);
     expect(result.published).toHaveLength(1);
-    expect(result.published).toEqual(['ann_s']);
+    // The slug travels with the id so the worker's log line stays readable.
+    expect(result.published).toEqual([{ id: 'ann_s', slug: 's' }]);
   });
 
   it('still runs fan-out when the scheduler throws', async () => {

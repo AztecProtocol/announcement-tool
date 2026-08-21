@@ -6,7 +6,10 @@ import type { ChannelAdapter } from '../adapters/types.js';
 import type { EmailSender } from '../adapters/esp.js';
 
 export interface TickResult {
-  published: string[];
+  /** Announcements the scheduler published this tick. Carries the slug as well as
+   *  the id because that is what makes a worker log line readable to a human
+   *  watching a scheduled send land. */
+  published: { id: string; slug: string }[];
   delivered: number;
   failed: number;
   alerted: number;
@@ -28,7 +31,7 @@ export async function runTick(
   adapters: Record<string, ChannelAdapter>,
   sender: EmailSender,
 ): Promise<TickResult> {
-  const published: string[] = [];
+  const published: { id: string; slug: string }[] = [];
   let delivered = 0;
   let failed = 0;
   let alerted = 0;
@@ -39,7 +42,7 @@ export async function runTick(
   // even while the scheduler is broken.
   try {
     const due = await publishDueScheduled(sql);
-    for (const a of due) published.push(a.id);
+    for (const a of due) published.push({ id: a.id, slug: a.slug });
   } catch (err) {
     console.error('scheduled publish error:', err);
   }

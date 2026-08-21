@@ -57,7 +57,7 @@ const adapters: Record<string, ChannelAdapter> = {
 console.log(`fan-out worker started (15s interval, scheduling on, esp=${sender.name}, channels=${Object.keys(adapters).join(',')})`);
 setInterval(async () => {
   const { published, delivered, failed, alerted } = await runTick(sql, adapters, sender);
-  for (const id of published) console.log(`scheduled publish sent: ${id}`);
+  for (const a of published) console.log(`scheduled publish sent: ${a.id} (${a.slug})`);
   if (delivered || failed) console.log(`fanout: delivered=${delivered} failed=${failed}`);
   if (alerted) console.log(`health alerts dispatched: ${alerted}`);
 }, 15_000);
