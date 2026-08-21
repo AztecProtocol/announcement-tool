@@ -15,8 +15,9 @@
  * 17 of its call sites untouched.
  *
  * The header is unsigned, so the entire four-eyes guarantee rests on the ORDER of
- * operations below. Specifically on step 1: the inbound copy is deleted first and
- * unconditionally. Anyone who reaches this origin directly will try to set that
+ * operations below. Specifically on step 1: the inbound copies of every identity
+ * header — the internal Auth0 one and the VM's Tailscale pair — are deleted first
+ * and unconditionally. Anyone who reaches this origin directly will try to set that
  * header themselves; if the delete is removed, made conditional, or moved below an
  * early return, admin identity becomes forgeable and a single person can
  * self-approve a `critical` announcement — an IRREVERSIBLE Discord role ping.
@@ -59,10 +60,19 @@ function normalizeIssuer(raw: string): string {
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   // ── STEP 1 — STRIP. FIRST. UNCONDITIONAL. ─────────────────────────────────
-  // Do not add any branch, early return, or `if` above this line. This is the
-  // single line that makes an unsigned identity header safe to trust.
+  // Do not add any branch, early return, or `if` above these lines. This is what
+  // makes an unsigned identity header safe to trust.
   const headers = new Headers(request.headers);
   headers.delete(AUTH0_IDENTITY_HEADER);
+  // Defence in depth. `resolveIdentity` only reads these when DEPLOY_TARGET is
+  // 'vm', and this middleware runs on Netlify where that is never the case — so
+  // an inbound copy here can only be attacker-supplied. The real headers are
+  // injected by `tailscale serve`, which is not in front of a Netlify
+  // deployment; Netlify itself strips only its own `X-Nf-*` headers and forwards
+  // everything else untouched. Stripping them means a future change that
+  // weakens the DEPLOY_TARGET gate does not immediately reopen the hole.
+  headers.delete('Tailscale-User-Login');
+  headers.delete('Tailscale-User-Name');
 
   // From here on, `headers` is guaranteed free of any client-supplied identity.
   // Every failure path below simply forwards it unchanged, which denies access.

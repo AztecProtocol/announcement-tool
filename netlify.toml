@@ -91,5 +91,19 @@
 # AUTH0_ISSUER      - provisioned by the Netlify Auth0 extension
 # DATABASE_URL      - Postgres connection string for the deployed database
 #
+# NOT A SECRET, BUT STILL REQUIRED IN THE UI:
+# DEPLOY_TARGET     - the `[build.environment]` block above sets this for the
+#                     BUILD only. It must ALSO be set to "netlify" in the
+#                     Netlify UI (Site configuration > Environment variables),
+#                     scoped so it reaches the function and server runtime.
+#                     Two things read it at RUNTIME, not build time:
+#                       - instrumentation.ts / the production guard, which
+#                         refuses to boot on an unset or unrecognized value;
+#                       - src/core/identity.ts, which trusts the forgeable
+#                         `Tailscale-User-Login` header ONLY when it reads
+#                         exactly "vm".
+#                     Unset at runtime, the app refuses to serve rather than
+#                     mis-trusting a header — but it does refuse, so set it.
+#
 # Admin routes (app/admin/*) are already protected by Auth0 JWT verification
 # in middleware.ts and do not need a rate-limit rule here.

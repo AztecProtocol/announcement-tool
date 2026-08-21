@@ -25,12 +25,41 @@ export interface Identity { email: string; name?: string; source: 'auth0' | 'tai
  * header anywhere else, and do not relax middleware.ts's matcher without
  * re-checking every route that calls this.
  *
- * ── Why the Tailscale header can be trusted ──────────────────────────────────
- * Identity comes from Tailscale's proxy headers. This is only sound because the
- * app binds to localhost and `tailscale serve` is the sole route in — if the port
- * were publicly exposed, the header could be forged. See concept doc §8. This
- * path is still live: `main` deploys to a VM, so removing it would strand that
+ * ── Why the Tailscale header can be trusted, and ONLY on the VM ──────────────
+ * Identity comes from Tailscale's proxy headers, which are injected by
+ * `tailscale serve`. That is sound for exactly one deployment shape: the app
+ * binds to loopback and `tailscale serve` is the sole route in, so nothing
+ * client-supplied can reach the origin. See concept doc §8. This path is still
+ * live because `main` deploys to a VM, and removing it would strand that
  * deployment.
+ *
+ * It is NOT sound anywhere else. On Netlify there is no such proxy: requests
+ * arrive from the public internet and Netlify strips only its own `X-Nf-*`
+ * headers, so `Tailscale-User-Login` there can ONLY be attacker-supplied. If
+ * this branch ran on Netlify, anyone could name themselves an existing
+ * publisher, request a `critical` announcement as one address and confirm it as
+ * another — collapsing four-eyes to one person and firing an IRREVERSIBLE
+ * Discord role ping.
+ *
+ * So the two identity sources are MUTUALLY EXCLUSIVE PER DEPLOYMENT, decided by
+ * the same explicit `DEPLOY_TARGET` signal production-guard.ts uses. The gate is
+ * an ALLOWLIST — the Tailscale branch runs when DEPLOY_TARGET is exactly 'vm'
+ * and at no other time. Unset, misspelled, or any future value therefore
+ * disables it rather than enabling it: a wrong value must lose the identity
+ * source, never gain one. Nothing legitimate is stranded by that default,
+ * because production-guard.ts already refuses to boot on an unset or
+ * unrecognized DEPLOY_TARGET, and local development resolves identity through
+ * the ADMIN_EMAIL fallback below rather than through Tailscale headers.
+ *
+ * middleware.ts also deletes both Tailscale headers on the admin routes it
+ * matches. That is defence in depth, not the fix — this gate is the fix, and it
+ * covers every caller regardless of the middleware matcher.
+ *
+ * Read directly from process.env rather than taken as a parameter: this
+ * function is synchronous and has 17 call sites of the form
+ * `resolveIdentity(await headers())`, and an extra parameter would have to be
+ * threaded correctly through every one of them — a gate you can forget to pass
+ * is a gate that will be forgotten.
  */
 export function resolveIdentity(headers: Headers, opts: { devEmail?: string } = {}): Identity | undefined {
   const auth0Email = headers.get(AUTH0_IDENTITY_HEADER);
@@ -39,10 +68,13 @@ export function resolveIdentity(headers: Headers, opts: { devEmail?: string } = 
     if (trimmed) return { email: trimmed, source: 'auth0' };
   }
 
-  const tsUser = headers.get('Tailscale-User-Login');
-  if (tsUser) {
-    const name = headers.get('Tailscale-User-Name') ?? undefined;
-    return { email: tsUser, ...(name ? { name } : {}), source: 'tailscale' };
+  // Allowlist, not a denylist: only the VM shape trusts Tailscale headers.
+  if (process.env.DEPLOY_TARGET === 'vm') {
+    const tsUser = headers.get('Tailscale-User-Login');
+    if (tsUser) {
+      const name = headers.get('Tailscale-User-Name') ?? undefined;
+      return { email: tsUser, ...(name ? { name } : {}), source: 'tailscale' };
+    }
   }
   const dev = opts.devEmail ?? process.env.ADMIN_EMAIL;
   return dev ? { email: dev, source: 'dev' } : undefined;
