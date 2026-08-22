@@ -18,6 +18,16 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const identity = resolveIdentity(await headers());
 
   if (!identity) {
+    if (process.env.DEPLOY_TARGET === 'netlify') {
+      return (
+        <div>
+          <h1>Admin sign-in required</h1>
+          <p className="muted">
+            <a href="/admin/login">Sign in with Google</a>
+          </p>
+        </div>
+      );
+    }
     return (
       <div>
         <h1>Admin access requires the Aztec tailnet</h1>
