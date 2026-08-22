@@ -228,9 +228,18 @@ Discord, Telegram, and Signal *destinations* (webhook URLs, chat/group ids) are 
 | `AUTH0_CLIENT_ID` | *(unset)* | Provisioned by the Netlify Auth0 extension. Used as the expected token audience if `AUTH0_AUDIENCE` is not set directly. |
 | `AUTH0_AUDIENCE` | *(unset)* | Expected JWT audience. Takes precedence over `AUTH0_CLIENT_ID` if both are set. |
 | `AUTH0_ISSUER` | *(unset)* | Expected JWT issuer. Takes precedence over the value derived from `AUTH0_DOMAIN` if both are set. |
+| `AUTH0_CLIENT_SECRET` | *(unset)* | Auth0 application client secret. Required for the browser login flow — `app/admin/callback/route.ts` uses it to exchange the authorization code for tokens. Required in production on the Netlify shape; the app refuses to start without it. |
+| `SESSION_SECRET` | *(unset)* | Signing key for the browser session cookie (`src/core/session.ts`). Required for the browser login flow, and required in production on the Netlify shape — the app refuses to start unless it is set and at least 32 characters. Generate one with `openssl rand -base64 32`. |
 | `TICK_SECRET` | *(unset)* | Shared secret authenticating the `tick-scheduled` → `tick-background` call. That endpoint is public HTTP with nothing else in front of it, so this is the only thing stopping anyone who finds the URL from forcing repeated fan-out ticks. Must be a long random value in production; unset or empty refuses every request rather than allowing them. |
 
-`AUTH0_DOMAIN`/`AUTH0_CLIENT_ID`/`AUTH0_AUDIENCE`/`AUTH0_ISSUER` are not secrets in the traditional sense (they are not bearer credentials on their own), but `TICK_SECRET` is — see the "never commit a secret" note in `.env.example`.
+`AUTH0_DOMAIN`/`AUTH0_CLIENT_ID`/`AUTH0_AUDIENCE`/`AUTH0_ISSUER` are not secrets in the traditional sense (they are not bearer credentials on their own), but `AUTH0_CLIENT_SECRET`, `SESSION_SECRET`, and `TICK_SECRET` are — see the "never commit a secret" note in `.env.example`.
+
+**Registering the browser login flow with Auth0:** create (or reuse) a regular web application in the Auth0 dashboard and set:
+
+- **Allowed Callback URLs** — the full callback path: `https://<your-site>/admin/callback`.
+- **Allowed Web Origins** — the bare origin only, with no path: `https://<your-site>`.
+
+These two fields are easy to confuse and take different shapes — pasting the full callback path into Allowed Web Origins (or the bare origin into Allowed Callback URLs) produces a callback-mismatch error and blocked a real deployment attempt. Sign-in starts at `/admin/login` (redirects to Auth0, then back to `/admin/callback`, which sets the session cookie); `/admin/logout` clears it.
 
 ## Public web
 
@@ -264,7 +273,7 @@ Every admin route resolves the caller's identity from request headers (`src/core
 2. **VM shape** (`main`) — identity comes from Tailscale's `Tailscale-User-Login` proxy header (plus optional `Tailscale-User-Name`). This is sound **only** because the app binds to `localhost` and `tailscale serve` is the sole route in — if the port were ever exposed directly, these headers could be forged by any caller.
 3. In development only, set `ADMIN_EMAIL` and it is used as a fallback identity when neither of the above resolves anything.
 
-If none of the three resolves an identity, the admin layout renders an access-denied page instead of the requested content.
+If none of the three resolves an identity, the admin layout renders an access-denied page instead of the requested content — a **Sign in with Google** link to `/admin/login` on the Netlify shape (`DEPLOY_TARGET=netlify`), or the tailnet message on the VM shape.
 
 **Manual check required before any Netlify cutover:** send `/admin` a request with the internal auth header hand-set to an arbitrary identity and confirm access is DENIED. `middleware.ts` has no automated test coverage of this path — it requires a live Auth0 tenant to exercise end to end — so this check has not been run against a real deployment.
 
@@ -282,7 +291,7 @@ Both the web app and the worker (or, on the Netlify shape, the `tick-background`
 The remaining check depends on `DEPLOY_TARGET`, since the two shapes trust different identity sources:
 
 - **`DEPLOY_TARGET=vm`** — `HOSTNAME` must be `127.0.0.1` or `::1`. Unset or anything else, the server binds every interface, exposing the forgeable Tailscale header directly. This is unchanged from before this branch existed.
-- **`DEPLOY_TARGET=netlify`** — an Auth0 issuer (`AUTH0_ISSUER` or `AUTH0_DOMAIN`) and audience (`AUTH0_AUDIENCE` or `AUTH0_CLIENT_ID`) must both be present. Without them `middleware.ts` cannot verify a bearer token, and on Netlify there is no other authenticating proxy in front of the admin routes.
+- **`DEPLOY_TARGET=netlify`** — an Auth0 issuer (`AUTH0_ISSUER` or `AUTH0_DOMAIN`) and audience (`AUTH0_AUDIENCE` or `AUTH0_CLIENT_ID`) must both be present. Without them `middleware.ts` cannot verify a bearer token, and on Netlify there is no other authenticating proxy in front of the admin routes. `SESSION_SECRET` must also be set and at least 32 characters — it signs the browser session cookie, one of the identities four-eyes trusts, and a short or missing secret makes that cookie brute-forceable. `AUTH0_CLIENT_SECRET` must also be set, or `app/admin/callback/route.ts` cannot exchange the authorization code for tokens and every sign-in attempt fails closed with no explanation on the page.
 
 **These checks run always, regardless of `NODE_ENV`, unless `ANNOUNCE_ALLOW_INSECURE_DEV=1` is set.** They are deliberately not keyed on `NODE_ENV=production`: `next start` only *defaults* `NODE_ENV` to production rather than overriding an existing value, so `NODE_ENV=staging next start` would otherwise leave the app in a non-production `NODE_ENV` and skip every check while still serving admin traffic. `.env.example` sets `ANNOUNCE_ALLOW_INSECURE_DEV=1` for local development; it must never be set on a deployed instance, since setting it removes the only thing enforcing that the forgeable identity header — Tailscale's or Auth0's internal one — is safe to trust.
 

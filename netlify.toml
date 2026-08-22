@@ -84,12 +84,17 @@
 # Secrets — DO NOT put real values in this file. Set these in the Netlify UI
 # (Site configuration > Environment variables) or via `netlify env:set`.
 # -----------------------------------------------------------------------------
-# TICK_SECRET      - shared secret authenticating tick-scheduled -> tick-background
-# AUTH0_DOMAIN      - provisioned by the Netlify Auth0 extension
-# AUTH0_CLIENT_ID   - provisioned by the Netlify Auth0 extension
-# AUTH0_AUDIENCE    - provisioned by the Netlify Auth0 extension
-# AUTH0_ISSUER      - provisioned by the Netlify Auth0 extension
-# DATABASE_URL      - Postgres connection string for the deployed database
+# TICK_SECRET         - shared secret authenticating tick-scheduled -> tick-background
+# AUTH0_DOMAIN        - provisioned by the Netlify Auth0 extension
+# AUTH0_CLIENT_ID     - provisioned by the Netlify Auth0 extension
+# AUTH0_AUDIENCE      - provisioned by the Netlify Auth0 extension
+# AUTH0_ISSUER        - provisioned by the Netlify Auth0 extension
+# AUTH0_CLIENT_SECRET - Auth0 application client secret; needed to exchange the
+#                       authorization code at /admin/callback. The app refuses
+#                       to start on this shape without it.
+# SESSION_SECRET      - signs the browser session cookie (32+ chars). The app
+#                       refuses to start on this shape without it.
+# DATABASE_URL        - Postgres connection string for the deployed database
 #
 # NOT A SECRET, BUT STILL REQUIRED IN THE UI:
 # DEPLOY_TARGET     - the `[build.environment]` block above sets this for the
