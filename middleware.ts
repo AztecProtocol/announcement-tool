@@ -14,6 +14,19 @@
  * `resolveIdentity` then just reads that header and stays synchronous, leaving all
  * 17 of its call sites untouched.
  *
+ * TWO sources can mint that header, tried in this order:
+ *
+ *   1. An `Authorization: Bearer` RS256 token, verified against the tenant JWKS.
+ *      This is the API/script path and the one the deployment guide's security
+ *      check exercises. It must keep working.
+ *   2. The `announce_session` cookie, signed HS256 by app/admin/callback/route.ts
+ *      after a completed browser login. This exists because a browser tab cannot
+ *      attach an Authorization header to an ordinary navigation.
+ *
+ * The cookie is tried ONLY when the bearer path yielded no identity, so a request
+ * carrying both cannot have a weaker credential override a stronger one. Both
+ * sources are checked AFTER the strip below, never before it.
+ *
  * The header is unsigned, so the entire four-eyes guarantee rests on the ORDER of
  * operations below. Specifically on step 1: the inbound copies of every identity
  * header — the internal Auth0 one and the VM's Tailscale pair — are deleted first
@@ -34,29 +47,14 @@
 // reasoning is in tsconfig.json's paths comment.
 import { NextResponse } from 'next/dist/server/web/spec-extension/response.js';
 import type { NextRequest } from 'next/dist/server/web/spec-extension/request.js';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { emailFromClaims, AUTH0_IDENTITY_HEADER } from './src/core/auth0-claims.js';
-
-/**
- * `createRemoteJWKSet` caches the fetched key set and handles rotation, so it must
- * be created once per process, not per request. Built lazily because the env vars
- * are absent in local dev and on the VM deployment, where this path never runs.
- */
-let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
-let jwksIssuer: string | undefined;
-
-function getJwks(issuer: string): ReturnType<typeof createRemoteJWKSet> {
-  if (!jwks || jwksIssuer !== issuer) {
-    jwks = createRemoteJWKSet(new URL('.well-known/jwks.json', issuer));
-    jwksIssuer = issuer;
-  }
-  return jwks;
-}
-
-/** Auth0 sets AUTH0_ISSUER with a trailing slash; tolerate it missing either way. */
-function normalizeIssuer(raw: string): string {
-  return raw.endsWith('/') ? raw : `${raw}/`;
-}
+// Issuer normalisation, the per-process JWKS cache, and the `jwtVerify` call all
+// live in ONE module, shared with app/admin/callback/route.ts. This file used to
+// carry its own copy. Two copies of the logic four-eyes rests on WILL drift, and
+// the drift is invisible at both call sites — the weaker copy silently becomes
+// the way in. Do not reintroduce a private copy here.
+import { auth0ConfigFromEnv, verifyAuth0Token } from './src/core/auth0-verify.js';
+import { SESSION_COOKIE, verifySession } from './src/core/session.js';
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   // ── STEP 1 — STRIP. FIRST. UNCONDITIONAL. ─────────────────────────────────
@@ -78,57 +76,85 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   // Every failure path below simply forwards it unchanged, which denies access.
   const deny = () => NextResponse.next({ request: { headers } });
 
-  // ── STEP 2 — read the bearer token ────────────────────────────────────────
-  const authorization = request.headers.get('authorization');
-  if (!authorization) return deny();
+  // ── STEP 2 — bearer token, unchanged ──────────────────────────────────────
+  // Tried first and left exactly as it has always behaved. The deployment
+  // guide's security check drives this path; it must keep working.
+  const email = (await bearerIdentity(request)) ?? (await sessionIdentity(request));
 
-  const match = /^Bearer (.+)$/i.exec(authorization.trim());
-  if (!match) return deny();
-  const token = match[1].trim();
-  if (!token) return deny();
-
-  // Config is required for verification. Missing config must NOT mean "skip the
-  // check and trust the token" — it means deny.
-  const issuerRaw = process.env.AUTH0_ISSUER ?? (
-    process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : undefined
-  );
-  const audience = process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID;
-  if (!issuerRaw || !audience) return deny();
-
-  const issuer = normalizeIssuer(issuerRaw);
-
-  // ── STEP 3 — verify signature, issuer, audience and expiry ────────────────
-  // `jwtVerify` checks the RS256 signature against the JWKS AND enforces `iss`,
-  // `aud`, `exp` and `nbf`. Checking the signature alone would accept a valid
-  // token minted for a different application in the same tenant.
-  let payload: Record<string, unknown>;
-  try {
-    const result = await jwtVerify(token, getJwks(issuer), {
-      issuer,
-      audience,
-      algorithms: ['RS256'],
-    });
-    payload = result.payload as Record<string, unknown>;
-  } catch {
-    // Bad signature, wrong issuer/audience, expired, or JWKS fetch failure.
-    // All of them deny. The reason is deliberately not echoed to the client.
-    return deny();
-  }
-
-  // ── STEP 4 — apply the claim policy ───────────────────────────────────────
-  const email = emailFromClaims(payload);
+  // ── STEP 4 — set the internal header on the forwarded request ─────────────
+  // Only reached when one of the two sources fully succeeded. Every other route
+  // out of this function forwards the stripped headers via `deny()`.
   if (!email) return deny();
-
-  // ── STEP 5 — set the internal header on the forwarded request ─────────────
-  // Only reached on full success: verified signature, matching issuer and
-  // audience, unexpired, and a verified email claim.
   headers.set(AUTH0_IDENTITY_HEADER, email);
   return NextResponse.next({ request: { headers } });
+}
+
+/**
+ * The `Authorization: Bearer` path. Returns the verified email, or `undefined`
+ * on a missing/malformed header, missing configuration, a failed verification,
+ * or a claim set that does not carry a verified email.
+ *
+ * Missing config returns undefined. It must NEVER mean "skip the check and trust
+ * the token".
+ */
+async function bearerIdentity(request: NextRequest): Promise<string | undefined> {
+  const authorization = request.headers.get('authorization');
+  if (!authorization) return undefined;
+
+  const match = /^Bearer (.+)$/i.exec(authorization.trim());
+  if (!match) return undefined;
+  const token = match[1].trim();
+  if (!token) return undefined;
+
+  const config = auth0ConfigFromEnv(process.env);
+  if (!config) return undefined;
+
+  // Verifies the RS256 signature against the tenant JWKS AND enforces `iss`,
+  // `aud`, `exp` and `nbf` — checking the signature alone would accept a token
+  // minted for a different application in the same tenant.
+  const payload = await verifyAuth0Token(token, config);
+  if (!payload) return undefined;
+
+  return emailFromClaims(payload);
+}
+
+/**
+ * ── STEP 3 — the session cookie, only when the bearer path found nothing ────
+ *
+ * Reached only as a fallback, so a request presenting both credentials is
+ * decided by the bearer token and a cookie can never override it.
+ *
+ * `SESSION_SECRET` comes from the environment. When it is absent this returns
+ * `undefined` — the cookie is NOT trusted unverified. A deployment that forgets
+ * the secret gets nobody logged in, which is the correct failure direction:
+ * trusting an unverified cookie would make admin identity, and therefore
+ * four-eyes, forgeable by anyone who can set a cookie.
+ *
+ * `verifySession` checks the HS256 signature and expiry and returns `undefined`
+ * on ANY failure without throwing, so a forged cookie is a clean denial.
+ */
+async function sessionIdentity(request: NextRequest): Promise<string | undefined> {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) return undefined;
+
+  const value = request.cookies.get(SESSION_COOKIE)?.value;
+  if (!value) return undefined;
+
+  return verifySession(value, secret);
 }
 
 export const config = {
   // Scoped to the admin surface — the only place identity is consumed. Widening
   // this is safe; NARROWING it is not, because any /admin route left unmatched
   // would skip the strip in step 1 and accept a client-supplied identity header.
+  //
+  // /admin/login, /admin/callback and /admin/logout are matched too, and that is
+  // correct: they need the strip like everything else. They cannot be locked out
+  // by it because this middleware NEVER redirects — every path ends in
+  // `NextResponse.next`, with or without the identity header. Those three routes
+  // never call `resolveIdentity`, so a request with no header passes straight
+  // through to them and the login flow works while signed out. Do not add a
+  // redirect-to-login here: /admin/login is under this matcher, so redirecting
+  // unauthenticated requests would bounce it to itself forever.
   matcher: ['/admin/:path*'],
 };
