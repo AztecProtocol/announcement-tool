@@ -25,6 +25,8 @@ export async function register(): Promise<void> {
     allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
     auth0Issuer: process.env.AUTH0_ISSUER ?? (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : undefined),
     auth0Audience: process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID,
+    auth0ClientSecret: process.env.AUTH0_CLIENT_SECRET,
+    sessionSecret: process.env.SESSION_SECRET,
   };
   const problems = checkEnvironment(guardEnv);
 

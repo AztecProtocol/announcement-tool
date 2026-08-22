@@ -14,6 +14,8 @@ const netlifyProd = {
   publicBaseUrl: 'https://announce.example.org',
   auth0Issuer: 'https://tenant.us.auth0.com/',
   auth0Audience: 'https://announce.example.org/api',
+  auth0ClientSecret: 'a-client-secret',
+  sessionSecret: 'x'.repeat(32),
 };
 
 describe('checksApply', () => {
@@ -145,8 +147,39 @@ describe('checkEnvironment — checks that apply in both shapes', () => {
       publicBaseUrl: undefined,
       auth0Issuer: undefined,
       auth0Audience: undefined,
+      sessionSecret: undefined,
+      auth0ClientSecret: undefined,
     });
-    expect(problems).toHaveLength(3);
+    expect(problems).toHaveLength(5);
+  });
+});
+
+describe('checkEnvironment — Netlify shape: SESSION_SECRET and AUTH0_CLIENT_SECRET', () => {
+  it('rejects a missing SESSION_SECRET', () => {
+    const problems = checkEnvironment({ ...netlifyProd, sessionSecret: undefined });
+    expect(problems.some(p => p.includes('SESSION_SECRET'))).toBe(true);
+  });
+
+  it('rejects a SESSION_SECRET shorter than 32 characters', () => {
+    const problems = checkEnvironment({ ...netlifyProd, sessionSecret: 'x'.repeat(31) });
+    expect(problems.some(p => p.includes('SESSION_SECRET'))).toBe(true);
+  });
+
+  it('accepts a SESSION_SECRET of exactly 32 characters', () => {
+    const problems = checkEnvironment({ ...netlifyProd, sessionSecret: 'x'.repeat(32) });
+    expect(problems.some(p => p.includes('SESSION_SECRET'))).toBe(false);
+  });
+
+  it('rejects a missing AUTH0_CLIENT_SECRET', () => {
+    const problems = checkEnvironment({ ...netlifyProd, auth0ClientSecret: undefined });
+    expect(problems.some(p => p.includes('AUTH0_CLIENT_SECRET'))).toBe(true);
+  });
+
+  it('does not check SESSION_SECRET or AUTH0_CLIENT_SECRET on the VM shape', () => {
+    // The regression that matters: main's deployment shape must not be
+    // affected by checks that only make sense for the browser login flow.
+    expect(checkEnvironment(prod)).toEqual([]);
+    expect(checkEnvironment({ ...prod, sessionSecret: undefined, auth0ClientSecret: undefined })).toEqual([]);
   });
 });
 

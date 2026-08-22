@@ -56,6 +56,19 @@ export interface GuardEnv {
   auth0Issuer?: string;
   /** AUTH0_AUDIENCE, or the AUTH0_CLIENT_ID fallback middleware.ts also accepts. */
   auth0Audience?: string;
+  /**
+   * Auth0 application client secret. Only checked on the Netlify shape:
+   * app/admin/callback/route.ts needs it to exchange the authorization code
+   * for tokens at POST /oauth/token, and there is no other way to get it.
+   */
+  auth0ClientSecret?: string;
+  /**
+   * Signing key for the browser session cookie (src/core/session.ts). Only
+   * checked on the Netlify shape. This cookie is one of the identities
+   * four-eyes trusts, so a short or absent secret is a real path to a forged
+   * admin session, not just a weak default.
+   */
+  sessionSecret?: string;
 }
 
 /** Loopback only. Anything else means the port is reachable off-host. */
@@ -117,6 +130,22 @@ export function checkEnvironment(env: GuardEnv): string[] {
         + 'audience — AUTH0_AUDIENCE or AUTH0_CLIENT_ID). Without it, middleware.ts cannot verify '
         + 'a bearer token, and on Netlify there is no other authenticating proxy in front of the '
         + 'admin routes.',
+      );
+    }
+
+    if (!env.sessionSecret || env.sessionSecret.length < 32) {
+      problems.push(
+        'SESSION_SECRET must be set and at least 32 characters. It signs the browser session '
+        + 'cookie, one of the identities four-eyes trusts — a short or missing secret makes that '
+        + 'cookie brute-forceable, letting an attacker forge an admin session.',
+      );
+    }
+
+    if (!env.auth0ClientSecret) {
+      problems.push(
+        'AUTH0_CLIENT_SECRET must be set. Without it, app/admin/callback/route.ts cannot exchange '
+        + 'the authorization code for tokens, so the browser login flow fails closed at every '
+        + 'sign-in attempt.',
       );
     }
   } else {
