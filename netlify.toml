@@ -60,42 +60,35 @@
 # Rate limiting — PARTIAL COVERAGE, read this before assuming both public
 # write paths are protected.
 # -----------------------------------------------------------------------------
-# Netlify's rate-limit rules attach to `[[redirects]]` and match on REQUEST
-# PATH ONLY (prefix/glob matching via `from`). There is no HTTP-method field
-# and no way to match on request body, header, or Server Action id.
+# RATE LIMITING IS NOT CONFIGURED HERE, DELIBERATELY.
 #
-# This app's two public write paths are Next.js Server Actions:
-#   - subscribeEmail    (app/actions.ts) — form on app/page.tsx, route "/"
-#   - subscribeWebhook  (app/actions.ts) — form on app/webhook-form.tsx,
-#                                          also rendered on app/page.tsx, route "/"
+# An earlier version of this file carried a rule with `from = "/"`, intending to
+# throttle the two public write paths (subscribeEmail and subscribeWebhook, both
+# Next.js Server Actions that POST to "/"). It was removed on 2026-08-23 after a
+# real deployment showed it breaks the site:
 #
-# Both forms live on the SAME page and both POST to the SAME path ("/").
-# Next.js Server Actions do not get their own route — the browser POSTs back
-# to the page's own URL, and the framework dispatches to the right function
-# server-side using an internal `Next-Action` request header that Netlify's
-# path-based redirect rules cannot see or match on.
+#   `from = "/"` matches as a PREFIX in Netlify, so it applied to EVERY path,
+#   including /admin/login. A browser loading one page makes many requests
+#   (HTML, scripts, styles, RSC payloads), so 20/minute was tripped instantly —
+#   a second publisher trying to sign in got HTTP 429 and could not reach the
+#   login page at all. On a tool whose whole point is that a SECOND person must
+#   approve a critical announcement, a rule that blocks the second person from
+#   signing in is worse than no rule.
 #
-# Consequence: a path rule on "/" cannot tell subscribeEmail apart from
-# subscribeWebhook — one rule, applied to the shared path, is the finest
-# distinction actually available. It also can't help matching plain page GETs
-# to "/" (visitors just loading the page), since aggregate_by is per
-# IP+domain and window-based, not per-method — a burst of ordinary page loads
-# from one IP shares the same budget as a burst of form submissions. This is
-# a genuine gap versus the deleted in-memory limiter, which acted inside the
-# action itself and therefore did discriminate between the two actions. It is
-# recorded here rather than hidden behind a rule that reads as though it
-# covers both paths separately, because it does not.
-[[redirects]]
-  from = "/"
-  to = "/"
-  status = 200
-  force = false
+# Netlify's rate limiting matches on request path only. Server Actions have no
+# path of their own — the browser POSTs back to the page's own URL and Next
+# dispatches internally via a `Next-Action` header that redirect rules cannot
+# see. So there is NO path expression that throttles the write paths without
+# also throttling ordinary page loads.
+#
+# The abuse this was meant to bound: subscribeEmail sends a confirmation email
+# to any address given, so an unthrottled endpoint is an email bomber pointed at
+# a third party. That risk is real and currently UNMITIGATED on this branch.
+# Options if it matters: throttle inside the action against a shared store
+# (Netlify Blobs or the database, since in-memory state does not survive
+# serverless cold starts), or put a CAPTCHA on the subscribe form. Both are real
+# work; neither is a config line. Do not "fix" this by re-adding a path rule.
 
-  [redirects.rate_limit]
-    action = "rate_limit"
-    window_limit = 20
-    window_size = 60
-    aggregate_by = ["domain", "ip"]
 
 # -----------------------------------------------------------------------------
 # Secrets — DO NOT put real values in this file. Set these in the Netlify UI
