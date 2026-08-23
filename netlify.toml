@@ -11,9 +11,16 @@
 #       https://docs.netlify.com/manage/security/secure-access-to-sites/rate-limiting/
 
 [build]
-  # `publish` is deliberately NOT set: the Next.js adapter owns the output
-  # directory, and pinning it to `.next` fights that.
   command = "npm run web:build"
+  # `publish` MUST be set to `.next`. Leaving it unset does NOT mean "let the
+  # adapter decide" — Netlify's default is the repository root, and the adapter
+  # then fails with "Your publish directory cannot be the same as the base
+  # directory of your site". Two real deploys proved this: the first with the
+  # value set in the UI (publishOrigin: ui), the second with the UI field
+  # cleared (publishOrigin: default). Both resolved to /opt/build/repo and both
+  # failed identically. The adapter reads `.next` and rewrites it into the
+  # deployable output itself.
+  publish = ".next"
 
 # The Next.js adapter MUST be declared explicitly. An earlier version of this
 # file asserted it applies automatically and told readers not to add it — that
