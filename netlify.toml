@@ -11,14 +11,24 @@
 #       https://docs.netlify.com/manage/security/secure-access-to-sites/rate-limiting/
 
 [build]
-  # The Netlify Next.js runtime (OpenNext-based adapter) auto-detects Next.js
-  # and handles the publish directory itself — per Netlify's docs, "zero
-  # configuration" is required for App Router sites on Next.js 13.5+, and the
-  # adapter is applied automatically at build time. `publish` is intentionally
-  # NOT set here: setting it to `.next` would fight the adapter's own output
-  # handling. Do not add `[[plugins]] package = "@netlify/plugin-nextjs"`
-  # either — that only pins an older adapter version, which we don't want.
+  # `publish` is deliberately NOT set: the Next.js adapter owns the output
+  # directory, and pinning it to `.next` fights that.
   command = "npm run web:build"
+
+# The Next.js adapter MUST be declared explicitly. An earlier version of this
+# file asserted it applies automatically and told readers not to add it — that
+# was WRONG, and a real deploy proved it: the build compiled all 18 routes, then
+# uploaded 16 static files and only the two scheduled functions. No server
+# function was produced for the app at all, so every page returned Netlify's own
+# "Page not found".
+#
+# Netlify's zero-config detection is suppressed once a project declares a custom
+# build command and a custom functions directory, both of which this file does.
+# Declaring the plugin restores it. If you ever see the deploy log jump straight
+# from "build.command completed" to "Functions bundling" with no adapter section
+# in between, this block has gone missing again.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [build.environment]
   # Non-secret. Read by the app to distinguish "running on Netlify" (functions,
