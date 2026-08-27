@@ -29,6 +29,18 @@ describe('parseEnabledChannels', () => {
     expect(parseEnabledChannels('discord,discord')).toEqual(['discord']);
   });
 
+  it('returns zero channels for a value of only commas', () => {
+    // Pinning CURRENT behaviour, not endorsing it: every part of ',,,' is a
+    // blank entry, which the loop above skips, so this returns [] rather
+    // than falling back to ALL the way undefined/blank-string does. A
+    // publish would then succeed while reaching nobody, with no error at
+    // startup or at publish time. A future change may decide this should
+    // refuse instead (like an unrecognised channel name does) — if that
+    // happens, update this test rather than treating its failure as a
+    // regression.
+    expect(parseEnabledChannels(',,,')).toEqual([]);
+  });
+
   it('throws on an unrecognised channel rather than ignoring it', () => {
     // A typo must not silently disable a channel the operator believed was on.
     expect(() => parseEnabledChannels('discord,slak'))
