@@ -10,6 +10,11 @@ import {
 export type PreviewChannel = 'discord' | 'telegram' | 'signal' | 'email' | 'webhook';
 export type PreviewMode = 'rendered' | 'raw';
 
+/** The one fixed display order for channel tabs/columns, shared by the
+ *  compose form's preview tabs and the review screen's channel tabs so the
+ *  two screens can never disagree with each other. */
+export const CHANNEL_ORDER: PreviewChannel[] = ['discord', 'telegram', 'signal', 'email', 'webhook'];
+
 function Spans({ spans }: { spans: Inline[] }) {
   return (
     <>

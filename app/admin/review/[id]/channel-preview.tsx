@@ -1,11 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { PreviewPane, type PreviewChannel, type PreviewMode } from '../../preview-pane.js';
+import { PreviewPane, CHANNEL_ORDER, type PreviewChannel, type PreviewMode } from '../../preview-pane.js';
 import { parseMentions } from '../../preview-render.js';
 import type { PreviewSet } from '../../../../src/core/preview.js';
-
-const CHANNEL_ORDER: PreviewChannel[] = ['discord', 'telegram', 'signal', 'email', 'webhook'];
 
 const CHANNEL_LABEL: Record<PreviewChannel, string> = {
   discord: 'Discord',

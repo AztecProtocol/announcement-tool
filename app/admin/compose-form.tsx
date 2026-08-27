@@ -13,7 +13,7 @@ import { createDraftAction, saveRevisionAction, previewAction, saveTemplateActio
 import { GH_RELEASE } from '../../src/core/validate.js';
 import type { AnnouncementInput, AnnouncementType, Audience, DiscordRole, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
-import { PreviewPane, type PreviewChannel, type PreviewMode } from './preview-pane.js';
+import { PreviewPane, CHANNEL_ORDER, type PreviewChannel, type PreviewMode } from './preview-pane.js';
 import { normalizeSlug, slugError } from '../../src/core/slug.js';
 import { makeSlug } from '../../src/core/ids.js';
 import { isoToUtcInput } from '../../src/core/datetime.js';
@@ -69,7 +69,13 @@ export type ComposeFormProps = {
 };
 
 export default function ComposeForm({ templates = [], recentAnnouncements = [], discordRoles = [], prefill, editingId, enabledChannels }: ComposeFormProps) {
-  const previewChannels = enabledChannels ?? ['discord', 'telegram', 'signal', 'email', 'webhook'];
+  // Sorted to the same fixed order the review screen uses (CHANNEL_ORDER),
+  // not the order the operator happened to type into ENABLED_CHANNELS — so
+  // ENABLED_CHANNELS=webhook,discord does not silently open compose on the
+  // raw-JSON Webhook tab while review always opens on Discord.
+  const previewChannels = CHANNEL_ORDER.filter(
+    c => (enabledChannels ?? ['discord', 'telegram', 'signal', 'email', 'webhook']).includes(c),
+  );
   const router = useRouter();
   const action = async (_prev: Result | undefined, formData: FormData): Promise<Result> =>
     editingId ? saveRevisionAction(editingId, formData) : createDraftAction(formData);
