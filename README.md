@@ -128,9 +128,9 @@ if (signature !== expected) {
 
 ## Channels
 
-The worker registers one adapter per channel at startup: `webhook`, `discord`, `telegram`, `email`, `signal`. Delivery targets are matched to subscriptions/settings by the `target` key on each `delivery_ledger` row; for webhook and email, `target` is a subscription id (`subscriptions` table). For discord, telegram, and signal, `target` is a `channel_settings.key` — there is no self-serve subscribe flow for these three, so destinations are configured directly in Postgres (see the worked example below). Admin-editable channel settings are Plan 4 scope.
+The worker knows about five channels — `webhook`, `discord`, `telegram`, `email`, `signal` — but registers an adapter only for the ones `ENABLED_CHANNELS` names (see "Which channels this deployment runs" under Configuration). Unset, that variable means all five, so an operator who has not set it keeps today's behaviour. Delivery targets are matched to subscriptions/settings by the `target` key on each `delivery_ledger` row; for webhook and email, `target` is a subscription id (`subscriptions` table). For discord, telegram, and signal, `target` is a `channel_settings.key` — there is no self-serve subscribe flow for these three, so destinations are configured directly in Postgres (see the worked example below). Admin-editable channel settings are Plan 4 scope.
 
-**On the Netlify shape (`feat/netlify-deployment`, not merged), Signal is not deployed.** Netlify runs functions, not persistent containers, and the Signal channel needs an always-running `signal-cli-rest-api` sidecar (see the Signal section below) — there is nowhere on Netlify to run it. The Netlify tick function registers only `webhook`, `discord`, `telegram`, `email`. The Signal adapter code is untouched and keeps working on the VM shape; it would need a separate host if Signal support is wanted alongside a Netlify deployment.
+**On the Netlify shape (`feat/netlify-deployment`, not merged), Signal must not be enabled.** Netlify runs functions, not persistent containers, and the Signal channel needs an always-running `signal-cli-rest-api` sidecar (see the Signal section below) — there is nowhere on Netlify to run it. The startup guard enforces this: on `DEPLOY_TARGET=netlify`, it refuses to start if `ENABLED_CHANNELS` is unset (which would default to all five, including Signal) or if it names `signal`. The Signal adapter code is untouched and keeps working on the VM shape; it would need a separate host if Signal support is wanted alongside a Netlify deployment.
 
 ### Discord
 
@@ -217,6 +217,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `RESEND_API_KEY` | *(unset)* | Required when `ESP_PROVIDER=resend`. |
 | `BREVO_API_KEY` | *(unset)* | Required when `ESP_PROVIDER=brevo`. |
 | `ALERT_EMAIL_TO` | *(unset)* | Destination address for channel-health alert emails. Not in `.env.example` (opt-in). Unset disables alerting entirely — see Alerting below. |
+| `ENABLED_CHANNELS` | *(unset)* | Comma-separated channels this deployment fans out to. Unset means all five. See "Which channels this deployment runs" under Admin. |
 
 Discord, Telegram, and Signal *destinations* (webhook URLs, chat/group ids) are not environment variables — they live in `channel_settings` rows, since a deployment typically has more than one destination per channel.
 
@@ -301,6 +302,16 @@ The two public server actions (email subscribe, webhook registration) are rate-l
 
 - **VM shape** — in-memory, per process: 5 email-subscribe attempts and 10 webhook registrations per 10 minutes. This limit resets on process restart and is not shared across multiple instances. It lives in `src/core/rate-limit.ts` **on `main` only** — that file does not exist on this branch, which deleted it (see below).
 - **Netlify shape** (`feat/netlify-deployment`, not merged) — the in-memory limiter was removed, since a serverless function has no persistent process to hold its state. Rate limiting moved to `netlify.toml`, which attaches a rule to the `/` path (20 requests per 60 seconds, aggregated by domain+IP). **This is a narrower guarantee than the VM shape's, and `netlify.toml` documents the gap in a comment — read it before assuming both public actions are protected separately.** Netlify's rate-limit rules match on request path only, with no method or body matching, and both public server actions (`subscribeEmail`, `subscribeWebhook`) are Next.js Server Actions that POST to the same path (`/`) — the framework dispatches between them server-side using an internal header Netlify's redirect rules cannot see. So one shared rule is the finest distinction actually available; it cannot rate-limit `subscribeEmail` and `subscribeWebhook` independently, and it also shares its budget with ordinary page loads to `/`. Neither `netlify.toml` nor this doc claims otherwise.
+
+### Which channels this deployment runs
+
+`ENABLED_CHANNELS` (comma-separated, e.g. `webhook,discord,telegram,email`) controls which of the five channels — `webhook`, `discord`, `telegram`, `email`, `signal` — this deployment fans out to. It is read by the worker (or, on the Netlify shape, the `tick-background` function), the preview, the admin compose/review UI, and `scripts/setup-channel.ts`, so one value governs all of them.
+
+- **Unset or blank means all five.** This preserves the behaviour every deployment had before this variable existed.
+- **An unknown name refuses to start**, rather than being silently ignored — a typo (`ENABLED_CHANNELS=discord,emial`) would otherwise disable a channel the operator believes is on, and the failure would only surface later as "the announcement reached nobody by email."
+- **On `DEPLOY_TARGET=netlify`, the startup guard (`src/core/production-guard.ts`) refuses to start** if `ENABLED_CHANNELS` is unset (which would default to all five, including Signal) or if it names `signal` — Netlify has no `signal-cli` sidecar to reach from a serverless function. On `DEPLOY_TARGET=vm`, unset still means all five; Signal is allowed there.
+- **Disabling a channel does not hide past deliveries.** The `delivery_ledger` table and the admin delivery views are deliberately unfiltered by this variable, so an announcement that already published to a channel still shows that delivery record after the channel is disabled.
+- **`npm run setup:channel` refuses to configure a destination on a disabled channel**, so a `channel_settings` row can't be created for a channel that will never deliver to it.
 
 ### Publishers and the bootstrap rule
 

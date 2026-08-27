@@ -120,5 +120,12 @@
 #                     Unset at runtime, the app refuses to serve rather than
 #                     mis-trusting a header — but it does refuse, so set it.
 #
+# ENABLED_CHANNELS  - comma-separated channels this deployment fans out to.
+#                     Must be scoped to the FUNCTION AND SERVER RUNTIME, not
+#                     only [build.environment]: the tick function, the preview
+#                     and the admin UI all read it at runtime. The Netlify
+#                     deployment omits 'signal' — there is no signal-cli
+#                     sidecar to reach from a serverless function.
+#
 # Admin routes (app/admin/*) are already protected by Auth0 JWT verification
 # in middleware.ts and do not need a rate-limit rule here.
