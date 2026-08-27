@@ -17,11 +17,12 @@ const CHANNEL_LABEL: Record<PreviewChannel, string> = {
 
 /**
  * The channels this announcement actually has a payload for. Mirrors the
- * undefined/empty conventions PreviewSet already uses: a broadcast channel is
- * absent (or, for discord, an empty array) when no channel_settings row
- * matches this announcement's network and type, which is exactly when
- * countFanoutTargets would not deliver to it either. Exported so it can be
- * tested without a React renderer.
+ * undefined/empty conventions PreviewSet already uses: a channel is absent
+ * (or, for discord, an empty array) when no channel_settings row matches this
+ * announcement's network and type, OR when ENABLED_CHANNELS has it turned
+ * off — src/core/preview.ts applies the same isChannelEnabled gate
+ * countFanoutTargets does, so this list is exactly what countFanoutTargets
+ * would deliver to. Exported so it can be tested without a React renderer.
  */
 export function availableChannels(preview: PreviewSet): PreviewChannel[] {
   return CHANNEL_ORDER.filter(c => {

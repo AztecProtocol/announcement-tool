@@ -6,6 +6,7 @@ import { rowToSetting, broadcastTargetsFor } from './outbox.js';
 import { makeSlug } from './ids.js';
 import { validateAnnouncement } from './validate.js';
 import { composeMentionLine, parseDiscordRoles } from './discord-mentions.js';
+import { isChannelEnabled } from './enabled-channels.js';
 
 export interface PreviewSet {
   // Set only when the input fails validateAnnouncement (e.g. a javascript:
@@ -18,11 +19,15 @@ export interface PreviewSet {
   warnings?: string[];
   discord?: { target: string; content: string; prefix?: string; roles: DiscordRole[] }[];
   // undefined when no telegram/signal channel_settings row matches this
-  // announcement's network and type — mirrors the discord array's filtering
-  // via broadcastTargetsFor so the preview never shows a channel that
+  // announcement's network and type, OR when the channel is disabled via
+  // ENABLED_CHANNELS — mirrors the discord array's filtering via
+  // broadcastTargetsFor so the preview never shows a channel that
   // countFanoutTargets would not actually deliver to.
   telegram?: string;
   signal?: string;
+  // email and webhook have no channel_settings row to be absent, so unlike
+  // the broadcast channels above their absence here comes only from
+  // ENABLED_CHANNELS, not from a targets match.
   email?: { subject: string; text: string; html: string };
   webhook?: string;
 }
@@ -58,7 +63,7 @@ async function renderPreviewSet(
   const settings = rows.map(rowToSetting);
   const targets = broadcastTargetsFor(a, settings);
 
-  const discordTargets = targets.filter(t => t.channel === 'discord');
+  const discordTargets = isChannelEnabled('discord') ? targets.filter(t => t.channel === 'discord') : [];
   const discord = discordTargets.map(t => {
     const cfg = settings.find(s => s.key === t.target)!.config;
     const prefix = composeMentionLine(cfg, a.mentionRoleIds);
@@ -67,13 +72,18 @@ async function renderPreviewSet(
     return { target: t.target, content, ...(prefix ? { prefix } : {}), roles: parseDiscordRoles(cfg) };
   });
 
-  const telegram = targets.some(t => t.channel === 'telegram') ? renderTelegramHtml(a, kind) : undefined;
-  const signal = targets.some(t => t.channel === 'signal') ? renderPlain(a, kind) : undefined;
+  const telegram = isChannelEnabled('telegram') && targets.some(t => t.channel === 'telegram')
+    ? renderTelegramHtml(a, kind) : undefined;
+  const signal = isChannelEnabled('signal') && targets.some(t => t.channel === 'signal')
+    ? renderPlain(a, kind) : undefined;
 
-  const { subject, text, html } = renderEmail(a, kind);
+  // email and webhook have no channel_settings row to be absent, so unlike
+  // the broadcast channels above they need an explicit enablement check or a
+  // disabled channel would still render a payload in the compose preview.
+  const email = isChannelEnabled('email') ? renderEmail(a, kind) : undefined;
 
   // Mirrors the payload shape webhook.ts sends, field by field.
-  const webhookPayload = {
+  const webhook = isChannelEnabled('webhook') ? JSON.stringify({
     event_id: `${a.id}.${a.revision}.${kind}`,
     kind,
     announcement: {
@@ -82,15 +92,15 @@ async function renderPreviewSet(
       title: a.title, body_md: a.bodyMd, actions_required: a.actionsRequired,
       links: a.links, published_at: a.publishedAt ?? null,
     },
-  };
+  }, null, 2) : undefined;
 
   return {
     ...(warnings.length > 0 ? { warnings } : {}),
     discord,
     telegram,
     signal,
-    email: { subject, text, html },
-    webhook: JSON.stringify(webhookPayload, null, 2),
+    email,
+    webhook,
   };
 }
 

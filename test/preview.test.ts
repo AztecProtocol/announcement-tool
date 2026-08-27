@@ -1,12 +1,17 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { previewAnnouncement, previewStored } from '../src/core/preview.js';
+import { resetEnabledChannelsCache } from '../src/core/enabled-channels.js';
 import type { Announcement, AnnouncementInput } from '../src/core/types.js';
 
 let sql: Sql;
 beforeAll(async () => { sql = await testSql(); });
 beforeEach(async () => { await resetDb(sql); });
+afterEach(() => {
+  delete process.env.ENABLED_CHANNELS;
+  resetEnabledChannelsCache();
+});
 afterAll(async () => { await sql.end(); });
 
 const input: AnnouncementInput = {
@@ -252,6 +257,31 @@ describe('previewAnnouncement', () => {
     expect(entry).toBeDefined();
     expect(entry!.prefix).toBeUndefined();
     expect(entry!.content.startsWith('UPDATED: [MAINNET]')).toBe(true);
+  });
+
+  it('omits signal from the preview when signal is disabled', async () => {
+    process.env.ENABLED_CHANNELS = 'discord,email,webhook';
+    resetEnabledChannelsCache();
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.signal).toBeUndefined();
+  });
+
+  it('omits email and webhook when they are disabled, though they have no settings row', async () => {
+    // email and webhook are built unconditionally today, so a targets-based
+    // filter alone would leave them in the preview. This is the case that
+    // catches a half-applied gate.
+    process.env.ENABLED_CHANNELS = 'discord';
+    resetEnabledChannelsCache();
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.email).toBeUndefined();
+    expect(preview.webhook).toBeUndefined();
+  });
+
+  it('leaves discord empty rather than undefined when disabled, matching its array convention', async () => {
+    process.env.ENABLED_CHANNELS = 'email';
+    resetEnabledChannelsCache();
+    const preview = await previewAnnouncement(sql, input);
+    expect(preview.discord ?? []).toEqual([]);
   });
 });
 
