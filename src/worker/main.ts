@@ -44,7 +44,7 @@ try {
 
 const sender = senderFromEnv();
 
-const adapters = buildAdapters(sql, sender, ['webhook', 'discord', 'telegram', 'email', 'signal']);
+const adapters = buildAdapters(sql, sender);
 
 console.log(`fan-out worker started (15s interval, scheduling on, esp=${sender.name}, channels=${Object.keys(adapters).join(',')})`);
 setInterval(async () => {

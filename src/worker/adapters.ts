@@ -6,13 +6,12 @@ import { makeDiscordAdapter } from '../adapters/discord.js';
 import { makeTelegramAdapter } from '../adapters/telegram.js';
 import { makeEmailAdapter } from '../adapters/email.js';
 import { makeSignalAdapter } from '../adapters/signal.js';
+import { enabledChannels } from '../core/enabled-channels.js';
 
-/** Every channel this tool knows how to fan out to. Netlify omits 'signal'
- *  because there is no signal-cli sidecar to run it against; the VM worker
- *  enables all five. */
+/** Every channel this tool knows how to fan out to. Which of these actually
+ *  run on a given deployment is configuration (ENABLED_CHANNELS), not a
+ *  property of this type — see src/core/enabled-channels.ts. */
 export type ChannelName = 'webhook' | 'discord' | 'telegram' | 'email' | 'signal';
-
-const ALL_CHANNELS: ChannelName[] = ['webhook', 'discord', 'telegram', 'email', 'signal'];
 
 /**
  * Builds the adapter map for the requested channels. Both hosts (the always-on
@@ -20,11 +19,16 @@ const ALL_CHANNELS: ChannelName[] = ['webhook', 'discord', 'telegram', 'email', 
  * of constructing the map themselves, so there is exactly one place that knows
  * how to build each adapter — copying the map would let the two hosts drift
  * apart the same way a second copy of runTick would.
+ *
+ * The default reads ENABLED_CHANNELS via enabledChannels(), so an unset
+ * variable still builds all five (today's VM behaviour is preserved) and a
+ * set variable builds only what it names. Pass an explicit list to override
+ * the variable entirely, e.g. from a test or a one-off script.
  */
 export function buildAdapters(
   sql: Sql,
   sender: EmailSender,
-  channels: ChannelName[] = ALL_CHANNELS,
+  channels: ChannelName[] = enabledChannels(),
 ): Record<string, ChannelAdapter> {
   const adapters: Record<string, ChannelAdapter> = {};
   for (const channel of channels) {

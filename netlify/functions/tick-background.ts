@@ -9,10 +9,10 @@
  * are shared with the always-on VM worker (src/worker/main.ts) so there is
  * exactly one implementation of each.
  *
- * Signal is deliberately NOT in the channel list below: Netlify cannot run
- * the signal-cli sidecar, so registering it would produce failing deliveries
- * and health alerts for a channel with no way to succeed. The Signal adapter
- * itself is untouched and still used by the VM worker.
+ * Which channels run here is deployment configuration (ENABLED_CHANNELS), not
+ * a property of this host. The Netlify deployment omits 'signal' because there
+ * is no signal-cli sidecar to reach; the VM enables it once a phone number
+ * exists. See src/core/enabled-channels.ts.
  *
  * SECURITY: this function is a public HTTP endpoint — Netlify puts nothing
  * in front of it. checkEnvironment/assertPublishersConfigured below verify
@@ -80,7 +80,7 @@ export default async (req: Request): Promise<Response | void> => {
   }
 
   const sender = senderFromEnv();
-  const adapters = buildAdapters(sql, sender, ['webhook', 'discord', 'telegram', 'email']);
+  const adapters = buildAdapters(sql, sender);
 
   const { published, delivered, failed, alerted } = await runTick(sql, adapters, sender);
   for (const a of published) console.log(`scheduled publish sent: ${a.id} (${a.slug})`);
