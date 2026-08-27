@@ -10,12 +10,19 @@ import type { ChannelName } from '../worker/adapters.js';
  * listed four — so "turn a channel off" meant editing code on two branches and
  * hoping the admin UI agreed.
  *
- * THE GATE IS AT ENQUEUE, NOT ONLY AT DELIVERY. src/worker/fanout.ts does
- * `adapters[row.channel].deliver(...)`; with no adapter that is a TypeError,
- * which its catch block treats as an ordinary delivery failure. The row would
- * burn MAX_ATTEMPTS retries, reach 'exhausted', and raise a health alert about
- * a channel that was switched off deliberately. So countFanoutTargets must not
- * create the row in the first place.
+ * THE GATE IS AT ENQUEUE. countFanoutTargets does not create a delivery_ledger
+ * row for a disabled channel, so nothing downstream has to cope with one.
+ *
+ * Two backstops sit behind that, and it is worth knowing they are backstops
+ * rather than the mechanism — an earlier version of this comment described the
+ * unguarded failure as if it were live, and a reviewer duly "found" it:
+ *   - runFanoutOnce selects `... and channel in (Object.keys(adapters))`, so a
+ *     row whose channel has no adapter is never even fetched.
+ *   - if one is fetched anyway (a caller injecting an adapter map that does not
+ *     come from buildAdapters), fanout.ts skips it and leaves it pending.
+ * Without those, `adapters[row.channel].deliver(...)` would throw a TypeError,
+ * be caught as an ordinary delivery failure, burn MAX_ATTEMPTS retries, reach
+ * 'exhausted', and alert about a channel switched off on purpose.
  *
  * IT MUST NOT REWRITE HISTORY. This governs composing, previewing and
  * enqueueing only. delivery_ledger reads stay unfiltered: an announcement that

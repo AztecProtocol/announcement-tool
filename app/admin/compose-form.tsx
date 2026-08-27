@@ -73,9 +73,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   // not the order the operator happened to type into ENABLED_CHANNELS — so
   // ENABLED_CHANNELS=webhook,discord does not silently open compose on the
   // raw-JSON Webhook tab while review always opens on Discord.
-  const previewChannels = CHANNEL_ORDER.filter(
-    c => (enabledChannels ?? ['discord', 'telegram', 'signal', 'email', 'webhook']).includes(c),
-  );
+  const previewChannels = CHANNEL_ORDER.filter(c => (enabledChannels ?? CHANNEL_ORDER).includes(c));
   const router = useRouter();
   const action = async (_prev: Result | undefined, formData: FormData): Promise<Result> =>
     editingId ? saveRevisionAction(editingId, formData) : createDraftAction(formData);
