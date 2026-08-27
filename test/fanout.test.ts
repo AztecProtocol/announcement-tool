@@ -63,11 +63,29 @@ describe('runFanoutOnce', () => {
     expect(res).toEqual({ delivered: 0, failed: 0 });
   });
 
-  it('a channel with no adapter is left pending (not crashed, not exhausted)', async () => {
+  it('every channel with no adapter is left pending (not crashed, not exhausted)', async () => {
     const res = await runFanoutOnce(sql, {});
     expect(res).toEqual({ delivered: 0, failed: 0 });
     const [row] = await sql`select status from delivery_ledger where target = 'sub_1'`;
     expect(row.status).toBe('pending');
+  });
+
+  it('a pending row is left untouched when its channel key maps to no adapter, not exhausted', async () => {
+    // Distinct from the test above: that one passes an EMPTY adapters map,
+    // so `known` is empty and the query's `channel in ${known}` filter
+    // returns zero rows — the per-row branch never runs. Here `known`
+    // (Object.keys(adapters)) still includes 'webhook', so the row IS
+    // selected by the query; it is the per-row `adapters[row.channel]`
+    // lookup that comes back falsy, exercising the loop-body branch itself.
+    // buildAdapters() never produces a map shaped this way (it only sets a
+    // key when it builds that adapter), but the loop body must not assume
+    // that invariant — it is enforcing it defensively, and this test pins
+    // that defence.
+    const res = await runFanoutOnce(sql, { webhook: undefined as unknown as ChannelAdapter });
+    expect(res).toEqual({ delivered: 0, failed: 0 });
+    const [row] = await sql`select status, attempts, next_attempt_at from delivery_ledger where target = 'sub_1'`;
+    expect(row.status).toBe('pending');
+    expect(row.attempts).toBe(0);
   });
 
   it('an orphaned ledger row (announcement deleted) is marked exhausted and does not block the batch', async () => {

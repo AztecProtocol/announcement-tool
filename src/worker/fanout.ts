@@ -41,6 +41,28 @@ export async function runFanoutOnce(
             and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
         continue;
       }
+      if (!adapters[row.channel as string]) {
+        // Disabled, not broken: this row was enqueued before ENABLED_CHANNELS
+        // turned its channel off, or before a Netlify deploy that never had
+        // it on. Unlike the poison-row branch above (announcement missing —
+        // a fact that can never change, so it exhausts immediately), a
+        // disabled channel can be re-enabled, and this row must still be
+        // there to deliver when that happens. So: leave it 'pending', do not
+        // touch attempts or next_attempt_at, and skip it — it must never
+        // reach 'exhausted' and trip health.ts's alert for a channel that
+        // was switched off on purpose.
+        //
+        // This does not spin a hot loop. `known` (Object.keys(adapters)) is
+        // what the `channel in ${known}` filter above uses, and
+        // buildAdapters() only ever sets a key for a channel it actually
+        // built — so in real operation a disabled channel's rows are never
+        // selected by the query at all, and this branch is unreachable: the
+        // filter, not this `continue`, is what keeps disabled-channel rows
+        // out of every batch. This check exists purely as a defensive
+        // backstop against `adapters` being built some other way (a test,
+        // or a future caller) with a key present but falsy.
+        continue;
+      }
       const a = rowToAnnouncement(annRows[0]);
       const attempts = (row.attempts as number) + 1;
       try {
