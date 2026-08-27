@@ -53,4 +53,15 @@ describe('countFanoutTargets channel enablement', () => {
     const targets = await countFanoutTargets(sql, a);
     expect(targets.some(t => t.channel === 'email')).toBe(false);
   });
+
+  it('includes the same SUBSCRIPTION channel when it is enabled, proving the setup is a real positive control', async () => {
+    const sub = await createSubscription(sql, { channel: 'email', endpoint: 'x@y.z', filters: { severities: ['critical'] } });
+    await verifySubscription(sql, sub.id);
+
+    process.env.ENABLED_CHANNELS = 'signal,email';
+    resetEnabledChannelsCache();
+    const a = await createDraft(sql, critical, 'alice@x');
+    const targets = await countFanoutTargets(sql, a);
+    expect(targets.some(t => t.channel === 'email')).toBe(true);
+  });
 });
