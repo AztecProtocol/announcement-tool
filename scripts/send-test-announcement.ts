@@ -14,12 +14,7 @@ loadEnv();
 import { createDraft, requestPublish, confirmPublish } from '../src/core/announcements.js';
 import { runFanoutOnce } from '../src/worker/fanout.js';
 import { senderFromEnv } from '../src/adapters/esp.js';
-import { makeWebhookAdapter } from '../src/adapters/webhook.js';
-import { makeDiscordAdapter } from '../src/adapters/discord.js';
-import { makeTelegramAdapter } from '../src/adapters/telegram.js';
-import { makeEmailAdapter } from '../src/adapters/email.js';
-import { makeSignalAdapter } from '../src/adapters/signal.js';
-import type { ChannelAdapter } from '../src/adapters/types.js';
+import { buildAdapters } from '../src/worker/adapters.js';
 import type { AnnouncementInput } from '../src/core/types.js';
 
 const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
@@ -55,13 +50,7 @@ const input = flags.includes('--governance') ? GOVERNANCE : flags.includes('--in
 async function main(): Promise<void> {
   const sql = postgres(DB, { max: 4 });
   const sender = senderFromEnv();
-  const adapters: Record<string, ChannelAdapter> = {
-    webhook: makeWebhookAdapter(sql),
-    discord: makeDiscordAdapter(sql),
-    telegram: makeTelegramAdapter(sql),
-    email: makeEmailAdapter(sql, sender),
-    signal: makeSignalAdapter(sql),
-  };
+  const adapters = buildAdapters(sql, sender);
 
   try {
     const destinations = await sql`select key, channel from channel_settings order by key`;
