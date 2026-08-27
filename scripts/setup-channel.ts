@@ -17,6 +17,8 @@ loadEnv();
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { validatePrefix } from '../src/core/discord-mentions.js';
+import { enabledChannels, isChannelEnabled } from '../src/core/enabled-channels.js';
+import type { ChannelName } from '../src/worker/adapters.js';
 
 const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const rl = createInterface({ input: stdin, output: stdout });
@@ -48,6 +50,16 @@ async function main(): Promise<void> {
     console.error(`\n✗ "${channel}" is not one of discord, telegram, signal.`);
     process.exitCode = 1;
     return; // the finally below still closes the pool and the readline interface
+  }
+
+  if (!isChannelEnabled(channel as ChannelName)) {
+    console.error(
+      `Channel "${channel}" is not enabled in this deployment.\n`
+      + `ENABLED_CHANNELS currently allows: ${enabledChannels().join(', ')}.\n`
+      + 'A destination configured on a disabled channel would never receive an announcement, '
+      + 'and would not appear in the admin UI. Enable the channel first, then re-run this.',
+    );
+    process.exit(1);
   }
 
   const defaultKey = channel === 'discord' ? 'discord:test-updates' : `${channel}:test`;
