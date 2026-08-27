@@ -1,6 +1,8 @@
 import type { Sql, TransactionSql } from 'postgres';
 import type { Announcement, AnnouncementType, DeliveryKind, DeliveryTarget, Network } from './types.js';
 import { matchesSubscription, rowToSub } from './subscriptions.js';
+import { isChannelEnabled } from './enabled-channels.js';
+import type { ChannelName } from '../worker/adapters.js';
 
 type Tx = Sql | TransactionSql;
 
@@ -44,7 +46,12 @@ export async function countFanoutTargets(sql: Tx, a: Announcement): Promise<Deli
     if (matchesSubscription(a, s)) targets.push({ channel: s.channel, target: s.id });
   }
 
-  return targets;
+  // Applied to broadcast AND subscription targets together, deliberately: they
+  // arrive from two different branches above, and a filter on only one of them
+  // would leave email/webhook subscribers receiving a channel the deployment
+  // has switched off. See src/core/enabled-channels.ts for why this gate is
+  // here rather than in fanout.ts.
+  return targets.filter(t => isChannelEnabled(t.channel as ChannelName));
 }
 
 export async function enqueueDeliveries(tx: TransactionSql, a: Announcement, kind: DeliveryKind): Promise<number> {
