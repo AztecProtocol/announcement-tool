@@ -49,8 +49,6 @@ const TOOLBAR: ToolbarOp[] = [
   { label: 'H', title: 'Heading', prefix: '## ' },
 ];
 
-const PREVIEW_CHANNELS: PreviewChannel[] = ['discord', 'telegram', 'signal', 'email', 'webhook'];
-
 type PreviewResult = { preview?: PreviewSet; error?: string };
 
 export type ComposeFormProps = {
@@ -60,9 +58,18 @@ export type ComposeFormProps = {
   prefill?: AnnouncementInput;
   /** Set when continuing an existing draft (`?from=edit:<id>`) rather than creating a new one. */
   editingId?: string;
+  /**
+   * Channels this deployment fans out to. Passed from the server because this
+   * is a client component: ENABLED_CHANNELS is server-only, and a NEXT_PUBLIC_
+   * twin would be a second source of truth that can disagree with the gate in
+   * src/core/outbox.ts. Defaults to all five so existing callers and tests keep
+   * working.
+   */
+  enabledChannels?: PreviewChannel[];
 };
 
-export default function ComposeForm({ templates = [], recentAnnouncements = [], discordRoles = [], prefill, editingId }: ComposeFormProps) {
+export default function ComposeForm({ templates = [], recentAnnouncements = [], discordRoles = [], prefill, editingId, enabledChannels }: ComposeFormProps) {
+  const previewChannels = enabledChannels ?? ['discord', 'telegram', 'signal', 'email', 'webhook'];
   const router = useRouter();
   const action = async (_prev: Result | undefined, formData: FormData): Promise<Result> =>
     editingId ? saveRevisionAction(editingId, formData) : createDraftAction(formData);
@@ -104,7 +111,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
     prefill?.mentionRoleIds ?? (severity === 'critical' ? discordRoles.map(r => r.id) : []),
   );
   const [rolesTouched, setRolesTouched] = useState(false);
-  const [previewTab, setPreviewTab] = useState<PreviewChannel>('discord');
+  const [previewTab, setPreviewTab] = useState<PreviewChannel>(previewChannels[0] ?? 'discord');
   const [previewMode, setPreviewMode] = useState<PreviewMode>('rendered');
   const [previewResult, setPreviewResult] = useState<PreviewResult | undefined>(undefined);
   const [previewPending, setPreviewPending] = useState(false);
@@ -510,7 +517,7 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
         ))}
 
         <div className="preview-tabs" role="tablist" style={{ marginTop: 14 }}>
-          {PREVIEW_CHANNELS.map(ch => (
+          {previewChannels.map(ch => (
             <button
               type="button"
               key={ch}

@@ -14,7 +14,9 @@ import { resolveIdentity } from '../../src/core/identity.js';
 import { listPublished, listAwaitingConfirmation, listDrafts, listScheduled } from '../../src/core/queries.js';
 import { rowToSetting } from '../../src/core/outbox.js';
 import { parseDiscordRoles } from '../../src/core/discord-mentions.js';
+import { enabledChannels } from '../../src/core/enabled-channels.js';
 import type { AnnouncementInput, DiscordRole } from '../../src/core/types.js';
+import type { PreviewChannel } from './preview-pane.js';
 
 export const metadata = {
   title: 'Compose — Admin',
@@ -111,6 +113,7 @@ export default async function AdminComposePage({
         discordRoles={discordRoles}
         prefill={prefill}
         editingId={editingId}
+        enabledChannels={enabledChannels() as PreviewChannel[]}
       />
     </>
   );

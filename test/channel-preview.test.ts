@@ -28,6 +28,14 @@ describe('availableChannels', () => {
   it('returns an empty list when nothing will be sent', () => {
     expect(availableChannels({})).toEqual([]);
   });
+
+  it('drops a channel whose payload the preview omitted', () => {
+    // Task 4 makes a disabled channel absent from PreviewSet; availableChannels
+    // already filters on absence, so this asserts the two conventions line up.
+    const preview = { discord: [], telegram: undefined, signal: undefined,
+                      email: { subject: 's', text: 't', html: 'h' }, webhook: undefined } as PreviewSet;
+    expect(availableChannels(preview)).toEqual(['email']);
+  });
 });
 
 describe('mentionedRoleNames', () => {
