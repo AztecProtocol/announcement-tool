@@ -59,7 +59,8 @@ async function main(): Promise<void> {
       + 'A destination configured on a disabled channel would never receive an announcement, '
       + 'and would not appear in the admin UI. Enable the channel first, then re-run this.',
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return; // the finally below still closes the pool and the readline interface
   }
 
   const defaultKey = channel === 'discord' ? 'discord:test-updates' : `${channel}:test`;
