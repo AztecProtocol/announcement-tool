@@ -19,6 +19,8 @@
  * global state between tests.
  */
 
+import { parseEnabledChannels } from './enabled-channels.js';
+
 export interface GuardEnv {
   /**
    * Deliberately UNREAD. Kept on the interface so the tests can prove the gate
@@ -69,6 +71,21 @@ export interface GuardEnv {
    * admin session, not just a weak default.
    */
   sessionSecret?: string;
+  /**
+   * Raw ENABLED_CHANNELS value (src/core/enabled-channels.ts). Only checked
+   * on the Netlify shape, and only for one thing: that it is set and does not
+   * name 'signal'. src/worker/adapters.ts now builds its adapter map from
+   * this same variable on both hosts, and an unset variable means "all five"
+   * there — which is exactly right on the VM, and exactly wrong on Netlify,
+   * which has no signal-cli sidecar to run Signal against. Without this
+   * check, an operator who deploys to Netlify without setting the variable
+   * gets a Signal adapter that fails every delivery, burns MAX_ATTEMPTS
+   * retries, reaches 'exhausted', and raises a health alert for a channel
+   * nobody meant to enable — the checksApply header comment's "a refusal is
+   * noticed at once; [a live failure] is not" applies here as much as it does
+   * to the admin-identity checks below.
+   */
+  enabledChannels?: string;
 }
 
 /** Loopback only. Anything else means the port is reachable off-host. */
@@ -147,6 +164,31 @@ export function checkEnvironment(env: GuardEnv): string[] {
         + 'the authorization code for tokens, so the browser login flow fails closed at every '
         + 'sign-in attempt.',
       );
+    }
+
+    if (!env.enabledChannels || env.enabledChannels.trim() === '') {
+      problems.push(
+        'ENABLED_CHANNELS must be set on the Netlify shape. Unset, it defaults to all five '
+        + 'channels (src/core/enabled-channels.ts), including Signal — but Netlify has no '
+        + 'signal-cli sidecar to reach, so every Signal delivery would fail, burn MAX_ATTEMPTS '
+        + 'retries, and raise a health alert for a channel nobody meant to enable. Set it to the '
+        + 'comma-separated list of channels this deployment actually runs, without "signal".',
+      );
+    } else {
+      try {
+        const channels = parseEnabledChannels(env.enabledChannels);
+        if (channels.includes('signal')) {
+          problems.push(
+            'ENABLED_CHANNELS includes "signal", but Netlify has no signal-cli sidecar to reach. '
+            + 'Every Signal delivery on this shape would fail, burn MAX_ATTEMPTS retries, and raise '
+            + 'a health alert. Remove "signal" from ENABLED_CHANNELS on the Netlify deployment.',
+          );
+        }
+      } catch (err) {
+        problems.push(
+          `ENABLED_CHANNELS is invalid: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   } else {
     problems.push(

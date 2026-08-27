@@ -10,8 +10,13 @@
  * exactly one implementation of each.
  *
  * Which channels run here is deployment configuration (ENABLED_CHANNELS), not
- * a property of this host. The Netlify deployment omits 'signal' because there
- * is no signal-cli sidecar to reach; the VM enables it once a phone number
+ * a property of this host — src/worker/adapters.ts builds its map from that
+ * one variable on both hosts now. On its own, an unset ENABLED_CHANNELS would
+ * mean "all five" here too, which would build a Signal adapter with no
+ * signal-cli sidecar to reach and fail every Signal delivery. checkEnvironment
+ * below (src/core/production-guard.ts) is what actually enforces the Netlify
+ * deployment omits 'signal': it refuses to start unless ENABLED_CHANNELS is
+ * set and does not name 'signal'. The VM enables Signal once a phone number
  * exists. See src/core/enabled-channels.ts.
  *
  * SECURITY: this function is a public HTTP endpoint — Netlify puts nothing
@@ -60,6 +65,7 @@ export default async (req: Request): Promise<Response | void> => {
     auth0Audience: process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID,
     auth0ClientSecret: process.env.AUTH0_CLIENT_SECRET,
     sessionSecret: process.env.SESSION_SECRET,
+    enabledChannels: process.env.ENABLED_CHANNELS,
   };
   const problems = checkEnvironment(guardEnv);
   if (problems.length > 0) {

@@ -24,6 +24,7 @@ const guardEnv = {
   hostname: process.env.HOSTNAME,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
   allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
+  enabledChannels: process.env.ENABLED_CHANNELS,
 };
 const problems = checkEnvironment(guardEnv);
 if (problems.length > 0) {

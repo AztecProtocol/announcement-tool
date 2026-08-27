@@ -27,6 +27,7 @@ export async function register(): Promise<void> {
     auth0Audience: process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID,
     auth0ClientSecret: process.env.AUTH0_CLIENT_SECRET,
     sessionSecret: process.env.SESSION_SECRET,
+    enabledChannels: process.env.ENABLED_CHANNELS,
   };
   const problems = checkEnvironment(guardEnv);
 

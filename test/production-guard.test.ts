@@ -16,6 +16,7 @@ const netlifyProd = {
   auth0Audience: 'https://announce.example.org/api',
   auth0ClientSecret: 'a-client-secret',
   sessionSecret: 'x'.repeat(32),
+  enabledChannels: 'discord,email',
 };
 
 describe('checksApply', () => {
@@ -149,8 +150,51 @@ describe('checkEnvironment — checks that apply in both shapes', () => {
       auth0Audience: undefined,
       sessionSecret: undefined,
       auth0ClientSecret: undefined,
+      enabledChannels: undefined,
     });
-    expect(problems).toHaveLength(5);
+    expect(problems).toHaveLength(6);
+  });
+});
+
+describe('checkEnvironment — Netlify shape: ENABLED_CHANNELS', () => {
+  // Before this guard existed, an unset ENABLED_CHANNELS on Netlify meant
+  // "all five" (the same default the VM shape uses), which built a Signal
+  // adapter on a host with no signal-cli sidecar to reach. Every delivery
+  // through it fails, burns MAX_ATTEMPTS retries, reaches 'exhausted', and
+  // raises a health alert — the exact failure src/core/enabled-channels.ts
+  // was written to prevent. Nothing else enforced the variable, so the guard
+  // has to.
+
+  it('rejects an unset ENABLED_CHANNELS on the Netlify shape', () => {
+    const problems = checkEnvironment({ ...netlifyProd, enabledChannels: undefined });
+    expect(problems.some(p => p.includes('ENABLED_CHANNELS'))).toBe(true);
+  });
+
+  it('rejects a blank ENABLED_CHANNELS on the Netlify shape', () => {
+    const problems = checkEnvironment({ ...netlifyProd, enabledChannels: '   ' });
+    expect(problems.some(p => p.includes('ENABLED_CHANNELS'))).toBe(true);
+  });
+
+  it('accepts a Netlify-safe list with no Signal', () => {
+    const problems = checkEnvironment({ ...netlifyProd, enabledChannels: 'discord,email' });
+    expect(problems.some(p => p.includes('ENABLED_CHANNELS'))).toBe(false);
+  });
+
+  it('rejects an ENABLED_CHANNELS that includes signal, because Netlify has no signal-cli sidecar', () => {
+    const problems = checkEnvironment({ ...netlifyProd, enabledChannels: 'discord,signal' });
+    expect(problems.some(p => p.includes('ENABLED_CHANNELS'))).toBe(true);
+  });
+
+  it('rejects a typo rather than throwing — a bad value must surface as a refusal to start', () => {
+    expect(() => checkEnvironment({ ...netlifyProd, enabledChannels: 'discord,emial' }))
+      .not.toThrow();
+    const problems = checkEnvironment({ ...netlifyProd, enabledChannels: 'discord,emial' });
+    expect(problems.some(p => p.includes('ENABLED_CHANNELS'))).toBe(true);
+  });
+
+  it('does not check ENABLED_CHANNELS on the VM shape — unset still means all five there', () => {
+    const problems = checkEnvironment({ ...prod, enabledChannels: undefined });
+    expect(problems.some(p => p.includes('ENABLED_CHANNELS'))).toBe(false);
   });
 });
 
