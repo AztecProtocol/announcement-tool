@@ -1,0 +1,64 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  parseEnabledChannels, enabledChannels, isChannelEnabled, resetEnabledChannelsCache,
+} from '../src/core/enabled-channels.js';
+
+describe('parseEnabledChannels', () => {
+  it('returns every channel when unset', () => {
+    expect(parseEnabledChannels(undefined).sort())
+      .toEqual(['discord', 'email', 'signal', 'telegram', 'webhook']);
+  });
+
+  it('returns every channel when the value is only whitespace', () => {
+    // An operator who writes ENABLED_CHANNELS= in a .env file means "I did not
+    // decide", not "disable everything". Disabling everything silently would
+    // make a publish succeed while reaching nobody.
+    expect(parseEnabledChannels('   ').sort())
+      .toEqual(['discord', 'email', 'signal', 'telegram', 'webhook']);
+  });
+
+  it('parses a comma-separated list', () => {
+    expect(parseEnabledChannels('discord,email')).toEqual(['discord', 'email']);
+  });
+
+  it('tolerates spaces, blank entries and mixed case', () => {
+    expect(parseEnabledChannels(' Discord , ,EMAIL ')).toEqual(['discord', 'email']);
+  });
+
+  it('deduplicates', () => {
+    expect(parseEnabledChannels('discord,discord')).toEqual(['discord']);
+  });
+
+  it('throws on an unrecognised channel rather than ignoring it', () => {
+    // A typo must not silently disable a channel the operator believed was on.
+    expect(() => parseEnabledChannels('discord,slak'))
+      .toThrow(/unknown channel "slak"/i);
+  });
+
+  it('names every valid channel in the error, so the fix is obvious', () => {
+    expect(() => parseEnabledChannels('nope')).toThrow(/discord/);
+  });
+});
+
+describe('enabledChannels', () => {
+  afterEach(() => {
+    delete process.env.ENABLED_CHANNELS;
+    resetEnabledChannelsCache();
+  });
+
+  it('reads the environment', () => {
+    process.env.ENABLED_CHANNELS = 'webhook';
+    resetEnabledChannelsCache();
+    expect(enabledChannels()).toEqual(['webhook']);
+    expect(isChannelEnabled('webhook')).toBe(true);
+    expect(isChannelEnabled('signal')).toBe(false);
+  });
+
+  it('memoises, so a mid-process env change does not half-apply', () => {
+    process.env.ENABLED_CHANNELS = 'webhook';
+    resetEnabledChannelsCache();
+    expect(enabledChannels()).toEqual(['webhook']);
+    process.env.ENABLED_CHANNELS = 'discord';
+    expect(enabledChannels()).toEqual(['webhook']);
+  });
+});
