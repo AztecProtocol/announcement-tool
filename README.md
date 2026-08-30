@@ -7,6 +7,8 @@ Release-only announcement pipeline (author once → fan out).
 
 **Two deployment shapes exist.** `main` deploys to a VM behind Tailscale (Plan 5) and remains the working, supported deployment. A separate branch, `feat/netlify-deployment` (Plan 5b), adds a serverless Netlify shape as an alternative. **That branch is not merged, and no decision has been made to move off the VM.** This README documents both, marked clearly below wherever they differ; anything not marked applies to both. `DEPLOY_TARGET` (`vm` or `netlify`) tells the app which shape it is running under — see "Startup safety checks".
 
+**A third, split shape is being built on `feat/split-infrastructure`** (also not merged): the app and worker run on Netlify, and a separate Hetzner VM runs only Postgres, the Signal sidecar, and Caddy. The deploy procedure, security posture, and what has and has not been verified for that VM are documented in [`infra/README.md`](infra/README.md), not here — this README's Admin section covers the application, not that infrastructure.
+
 ## Development Setup
 
 **Prerequisites:** Docker, Node 22+, npm.
@@ -209,7 +211,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `DATABASE_URL` | `postgres://announce:announce@127.0.0.1:5499/announce` | Postgres connection string used by the worker (or, on the Netlify shape, the `tick-background` function) and migrations. On Netlify this must point at a reachable managed Postgres instance — there is no bundled database. Must NOT include `sslmode` or `sslrootcert` in its query string — those bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below and startup refuses to build a connection if either is present. |
 | `DATABASE_SSL_MODE` | *(unset)* | `verify-full` to require a verified TLS connection to Postgres — needed whenever the database is not reachable only over a private network (e.g. the Hetzner-VM split deployment, where the database port is exposed to the public internet). Unset means plaintext, for a private link such as loopback, Tailscale, or the docker-compose network. `require` is refused (encrypts but does not verify the server, so it does not stop an active attacker); any other value fails startup. |
 | `DATABASE_SSL_ROOT_CERT` | *(unset)* | Path to the CA bundle used to verify the Postgres server certificate. Required whenever `DATABASE_SSL_MODE=verify-full` — without an explicit CA, verification would silently fall back to the system trust store, which may not contain the issuer, so startup refuses rather than connecting with an unverified guarantee. |
-| `PUBLIC_BASE_URL` | `https://announce.aztec.foundation` | Base URL used to build the email unsubscribe link (`/u/<token>`). |
+| `PUBLIC_BASE_URL` | `https://announce.aztec.network` | Base URL used to build the email unsubscribe link (`/u/<token>`). |
 | `TELEGRAM_BOT_TOKEN` | *(unset)* | Bot token from BotFather; required for any Telegram delivery. |
 | `SIGNAL_API_BASE` | `http://127.0.0.1:8080` | Base URL of the `signal-cli-rest-api` sidecar. |
 | `SIGNAL_ACCOUNT` | *(unset)* | Registered Signal sender number; required for any Signal delivery. |
