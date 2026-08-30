@@ -213,6 +213,9 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
  */
 const PEM_HEADER = /^\s*-----BEGIN CERTIFICATE-----/;
 
+/** The closing marker a well-formed inline PEM value must contain. */
+const PEM_FOOTER = '-----END CERTIFICATE-----';
+
 /**
  * Resolves DATABASE_SSL_ROOT_CERT's value, mutating `options.ssl.ca` in
  * place from whatever buildConnectionOptions left there (see the comment on
@@ -260,6 +263,21 @@ const PEM_HEADER = /^\s*-----BEGIN CERTIFICATE-----/;
  * certificate export already contains real newlines, so a value with real
  * newlines is left untouched, and this branch only ever fires on the
  * specific "flattened by a UI" shape it exists to fix.
+ *
+ * TRUNCATION: a value that starts with a genuine `-----BEGIN CERTIFICATE-----`
+ * header but was cut short before reaching `-----END CERTIFICATE-----` — a
+ * paste dropped its last line, or hit a length limit in some UI's env-var
+ * field — is still detected as PEM by PEM_HEADER and handed to Node's TLS
+ * layer as-is. That fails, but with an OpenSSL ASN.1/PEM decode error that
+ * names neither "Netlify" nor "truncated": an operator gets a cryptic
+ * parser error with no hint of the actual, mundane cause, on the one
+ * variable (DATABASE_SSL_ROOT_CERT) this file already goes out of its way
+ * to diagnose clearly for the sibling escaped-newline failure above. This
+ * is not a fail-open — Node never falls back to the system trust store
+ * once `ca` is set, truncated or not — it is purely a diagnosability gap.
+ * So: any detected-PEM value missing the closing `-----END CERTIFICATE-----`
+ * marker throws here, naming truncation as the likely cause, instead of
+ * reaching postgres.js/Node's TLS layer at all.
  */
 export function resolveCaFile(options: ConnectionOptions): void {
   if (options.ssl && typeof options.ssl === 'object' && 'ca' in options.ssl) {
@@ -267,6 +285,16 @@ export function resolveCaFile(options: ConnectionOptions): void {
     let ca: string;
     if (PEM_HEADER.test(raw)) {
       ca = raw.includes('\\n') && !raw.includes('\n') ? raw.replace(/\\n/g, '\n') : raw;
+      if (!ca.includes(PEM_FOOTER)) {
+        throw new Error(
+          'DATABASE_SSL_ROOT_CERT looks like inline PEM (it starts with '
+          + '"-----BEGIN CERTIFICATE-----") but never reaches a closing '
+          + `"${PEM_FOOTER}" marker. This is almost always a truncated paste — `
+          + "a UI's length limit or a dropped final line — not a genuine "
+          + 'certificate. Re-paste the full PEM content, from the BEGIN line '
+          + 'through the END line inclusive.',
+        );
+      }
     } else {
       ca = readFileSync(raw, 'utf8');
     }

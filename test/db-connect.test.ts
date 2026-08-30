@@ -173,6 +173,28 @@ describe('resolveCaFile', () => {
     expect((options.ssl as { ca: string }).ca).toBe(mixed);
   });
 
+  it('fails loudly, naming truncation, for a PEM value cut short before its END marker', () => {
+    // A UI's env-var length limit, or a paste that dropped its last line, is
+    // a realistic way to lose the closing marker while keeping the opening
+    // one intact -- PEM_HEADER alone would still call this "PEM" and hand
+    // it to Node's TLS layer, which fails with an opaque ASN.1 decode error
+    // naming neither Netlify nor truncation. This must throw here instead,
+    // with a message an operator can act on directly.
+    const truncated = '-----BEGIN CERTIFICATE-----\nMIIFAKECERTDATA\n';
+    const options: ConnectionOptions = { ssl: { ca: truncated, rejectUnauthorized: true } };
+    expect(() => resolveCaFile(options)).toThrow(/truncat/i);
+  });
+
+  it('fails loudly, naming truncation, for an escaped-newline PEM cut short before its END marker', () => {
+    // The truncation check must run on the value AFTER unescaping, not
+    // before -- an escaped-newline paste that was also truncated should
+    // still be caught, not slip through because the raw string doesn't
+    // literally contain the footer text on its own line.
+    const truncated = '-----BEGIN CERTIFICATE-----\\nMIIFAKECERTDATA\\n';
+    const options: ConnectionOptions = { ssl: { ca: truncated, rejectUnauthorized: true } };
+    expect(() => resolveCaFile(options)).toThrow(/truncat/i);
+  });
+
   it('fails loudly for a value that is neither valid PEM nor an existing file', () => {
     // A bad path (typo, wrong mount, a value that is actually meant to be
     // pasted PEM but got truncated before the BEGIN header survived) must
