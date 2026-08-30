@@ -50,8 +50,16 @@
 -- log in` — loud and immediate, on the very first connection attempt — the
 -- exact opposite failure mode of a working credential nobody noticed. The
 -- deployment process must run, using a superuser/owner connection, after
--- this migration:
---   psql "$DATABASE_URL" -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+-- this migration. Run it over SSH on the VM against 127.0.0.1, not against
+-- the public hostname: psql's default sslmode is `prefer`, which silently
+-- falls back to plaintext and never verifies the server, so run against
+-- the internet-exposed port this would send the freshly generated
+-- password across the wire as literal plaintext in the SQL statement
+-- itself (see infra/README.md step 5 for the full command and the two
+-- operator gotchas — unencoded `/`/`+` from openssl breaking DATABASE_URL
+-- parsing, and the password landing in shell history):
+--   psql "postgres://announce:<owner password>@127.0.0.1:5432/announce" \
+--     -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
 -- with the generated password stored only in the deployment's secret
 -- manager / env, never committed. Until that step runs, announce_app
 -- cannot connect at all, regardless of grants.
