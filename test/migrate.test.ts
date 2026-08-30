@@ -24,3 +24,57 @@ describe('migrate', () => {
     await sql.end();
   });
 });
+
+describe('announce_app role (least-privilege app credential — migrations/014_app_role.sql)', () => {
+  // Applying the real migrations/ directory (the default `dir` migrate()
+  // uses) against the local dev database creates announce_app. These tests
+  // set a throwaway password on it via the owner connection, then connect
+  // AS announce_app to prove the grant boundary the migration establishes:
+  // normal publish-path writes work, DROP/ALTER is refused, DELETE on the
+  // two append-only audit tables is refused, and DELETE on the two tables
+  // the app code actually deletes from succeeds.
+  const appUrl = URL.replace(/announce:announce@/, 'announce_app:app-role-test-pw@');
+
+  it('grants the app role exactly what the code needs and nothing that can destroy audit history', async () => {
+    await migrate(URL); // ensures 014_app_role.sql has run and created announce_app
+
+    const owner = postgres(URL, { max: 1 });
+    await owner`alter role announce_app with password 'app-role-test-pw'`;
+    await owner.end();
+
+    const app = postgres(appUrl, { max: 1 });
+    try {
+      // Normal publish-path operations work.
+      await app`
+        insert into announcements
+          (id, revision, slug, type, networks, audiences, severity, title, body_md, status, created_by)
+        values
+          ('role-test', 1, 'role-test-slug', 'info', '{mainnet}', '{operators}', 'info', 't', 'b', 'draft', 'tester')
+      `;
+      await app`
+        insert into delivery_ledger (announcement_id, revision, channel, target)
+        values ('role-test', 1, 'webhook', 'sub-role-test')
+      `;
+      await expect(app`select key, channel, config from channel_settings limit 1`).resolves.toBeDefined();
+
+      // Cannot drop a table — the role does not own it and has no DDL rights.
+      await expect(app`drop table announcements`).rejects.toThrow(/must be owner/i);
+
+      // Cannot erase the append-only audit tables.
+      await expect(app`delete from audit_log`).rejects.toThrow(/permission denied/i);
+      await expect(app`delete from delivery_ledger`).rejects.toThrow(/permission denied/i);
+      await expect(app`update audit_log set actor = 'x'`).rejects.toThrow(/permission denied/i);
+
+      // The two tables the app code actually deletes from (src/core/templates.ts,
+      // src/core/tokens-flow.ts) must allow DELETE.
+      await expect(app`delete from templates where id = 'does-not-exist'`).resolves.toBeDefined();
+      await expect(app`delete from subscriptions where id = 'does-not-exist'`).resolves.toBeDefined();
+    } finally {
+      await app.end();
+      const cleanup = postgres(URL, { max: 1 });
+      await cleanup`delete from delivery_ledger where announcement_id = 'role-test'`;
+      await cleanup`delete from announcements where id = 'role-test'`;
+      await cleanup.end();
+    }
+  });
+});
