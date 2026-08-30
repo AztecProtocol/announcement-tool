@@ -1,0 +1,15 @@
+# Standalone image for the periodic Signal receive-poll job — see
+# docker-compose.prod.yml `signal-receive` service and
+# scripts/signal-receive.sh for the full spec.
+#
+# A separate small image, not the app's own Dockerfile: this job only needs
+# bash + curl, and the app's `node:22-alpine` runtime image ships neither
+# (checked: `node:22-alpine` has only `/bin/sh`, no bash or curl binary).
+# Same reasoning as Dockerfile.backup — a dedicated, real Dockerfile (not a
+# compose `dockerfile_inline`) always builds the right image, with or
+# without the buildx plugin.
+FROM alpine:3
+RUN apk add --no-cache bash curl
+COPY scripts/signal-receive.sh /usr/local/bin/signal-receive.sh
+RUN chmod +x /usr/local/bin/signal-receive.sh
+ENTRYPOINT ["/usr/local/bin/signal-receive.sh"]

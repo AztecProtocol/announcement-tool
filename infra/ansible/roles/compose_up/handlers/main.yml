@@ -1,0 +1,9 @@
+# Bind-mounted Caddyfile content changes are invisible to `docker compose
+# up` (the container itself didn't change, only the file it mounts), so
+# this handler restarts caddy explicitly whenever the repository sync
+# task reports a change.
+- name: Restart caddy
+  ansible.builtin.command:
+    cmd: docker compose restart caddy
+    chdir: "{{ stack_dir }}"
+  changed_when: true

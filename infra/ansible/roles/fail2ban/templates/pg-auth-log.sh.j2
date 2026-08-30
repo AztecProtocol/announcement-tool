@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Mirrors new lines from the `db` container's Docker-managed log into a
+# real host file, so fail2ban (which tails host files, not Docker's own
+# log driver) can see them. Run every minute by cron
+# (roles/fail2ban/tasks/main.yml) — NOT a long-running `docker compose
+# logs -f`, so a stuck/crashed instance of this script cannot silently
+# stop feeding fail2ban without cron's next tick trying again.
+#
+# `--since` is tracked via a small state file (the last line count seen)
+# rather than a timestamp: `docker compose logs --since` accepts
+# timestamps but not "since I last checked", and re-appending the whole
+# log every run would make fail2ban's maxretry counting meaningless
+# (every run would re-count every historical failure as if it just
+# happened). Line-count-based tracking is simpler to reason about than
+# timestamp math across cron's own minute-granularity drift.
+set -euo pipefail
+
+STACK_DIR="{{ stack_dir }}"
+STATE_FILE="/var/run/announce-pg-auth-log.lines"
+DEST="/var/log/announce-postgres-auth.log"
+
+cd "$STACK_DIR"
+
+total_lines="$(docker compose logs db 2>/dev/null | wc -l)"
+last_seen="0"
+if [ -f "$STATE_FILE" ]; then
+  last_seen="$(cat "$STATE_FILE")"
+fi
+
+if [ "$total_lines" -gt "$last_seen" ]; then
+  docker compose logs db 2>/dev/null | tail -n "+$((last_seen + 1))" >>"$DEST"
+fi
+
+echo "$total_lines" >"$STATE_FILE"

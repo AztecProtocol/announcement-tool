@@ -1,0 +1,21 @@
+# Standalone image for the nightly backup job — see docker-compose.prod.yml
+# `backup` service and scripts/backup.sh for the full spec.
+#
+# Deliberately NOT the app's own Dockerfile: this job only needs
+# pg_dump/pg_restore/psql (postgres:16-alpine already ships them) plus
+# gnupg (encrypt-before-upload) and aws-cli (S3-compatible upload). Keeping
+# it a separate image means a change here can never affect what ships in
+# app/worker, and vice versa.
+#
+# NOTE: this is a real file, not a compose `dockerfile_inline`, on purpose —
+# `dockerfile_inline` silently falls back to the classic builder's default
+# `Dockerfile` in the build context when the buildx plugin is not installed
+# (confirmed locally: no buildx here, and `docker compose build backup`
+# built the main app image instead of this one, with no error). A file that
+# always resolves correctly beats a feature that only works when a specific
+# plugin happens to be present.
+FROM postgres:16-alpine
+RUN apk add --no-cache bash gnupg curl aws-cli
+COPY scripts/backup.sh /usr/local/bin/backup.sh
+RUN chmod +x /usr/local/bin/backup.sh
+ENTRYPOINT ["/usr/local/bin/backup.sh"]

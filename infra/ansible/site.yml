@@ -1,0 +1,41 @@
+# Deploys the split-deployment VM stack: Postgres + signal-cli-rest-api +
+# signal-receive + Caddy + nightly backup (docker-compose.split.yml). Run
+# after `terraform apply` in infra/terraform (which renders inventory.yml
+# from vm.tf's outputs):
+#
+#   ansible-galaxy collection install -r requirements.yml
+#   ansible-playbook -i inventory.yml site.yml
+#
+# No tailnet on this deployment — see infra/terraform/vm.tf. Postgres
+# (5432) and Caddy (443) are exposed to the public internet on purpose;
+# TLS + the least-privilege announce_app DB role + fail2ban are what
+# protect them (infra/README.md, infra/docker-compose.split.yml's `db`
+# comment). That's why `fail2ban` and `cert_reload` are real roles here and
+# not, as on the tailnet'd aztec-observability module, skipped entirely.
+#
+# Role order matters:
+#   1. docker         — installs Docker + the RequiresMountsFor drop-in so
+#                        it never starts before the data volume is mounted.
+#   2. volume_mount    — confirms the Hetzner volume is actually mounted at
+#                        the path Terraform told us about, and creates the
+#                        stack directory on it.
+#   3. compose_up      — renders .env, copies the compose file + Caddyfile,
+#                        brings the stack up.
+#   4. fail2ban        — installed after the stack is up so its Postgres
+#                        jail has real log output to point at.
+#   5. cert_reload     — installs the daily cron that keeps Postgres's TLS
+#                        material in sync with whatever Caddy most recently
+#                        obtained from Let's Encrypt. Runs last because it
+#                        assumes both `db` and `caddy` containers already
+#                        exist.
+- name: Deploy the announcement tool's split-deployment VM stack
+  hosts: all
+  become: true
+  vars:
+    stack_dir: /opt/announce
+  roles:
+    - docker
+    - volume_mount
+    - compose_up
+    - fail2ban
+    - cert_reload

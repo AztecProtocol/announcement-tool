@@ -1,0 +1,115 @@
+# Syncs the repo onto the host and brings the stack up. Secrets
+# (POSTGRES_PASSWORD, BACKUP_ENCRYPTION_KEY, ANNOUNCE_SIGNAL_SECRET, ...)
+# are never generated or templated by this role — see the note on
+# `stack_dir + /.env` below.
+#
+# WHY THE WHOLE REPO, NOT JUST THE COMPOSE FILE + CADDYFILE: `backup` and
+# `signal-receive` in docker-compose.split.yml build their images from
+# `context: ..` (relative to infra/, i.e. the repo root) plus
+# Dockerfile.backup / Dockerfile.signal-receive / scripts/backup.sh /
+# scripts/signal-receive.sh. Copying only the two infra files here would
+# leave those `docker compose build` invocations with no build context on
+# the host at all. Syncing the full checkout keeps the build context
+# identical to what a developer has locally, so "it built here" and "it
+# builds on the VM" mean the same thing.
+- name: Create the stack directory
+  ansible.builtin.file:
+    path: "{{ stack_dir }}"
+    state: directory
+    mode: "0755"
+
+# `{{ playbook_dir }}/../..` is the repo root (site.yml lives in
+# infra/ansible/). rsync, not copy + recursive, so re-runs are fast and
+# deletions on the source side (e.g. a removed script) are reflected on the
+# host instead of accumulating stale files forever. Excludes match
+# .gitignore's own intent: never ship node_modules/.next/build artifacts
+# to a host that doesn't need or want them, and never ship
+# infra/dev/certs — those are local dev-only fixtures, this deployment
+# gets its cert from Let's Encrypt via Caddy.
+# Notifies the "Restart caddy" handler on change — see
+# roles/compose_up/handlers/main.yml.
+- name: Sync the repository to the host
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../../"
+    dest: "{{ stack_dir }}/repo"
+    delete: true
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=node_modules"
+      - "--exclude=.next"
+      - "--exclude=infra/dev/certs"
+      - "--exclude=infra/terraform/.terraform"
+  notify: Restart caddy
+
+# Symlinks, not copies: docker-compose.split.yml's `backup`/`signal-receive`
+# build contexts are `..` RELATIVE TO WHERE THE COMPOSE FILE LIVES, so the
+# compose file must actually live inside the synced repo tree (at
+# {{ stack_dir }}/repo/infra/), not be copied out to {{ stack_dir }}/ where
+# `..` would resolve to {{ stack_dir }}/ itself and find no Dockerfiles.
+# These two symlinks just give `docker compose` a stable, short invocation
+# path (`cd {{ stack_dir }} && docker compose up`) without callers needing
+# to know the synced tree's structure.
+- name: Symlink the compose file to the expected location
+  ansible.builtin.file:
+    src: "{{ stack_dir }}/repo/infra/docker-compose.split.yml"
+    dest: "{{ stack_dir }}/docker-compose.yml"
+    state: link
+    force: true
+
+- name: Symlink the Caddyfile to the expected location
+  ansible.builtin.file:
+    src: "{{ stack_dir }}/repo/infra/Caddyfile.split"
+    dest: "{{ stack_dir }}/Caddyfile.split"
+    state: link
+    force: true
+
+# THE .env FILE IS DELIBERATELY NOT MANAGED HERE.
+#
+# POSTGRES_PASSWORD, BACKUP_ENCRYPTION_KEY, BACKUP_S3_*, ANNOUNCE_DOMAIN,
+# ANNOUNCE_SIGNAL_SECRET, SIGNAL_ACCOUNT, and ALERT_EMAIL_TO are all real
+# secrets or deployment-specific values (see docker-compose.split.yml's
+# `${VAR:?VAR must be set}` guards, which make compose refuse to start
+# without them). Templating them from Ansible variables would mean they
+# either live in group_vars/host_vars in this repo (git — never) or an
+# Ansible Vault-encrypted file this role would need to decrypt on every
+# run — extra machinery for a value that changes rarely and is set once
+# per deployment.
+#
+# Instead: this task only asserts the file exists, with a clear failure
+# message pointing at what to do, mirroring how docker-compose.split.yml's
+# own `:?` guards fail — loud and immediate, not a silent empty default.
+# The operator creates {{ stack_dir }}/.env by hand on first deploy (see
+# infra/ansible/inventory.yml.example's header comment), the same way
+# aztec-observability's GRAFANA_ADMIN_PASSWORD is generated once on the
+# host and never touched by Ansible again.
+- name: Confirm the environment file exists
+  ansible.builtin.stat:
+    path: "{{ stack_dir }}/.env"
+  register: compose_up_env_file
+
+- name: Fail if the environment file is missing
+  ansible.builtin.fail:
+    msg: >-
+      {{ stack_dir }}/.env does not exist. Create it on the host before
+      running this playbook (see infra/ansible/inventory.yml.example) with
+      POSTGRES_PASSWORD, ANNOUNCE_DOMAIN, ANNOUNCE_SIGNAL_SECRET,
+      BACKUP_ENCRYPTION_KEY, BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY_ID,
+      BACKUP_S3_SECRET_ACCESS_KEY, and SIGNAL_ACCOUNT set. This role does
+      not generate or template secrets — see the comment above this task.
+  when: not compose_up_env_file.stat.exists
+
+# Unconditional: compose up is idempotent, and gating it on whether the
+# repo sync reported a change would leave a manually-stopped stack down
+# forever while the playbook reports green (same reasoning as
+# aztec-observability's ansible/site.yml). `--build` picks up any change
+# to Dockerfile.backup / Dockerfile.signal-receive / scripts/*.sh from
+# this run's repo sync; compose only rebuilds an image whose inputs
+# actually changed, so this is not a wasted rebuild on every run. Runs
+# BEFORE handlers flush, so if `docker compose up` created the caddy
+# container for the first time, the "Restart caddy" handler (if
+# triggered) still finds a real container to restart.
+- name: Start / converge the stack
+  ansible.builtin.command:
+    cmd: docker compose up -d --remove-orphans --build
+    chdir: "{{ stack_dir }}"
+  changed_when: true

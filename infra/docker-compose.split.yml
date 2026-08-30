@@ -1,0 +1,333 @@
+# Split-deployment stack for the announcement tool's Hetzner VM.
+#
+# THIS IS NOT `docker-compose.prod.yml`. That file (on `main`) is the
+# single-VM deployment where the app, worker, and everything else share one
+# host reachable only over a tailnet. On THIS deployment (`announce.aztec.
+# network`, Task 5/6 of 2026-08-27-06b-split-infrastructure) the app and
+# worker run on Netlify instead — this VM runs ONLY the stateful/host-bound
+# pieces Netlify cannot: Postgres, signal-cli-rest-api (+ its keep-alive
+# receive job), Caddy, and the nightly backup. There is deliberately no
+# tailnet here (see infra/terraform/vm.tf) — Postgres (5432) and Caddy (443)
+# are exposed to the public internet, and TLS + a least-privilege DB role +
+# fail2ban are what protect them, not network isolation. See infra/README.md
+# for the `announce_app` role and infra/Caddyfile.split for the Signal proxy
+# gate.
+#
+# `db`, `signal`, `signal-receive`, `backup`, and `caddy` below are carried
+# over from `main`'s docker-compose.prod.yml with their original comments
+# preserved (they encode real incidents — signal-cli's silent send
+# degradation, the backup crash-loop-vs-silent-abandonment reasoning). Only
+# `app`, `worker`, and `migrate` were removed: Netlify runs the app and
+# worker, and migrations are run against the exposed Postgres port from
+# wherever `npm run migrate` is invoked in the Netlify deploy pipeline, not
+# from this host.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: announce
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: announce
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # A SEPARATE volume from db-data, dedicated to TLS material. NOT
+      # Caddy's own cert directory (Caddy's ACME storage is owned by the
+      # caddy container's uid and is not 0600-as-postgres — Postgres could
+      # not use it directly even read-only). Instead, this is where the
+      # cert-reload Ansible role (and this service's own bootstrap
+      # entrypoint below, on first start) writes a cert/key pair Postgres
+      # already owns and can read with the right mode. See
+      # infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 for
+      # exactly how that copy happens and why it must, not can, run
+      # outside this compose file.
+      - db-tls:/var/lib/postgresql/tls
+    # BOOTSTRAP ORDERING NOTE: `db-tls` starts EMPTY on a fresh volume — the
+    # cert-reload role (infra/ansible/roles/cert_reload) is what populates
+    # it from Caddy's ACME-obtained cert, but that role's script itself
+    # requires the `db` container to already be running (`docker compose
+    # exec db ...`) to install a cert with the right ownership/mode. That's
+    # a chicken-and-egg problem on first deploy: Postgres can't start
+    # without a cert in db-tls/, and nothing can put a cert in db-tls/
+    # until Postgres has started. `entrypoint` below breaks the cycle by
+    # generating a THROWAWAY self-signed cert if db-tls/ is still empty,
+    # letting Postgres come up immediately; the cert-reload role's first
+    # run (which infra/ansible/site.yml triggers once right after `docker
+    # compose up`, not only on its daily cron schedule) then replaces it
+    # with Caddy's real cert and SIGHUPs — same code path either way, so
+    # there is exactly one mechanism for "Postgres's serving cert changed
+    # underneath it," not two.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        if [ ! -f /var/lib/postgresql/tls/server.crt ]; then
+          apk add --no-cache openssl >/dev/null
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 7 -nodes \
+            -keyout /var/lib/postgresql/tls/server.key \
+            -out /var/lib/postgresql/tls/server.crt \
+            -subj "/CN=announce-bootstrap-placeholder" 2>/dev/null
+          chown postgres:postgres /var/lib/postgresql/tls/server.crt /var/lib/postgresql/tls/server.key
+          chmod 644 /var/lib/postgresql/tls/server.crt
+          chmod 600 /var/lib/postgresql/tls/server.key
+        fi
+        exec docker-entrypoint.sh "$$@"
+      - --
+    # `ports:` publishes 5432 to the host's public interface — THE WHOLE
+    # POINT OF THIS FILE. `main`'s docker-compose.prod.yml has a comment
+    # here saying "Do not add a `ports:` mapping" — that comment is correct
+    # for `main`'s topology (app/worker reach `db:5432` over the private
+    # compose network, nothing outside it needs to) and WRONG for this one.
+    # This is the split deployment: Netlify's functions have no way to join
+    # a Docker network on this host, so Postgres must be reachable over the
+    # public internet on 5432, from a shifting pool of 80+ Netlify egress
+    # IPs with no stable range to allowlist (see infra/terraform/vm.tf's
+    # firewall comment). What protects this port, in the absence of a
+    # tailnet or IP allowlist, is:
+    #   1. TLS with sslmode=verify-full enforced client-side (src/db/
+    #      connect.ts refuses "require" — encrypted-but-unverified — and
+    #      refuses to start without DATABASE_SSL_ROOT_CERT). See the
+    #      cert-reload note above for how the serving cert stays current.
+    #   2. The `announce_app` role (migrations/014_app_role.sql,
+    #      infra/README.md): least-privilege, no DROP/TRUNCATE/ALTER, no
+    #      DELETE on the two append-only audit tables. A leaked credential
+    #      cannot do catastrophic damage.
+    #   3. fail2ban on this host (infra/ansible/roles/fail2ban), rate-
+    #      limiting repeated failed connection attempts against 5432 —
+    #      without a tailnet, an unthrottled public Postgres port is a
+    #      brute-force target.
+    # None of these is optional; removing any one weakens the others'
+    # justification for this port being open at all.
+    #
+    # Host port is DB_HOST_PORT, defaulting to the real 5432 — overridable
+    # only so Task 6's local verification run can avoid colliding with the
+    # unrelated announce-db-1 / announce-db-tls-1 containers this repo's
+    # test suite already runs on this machine. A real deployment should
+    # never set DB_HOST_PORT; Netlify's DATABASE_URL expects 5432.
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+    command:
+      # Same rationale as docker-compose.dev.yml's `db-tls` service: the
+      # cert/key arrive on a bind mount owned by the host user (or, here,
+      # by whatever uid the cert-reload role wrote them as), never uid 70
+      # (postgres in this image), so they cannot be pointed at directly.
+      # `command` overrides the entrypoint's default `postgres` invocation
+      # to add ssl flags; the base image's own entrypoint still handles
+      # initdb / permission-drop before exec'ing this.
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/lib/postgresql/tls/server.crt
+      - -c
+      - ssl_key_file=/var/lib/postgresql/tls/server.key
+    healthcheck:
+      # Preserved from main: `pg_isready` alone races a freshly-started
+      # container that accepts TCP before it can actually serve. Nothing
+      # in this compose file depends on this healthcheck (there is no
+      # `migrate` service here to gate on it), but it stays because it is
+      # cheap, correct, and useful for `docker compose ps` / monitoring.
+      test: ["CMD-SHELL", "pg_isready -U announce -d announce"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  signal:
+    image: bbernhard/signal-cli-rest-api:latest
+    restart: unless-stopped
+    environment:
+      MODE: native
+    volumes:
+      - signal-data:/home/.local/share/signal-cli
+    # Not published to the host directly. On `main` this comment continued
+    # "nothing outside this stack needs to reach signal-cli directly" —
+    # that is now only half true: Caddy (below) DOES need to reach it, but
+    # Caddy does so over the compose network as `signal:8080`, same as any
+    # other service-to-service call. Still nothing needs a host port here;
+    # the public path is Caddy's 443, gated by the shared secret (see
+    # infra/Caddyfile.split).
+
+  signal-receive:
+    # Periodic `GET /v1/receive/{number}` against the signal service. This
+    # is NOT optional housekeeping: signal-cli warns that an account which
+    # only ever sends and never receives degrades, and outbound sending
+    # then silently stops working — no error at send time, `/v2/send` keeps
+    # returning 201, messages simply stop arriving. Hit live 2026-08-11; see
+    # scripts/signal-receive.sh and the README's Signal registration notes.
+    #
+    # Built from Dockerfile.signal-receive, NOT the app's own Dockerfile:
+    # this job only needs bash + curl, and the app's `node:22-alpine`
+    # runtime image ships neither. Same reasoning as the `backup` service
+    # below and Dockerfile.backup.
+    build:
+      context: ..
+      dockerfile: Dockerfile.signal-receive
+    restart: unless-stopped
+    depends_on:
+      - signal
+    environment:
+      SIGNAL_API_BASE: http://signal:8080
+      SIGNAL_ACCOUNT: ${SIGNAL_ACCOUNT:?SIGNAL_ACCOUNT must be set}
+    # Same sleep-loop-plus-entrypoint scheduling shape as the `backup`
+    # service below, at a much shorter period: this only needs to run often
+    # enough that signal-cli's server-side sees regular activity, not once
+    # a night. Every SIGNAL_RECEIVE_INTERVAL_SECONDS (default 6 hours), run
+    # signal-receive.sh once. If the script itself fails (account
+    # unreachable, non-2xx), the entrypoint's `set -e` propagates that exit,
+    # `restart: unless-stopped` restarts the container, and it goes straight
+    # back to polling on schedule — same crash-loop-vs-silent-abandonment
+    # reasoning as the backup service. `entrypoint:` here overrides the
+    # image's own ENTRYPOINT (a single direct run of the script, used when
+    # invoking the container image standalone) with this loop.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        interval="${SIGNAL_RECEIVE_INTERVAL_SECONDS:-21600}"
+        while true; do
+          /usr/local/bin/signal-receive.sh
+          sleep "$$interval"
+        done
+
+  caddy:
+    # Public-facing TLS terminator for THIS deployment. See
+    # infra/Caddyfile.split for what it actually serves — it is NOT
+    # main's Caddyfile (that one fronts the public site + admin-404 guard,
+    # neither of which lives on this host; Netlify serves the public site
+    # here). This Caddy only: (1) obtains/renews the Let's Encrypt cert for
+    # announce.aztec.network, and (2) reverse-proxies to signal:8080 behind
+    # a shared-secret gate.
+    #
+    # Unlike main, this Caddy does NOT share the app's network namespace
+    # (there is no `app` container on this host at all) — it joins the
+    # default compose network directly and gets its own `ports:` mapping.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - signal
+    # Host ports are CADDY_HTTPS_PORT (default 443) — same override
+    # rationale as DB_HOST_PORT above, for the same local-verification
+    # reason. No 80 mapping: HTTP-01 ACME challenges and any plain-HTTP
+    # visitor are handled by Caddy's automatic HTTPS redirect internally
+    # needing only 443 for TLS-ALPN-01 in this setup; if HTTP-01 is ever
+    # required instead, add "80:80" here and to the firewall in vm.tf.
+    ports:
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp" # HTTP/3 (QUIC)
+    environment:
+      ANNOUNCE_DOMAIN: ${ANNOUNCE_DOMAIN:?ANNOUNCE_DOMAIN must be set}
+      # Read by infra/Caddyfile.split's shared-secret gate. Must match
+      # SIGNAL_API_SECRET as configured on the Netlify side (the app's
+      # SIGNAL_API_SECRET env var, sent by src/core/signal-auth.ts as the
+      # x-announce-signal-secret header) — this is the "proxy" half of the
+      # fail-closed pair described there. Left unset, the gate refuses
+      # every request (see infra/Caddyfile.split's comment on this).
+      #
+      # THE FALLBACK VALUE HERE IS LOAD-BEARING, NOT COSMETIC. Caddy's own
+      # `{$VAR:default}` placeholder syntax only substitutes its default
+      # when $VAR is truly UNSET in the container's environment — not when
+      # it is present-but-empty, which is exactly what Docker Compose's own
+      # `${ANNOUNCE_SIGNAL_SECRET:-}` produces for an unset host variable
+      # (a non-empty ANNOUNCE_SIGNAL_SECRET= line always reaches the
+      # container). Verified locally (Task 6's report): an empty
+      # x-announce-signal-secret header value in the Caddyfile's `header`
+      # matcher is a Caddyfile SYNTAX ERROR ("malformed header matcher:
+      # expected both field and value"), which crash-loops the caddy
+      # container — a worse failure than a clean 403, and one that also
+      # takes down the cert-reload hook's ability to read Caddy's ACME
+      # cert. The `:-<sentinel>` default below guarantees Caddy's
+      # environment variable is NEVER actually empty, only ever the real
+      # secret or this structurally-implausible placeholder that no real
+      # request header will ever equal — see the long comment in
+      # infra/Caddyfile.split for why that still fails closed.
+      ANNOUNCE_SIGNAL_SECRET: ${ANNOUNCE_SIGNAL_SECRET:-__announce_signal_secret_unset__}
+    volumes:
+      - ./Caddyfile.split:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  backup:
+    # Nightly dump + encrypt + restore-verify + off-host upload. See
+    # scripts/backup.sh for the full spec and comments — this service just
+    # wires it into compose and a schedule.
+    #
+    # Built from Dockerfile.backup, NOT the app's own Dockerfile: this job
+    # needs pg_dump/pg_restore/psql (postgres:16-alpine already has them),
+    # plus gnupg (encryption) and aws-cli (S3-compatible upload) that the
+    # app image has no reason to carry. A separate file (not compose's
+    # `dockerfile_inline`) is deliberate — see the note at the top of
+    # Dockerfile.backup for why inline silently builds the wrong image
+    # when the buildx plugin is absent.
+    build:
+      context: ..
+      dockerfile: Dockerfile.backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: announce
+      PGDATABASE: announce
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # Symmetric passphrase the dump is encrypted with BEFORE it ever
+      # leaves this container — see scripts/backup.sh. Required; there is
+      # no default, because a default would mean every deployment that
+      # forgets to set it encrypts backups with a known key.
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:?BACKUP_ENCRYPTION_KEY must be set}
+      # S3-compatible destination, OFF this VM. BACKUP_S3_ENDPOINT is only
+      # needed for a non-AWS S3-compatible provider (e.g. Backblaze B2,
+      # MinIO, Hetzner Object Storage); leave unset for real AWS S3.
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET must be set}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-announce-backups}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:?BACKUP_S3_ACCESS_KEY_ID must be set}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:?BACKUP_S3_SECRET_ACCESS_KEY must be set}
+      BACKUP_RETENTION_DAILY: ${BACKUP_RETENTION_DAILY:-30}
+      BACKUP_RETENTION_MONTHLY: ${BACKUP_RETENTION_MONTHLY:-12}
+      # Same alert destination and ESP as channel-health alerts (see
+      # src/core/alerts.ts / ALERT_EMAIL_TO) — a failed or missing backup
+      # raises an alert on the same path, not a separate one.
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ESP_PROVIDER: ${ESP_PROVIDER:-console}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      SIGNAL_DATA_DIR: /signal-data
+    volumes:
+      # Read-only: the signal-cli data directory is backed up, never
+      # written to, from this container.
+      - signal-data:/signal-data:ro
+    # This container runs the FULL nightly job once and exits — it is not a
+    # long-lived daemon. `entrypoint: ["sh", "-c", ...]` with a sleep-loop
+    # is how it gets scheduling without a host cron dependency: it sleeps
+    # until the next 03:00 UTC, runs backup.sh, and loops. `restart:
+    # unless-stopped` means if backup.sh itself exits non-zero (a real
+    # failure, not just "waiting for the next run"), Docker restarts the
+    # container and it goes straight back to sleeping for the next window
+    # — a crash-looping backup container is not the same as a silently
+    # abandoned one, but the alert already fired inside backup.sh's own
+    # failure path before this loop ever restarts it.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        while true; do
+          now=$$(date -u +%s)
+          next=$$(date -u -d '03:00' +%s)
+          if [ "$$next" -le "$$now" ]; then next=$$((next + 86400)); fi
+          sleep $$((next - now))
+          /usr/local/bin/backup.sh
+        done
+
+volumes:
+  db-data:
+  db-tls:
+  signal-data:
+  caddy-data:
+  caddy-config:

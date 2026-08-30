@@ -1,0 +1,6 @@
+# Shared across every role. `announce_domain` must match ANNOUNCE_DOMAIN in
+# {{ stack_dir }}/.env on the host (docker-compose.split.yml passes that
+# through to Caddy, which obtains the cert this value is used to find) —
+# kept here as a single Ansible-side source of truth rather than trying to
+# read it back out of the host's own .env at playbook time.
+announce_domain: announce.aztec.network

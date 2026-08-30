@@ -1,0 +1,96 @@
+# Rate-limits repeated failed connection attempts against the publicly
+# exposed Postgres port (5432). There is no tailnet on this deployment
+# (infra/terraform/vm.tf) — Postgres is reachable from anywhere, TLS +
+# the least-privilege `announce_app` role are what stop a stolen or
+# guessed credential from doing damage, but neither stops a brute-force
+# credential-stuffing run against the port itself. fail2ban is the layer
+# that does.
+#
+# Postgres logs failed auth to its own stderr, which Docker sends to the
+# json-file log driver by default — NOT to a host file fail2ban can tail
+# directly. `docker logs` reads that json-file log, so this role wires up
+# a small script that fail2ban's logpath calls through, rather than
+# expecting Postgres to write directly to a host path (postgres:16-alpine
+# has no such option without extra config, and duplicating Docker's
+# logging pipeline is more moving parts than necessary).
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    update_cache: true
+
+# `docker compose logs` needs a working directory; wrapping it in a script
+# invoked with an absolute path keeps the jail's `logpath` simple (fail2ban
+# does not expand shell variables in that field) and keeps stack_dir in one
+# place (this file) instead of also baked into the jail.local template.
+- name: Install the postgres-auth-log helper script
+  ansible.builtin.template:
+    src: pg-auth-log.sh.j2
+    dest: /usr/local/bin/pg-auth-log.sh
+    mode: "0755"
+
+# Runs the helper once a minute via cron, appending new log lines to a real
+# host file fail2ban can tail with `tail -F` semantics (its usual mode).
+# fail2ban itself has no notion of "run a container log command on a
+# timer" — this is the standard bridge pattern for containerized services
+# whose logs otherwise only exist inside the Docker logging driver.
+- name: Schedule the postgres-auth-log helper
+  ansible.builtin.cron:
+    name: "announce: mirror postgres auth log for fail2ban"
+    minute: "*"
+    job: /usr/local/bin/pg-auth-log.sh
+    user: root
+
+- name: Ensure the mirrored log file exists
+  ansible.builtin.file:
+    path: /var/log/announce-postgres-auth.log
+    state: touch
+    mode: "0644"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Install the postgres jail filter
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/filter.d/announce-postgres.conf
+    mode: "0644"
+    content: |
+      # Matches Postgres's own auth-failure log lines, as mirrored into
+      # /var/log/announce-postgres-auth.log by pg-auth-log.sh. Covers both
+      # "password authentication failed" (wrong password, right role) and
+      # "no pg_hba.conf entry" / role-does-not-exist style rejections
+      # (guessed role names), since both are brute-force signal.
+      [Definition]
+      failregex = ^.*FATAL:\s+password authentication failed for user\s+.*,\s*client\s*=\s*<HOST>\s*$
+                  ^.*FATAL:\s+.*no pg_hba\.conf entry for host\s+"<HOST>".*$
+                  ^.*FATAL:\s+role\s+".*"\s+does not exist.*client\s*=\s*<HOST>\s*$
+      ignoreregex =
+
+- name: Install the postgres jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/announce-postgres.conf
+    mode: "0644"
+    content: |
+      # Public Postgres port, no tailnet — see the note at the top of
+      # roles/fail2ban/tasks/main.yml. 5 failures in 10 minutes bans the
+      # source IP for 1 hour; deliberately more lenient than SSH-style
+      # jails (findtime=10m, not 24h) because a legitimate client
+      # (Netlify's shifting egress pool) can plausibly retry a handful of
+      # times during a deploy without being a real attack, and a 1-hour
+      # ban self-heals rather than requiring an operator to unban a
+      # innocent IP by hand.
+      [announce-postgres]
+      enabled = true
+      port = 5432
+      protocol = tcp
+      filter = announce-postgres
+      logpath = /var/log/announce-postgres-auth.log
+      maxretry = 5
+      findtime = 10m
+      bantime = 1h
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban is enabled and running
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: true

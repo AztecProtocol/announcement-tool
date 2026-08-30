@@ -1,0 +1,44 @@
+# Confirms the Hetzner data volume Terraform attached
+# (hcloud_volume_attachment.announce_data, automount = true) is actually
+# mounted where inventory.yml says it is, and creates the directories this
+# stack writes to on it — rather than on the root disk.
+#
+# `automount = true` in Terraform makes Hetzner's cloud-init integration
+# mount the volume on first boot, but this role does not simply trust that:
+# it asserts the mountpoint is a real mount, so a broken automount fails
+# the playbook loudly here rather than letting `docker` role's
+# RequiresMountsFor silently block Docker from ever starting (a systemd
+# unit waiting forever on a mount that will never appear looks identical,
+# from a monitoring standpoint, to "the playbook hasn't gotten here yet" —
+# better to fail in Ansible's own output).
+- name: Confirm the data volume is mounted
+  ansible.builtin.command: findmnt --noheadings {{ data_mount }}
+  changed_when: false
+  register: volume_mount_findmnt_result
+  failed_when: volume_mount_findmnt_result.rc != 0
+
+- name: Create the compose stack directory on the data volume
+  ansible.builtin.file:
+    path: "{{ data_mount }}/announce"
+    state: directory
+    mode: "0755"
+
+# db-data / caddy-data / caddy-config / signal-data / db-tls in
+# docker-compose.split.yml are compose-managed named volumes, which Docker
+# by default stores under /var/lib/docker/volumes — on the ROOT disk, not
+# this data volume, regardless of RequiresMountsFor. RequiresMountsFor only
+# protects against Docker STARTING early; it does not relocate where named
+# volumes live. Point Docker's own data-root at the mounted volume instead,
+# so every named volume (and every other image/layer Docker stores) lives
+# on the durable, resizable, detachable disk rather than the ephemeral
+# server root disk that a Hetzner rebuild wipes.
+- name: Point Docker's data-root at the mounted volume
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: |
+      {
+        "data-root": "{{ data_mount }}/docker"
+      }
+  register: volume_mount_docker_daemon_json
+  notify: Restart docker

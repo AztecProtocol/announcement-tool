@@ -10,3 +10,6 @@ next-env.d.ts
 # Generated TLS test fixtures (infra/dev/gen-test-certs.sh) — never commit
 # private keys, even throwaway ones for local test Postgres instances.
 infra/dev/certs/
+
+# Terraform-rendered, host-specific — see infra/ansible/inventory.yml.example
+infra/ansible/inventory.yml

@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# Keeps Postgres's TLS material in sync with whatever Caddy most recently
+# obtained from Let's Encrypt for announce.aztec.network. Run daily by
+# cron (roles/cert_reload/tasks/main.yml).
+#
+# THE PROBLEM THIS SOLVES
+# ------------------------
+# Caddy renews certs automatically and SILENTLY, typically around day 60
+# of a Let's Encrypt cert's ~90-day life — no operator action, no
+# deploy, no log anyone is watching by default. Postgres, unlike Caddy,
+# does NOT watch its cert files for changes: `ssl_cert_file` /
+# `ssl_key_file` (see docker-compose.split.yml's `db.command`) are read
+# once at startup and held until something explicitly tells Postgres to
+# reload — for TLS material specifically, that means SIGHUP
+# (`pg_reload_conf()` reloads postgresql.conf settings including ssl_*,
+# same signal). Without this script, the sequence is:
+#   day 0:  deploy. Everything works. Everyone moves on.
+#   day 60: Caddy silently renews. Postgres does not notice.
+#   day 90: the OLD cert Postgres is still serving expires. Every client
+#           enforcing verify-full (src/db/connect.ts — ALL of them)
+#           starts refusing the connection. Total outage.
+# This is the worst possible failure shape: a long, quiet gap between
+# cause (day 60) and effect (day 90), with nothing in between to notice.
+#
+# WHY A DAILY CRON, NOT inotifywait OR A CADDY PLUGIN
+# ----------------------------------------------------
+# See the comment in roles/cert_reload/tasks/main.yml for the full
+# comparison. Short version: this is deliberately the least clever
+# option available — one job, one log line per run, one exit code — so
+# that six months from now, someone debugging a TLS problem can read
+# this file top to bottom and understand the entire mechanism in one
+# pass, rather than needing to first find a plugin.
+#
+# WHY THE CERT PATH IS LOCATED AT RUNTIME, NOT HARDCODED
+# ---------------------------------------------------------
+# Caddy stores obtained certificates under a path keyed by the ACME
+# issuer's own naming (e.g.
+# /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<domain>/
+# on versions observed so far), and that scheme is NOT guaranteed stable
+# across Caddy versions — a Caddy upgrade that changes its storage
+# layout would silently make a hardcoded path stop matching anything,
+# and this script would then either error loudly (best case) or, worse,
+# quietly find nothing and never reload again (which is exactly why "no
+# file found" below is a `fail`, not a skip). Instead this script
+# SEARCHES inside the running `caddy` container for the domain's PEM
+# files by name pattern, wherever they happen to live in this version —
+# via `docker compose exec`, not a host bind-mount path, so it works
+# regardless of whether caddy-data is a named volume or (in a future
+# change) a bind mount, and regardless of the volume's host-side
+# directory name.
+set -euo pipefail
+
+DOMAIN="{{ announce_domain }}"
+STACK_DIR="{{ stack_dir }}"
+LOG_TAG="announce-cert-reload"
+LOG_FILE="/var/log/announce-cert-reload.log"
+
+log() {
+  # Both syslog (journalctl -t announce-cert-reload) and a dedicated file
+  # (rotated by roles/cert_reload/tasks/main.yml's logrotate rule) — two
+  # places an operator might plausibly look, neither of which requires
+  # remembering this script's name in advance.
+  logger -t "$LOG_TAG" -- "$1"
+  printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" >>"$LOG_FILE"
+}
+
+fail() {
+  # FAILURE MUST BE LOUD. A cron job's stderr, by default, is mailed to
+  # root by cron itself (or dropped if no MTA exists — which is the
+  # actual risk: a silent hook guarding against a silent failure is not
+  # protection, per the task brief). Logging explicitly to both syslog
+  # and a file, in addition to whatever cron does with stderr, means the
+  # failure is visible even on a host with no working local MTA.
+  log "FAILED: $1"
+  exit 1
+}
+
+cd "$STACK_DIR" || fail "cannot cd to $STACK_DIR"
+
+# --- Locate Caddy's current cert + key for $DOMAIN, at runtime ------------
+# Search the whole caddy-data mount (Caddy always mounts it at /data)
+# rather than assume a fixed subpath under it — see the header comment
+# on why. `-iname` for case-insensitivity: file naming conventions have
+# varied slightly across Caddy's storage format revisions. Run inside
+# the container so this works no matter how caddy-data is backed on the
+# host.
+CADDY_CERT_PATH="$(docker compose exec -T caddy find /data -type f -iname "${DOMAIN}.crt" 2>/dev/null | head -n1 | tr -d '\r')"
+CADDY_KEY_PATH="$(docker compose exec -T caddy find /data -type f -iname "${DOMAIN}.key" 2>/dev/null | head -n1 | tr -d '\r')"
+
+if [ -z "$CADDY_CERT_PATH" ] || [ -z "$CADDY_KEY_PATH" ]; then
+  # Caddy stores the leaf cert as "<domain>.crt" and the key as
+  # "<domain>.key" across every Caddy 2.x storage layout observed to
+  # date (only the DIRECTORY they sit in has moved between versions),
+  # so this pattern is the stable part. If it ever stops matching — a
+  # future Caddy major version renaming the leaf files themselves —
+  # this is exactly the kind of thing that must fail loudly rather than
+  # silently do nothing, which is why this is a `fail`, not a skip.
+  fail "no ${DOMAIN}.crt/.key found inside the caddy container's /data — Caddy may not have obtained a certificate yet, or its storage layout changed"
+fi
+
+# --- Read both fingerprints from inside their respective containers -------
+# Never assume a host-side path for either volume: hash each cert by
+# asking its own container to read its own copy. This also sidesteps
+# uid/permission differences between the host and either container.
+#
+# `sha256sum` over the raw PEM bytes, NOT `openssl x509 -fingerprint`:
+# neither caddy:2-alpine nor postgres:16-alpine ships openssl by default
+# (confirmed locally — both `docker exec ... openssl version` fail with
+# "not found"), and this script must not depend on `apk add` succeeding
+# against a package mirror on every single daily run just to compare two
+# files. `sha256sum` is busybox/coreutils, present in both images with no
+# extra install. A raw-byte hash is at least as strict a check as an X.509
+# fingerprint for "did Caddy hand us different cert bytes" — it is not
+# validating certificate STRUCTURE (this script is not a substitute for
+# Caddy's own ACME validity checks), only detecting that a reload is due.
+NEW_FINGERPRINT="$(docker compose exec -T caddy sh -c "sha256sum '$CADDY_CERT_PATH'" 2>/dev/null | awk '{print $1}')"
+
+if [ -z "$NEW_FINGERPRINT" ]; then
+  fail "could not hash $CADDY_CERT_PATH inside the caddy container"
+fi
+
+CURRENT_FINGERPRINT="$(docker compose exec -T db sh -c "test -f /var/lib/postgresql/tls/server.crt && sha256sum /var/lib/postgresql/tls/server.crt" 2>/dev/null | awk '{print $1}')"
+
+if [ "$NEW_FINGERPRINT" = "$CURRENT_FINGERPRINT" ] && [ -n "$CURRENT_FINGERPRINT" ]; then
+  log "no change (fingerprint matches, cert=$NEW_FINGERPRINT)"
+  exit 0
+fi
+
+# --- Copy the new cert/key into place and reload Postgres -----------------
+# `docker compose cp` moves the files container-to-container via this
+# host as an intermediary, without needing either container's storage to
+# be host-addressable. Written to a temp path first and then renamed
+# INSIDE the db container, so a reader (Postgres, or this script on its
+# next run) never observes a partially-written file.
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+docker compose cp "caddy:$CADDY_CERT_PATH" "$TMP_DIR/server.crt" || fail "could not copy the new cert out of the caddy container"
+docker compose cp "caddy:$CADDY_KEY_PATH" "$TMP_DIR/server.key" || fail "could not copy the new key out of the caddy container"
+
+docker compose cp "$TMP_DIR/server.crt" db:/var/lib/postgresql/tls/server.crt.new || fail "could not copy the new cert into the db container"
+docker compose cp "$TMP_DIR/server.key" db:/var/lib/postgresql/tls/server.key.new || fail "could not copy the new key into the db container"
+
+# Postgres refuses to start (and refuses to reload, per the same
+# permission check) unless the key file is 0600 and owned by the
+# postgres user inside the container — same constraint
+# docker-compose.dev.yml's db-tls service and docker-compose.split.yml's
+# db.command already work around. chown/chmod/mv all run as root inside
+# the container (the default `docker compose exec` user), then the
+# server process itself runs as postgres, same as always.
+if ! docker compose exec -T db sh -c '
+  set -e
+  chown postgres:postgres /var/lib/postgresql/tls/server.crt.new /var/lib/postgresql/tls/server.key.new
+  chmod 644 /var/lib/postgresql/tls/server.crt.new
+  chmod 600 /var/lib/postgresql/tls/server.key.new
+  mv /var/lib/postgresql/tls/server.crt.new /var/lib/postgresql/tls/server.crt
+  mv /var/lib/postgresql/tls/server.key.new /var/lib/postgresql/tls/server.key
+'; then
+  fail "could not install the new cert/key inside the db container — old cert is still in place, Postgres NOT reloaded"
+fi
+
+# SIGHUP reloads postgresql.conf, including ssl_cert_file/ssl_key_file —
+# this is the actual fix for the silent-expiry problem this whole script
+# exists to prevent. `docker compose kill -s HUP` (not `docker kill`,
+# which would need the raw container name) keeps this script portable
+# across compose project-name changes.
+if ! docker compose kill -s HUP db; then
+  fail "new cert/key installed but SIGHUP to the db container failed — Postgres may still be serving the OLD cert until its next restart"
+fi
+
+log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT)"

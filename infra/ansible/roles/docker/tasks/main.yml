@@ -1,0 +1,74 @@
+# Installs Docker from the pinned apt repo + keyring (no curl|sh), then
+# adds the RequiresMountsFor drop-in so Docker (and therefore every
+# container, including `db` writing to db-data) waits for the Hetzner
+# volume to be mounted before it starts.
+#
+# WHY THIS MATTERS (carried forward from infra/terraform/vm.tf's comment,
+# which explicitly deferred this fix to this task): on a reboot, systemd
+# starts services in parallel unless something orders them. If Docker wins
+# the race against the volume mount, `db`'s bind/named volume paths
+# resolve against the ROOT disk, Postgres initializes a fresh empty
+# cluster there, and the volume mount that completes moments later is
+# silently mounted OVER that directory — the real data (announcements,
+# subscribers, delivery ledger, audit log) still exists on the Hetzner
+# volume but is now invisible underneath the mountpoint, and the
+# container is running against an empty database with no error anywhere.
+# This is the single scenario this role exists to prevent.
+- name: Docker apt keyring
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+
+- name: Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    filename: docker
+
+- name: Install docker + compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+- name: Enable unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# `data_mount` comes from inventory.yml (rendered by Terraform from
+# hcloud_volume.announce_data's id — see infra/terraform/vm.tf and
+# infra/terraform/ansible/inventory.yml.tftpl). RequiresMountsFor is a
+# systemd unit-file directive, not an apt/service option, so this has to be
+# a drop-in rather than an ansible.builtin.systemd module parameter.
+- name: Create the docker.service.d drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: "0755"
+
+# Notifies the "Restart docker" handler on change, which itself runs
+# `daemon_reload: true` before restarting — so a changed drop-in always
+# gets both a systemd reload and a docker restart together, in the
+# correct order, without a separate in-line daemon_reload task racing it.
+- name: Docker waits for the data volume to be mounted
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker.service.d/wait-for-data-volume.conf
+    mode: "0644"
+    content: |
+      [Unit]
+      RequiresMountsFor={{ data_mount }}
+  notify: Restart docker
+
+- name: Ensure docker is enabled and running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
