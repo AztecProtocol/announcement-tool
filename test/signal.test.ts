@@ -66,4 +66,50 @@ describe('signal adapter', () => {
     await expect(makeSignalAdapter(sql, { apiBase: 'http://127.0.0.1:1', account: '+1' }).deliver(ann, 'signal:broken', 'publish'))
       .rejects.toThrow(/group_id/);
   });
+
+  it('sends the proxy secret header when SIGNAL_API_SECRET is configured', async () => {
+    let headers: Record<string, string | string[] | undefined> = {};
+    const { server, base } = await listen((req, res) => {
+      headers = req.headers; let d = '';
+      req.on('data', c => { d += c; });
+      req.on('end', () => { res.writeHead(201); res.end('{"timestamp":"1"}'); });
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('signal:main', 'signal', ${sql.json({ group_id: 'group.abc123' })})`;
+
+    const prev = process.env.SIGNAL_API_SECRET;
+    process.env.SIGNAL_API_SECRET = 's3cret';
+    try {
+      await makeSignalAdapter(sql, { apiBase: base, account: '+15550000000' })
+        .deliver(ann, 'signal:main', 'publish');
+    } finally {
+      if (prev === undefined) delete process.env.SIGNAL_API_SECRET; else process.env.SIGNAL_API_SECRET = prev;
+    }
+    server.close();
+
+    expect(headers['x-announce-signal-secret']).toBe('s3cret');
+  });
+
+  it('sends no proxy secret header when SIGNAL_API_SECRET is unset', async () => {
+    let headers: Record<string, string | string[] | undefined> = {};
+    const { server, base } = await listen((req, res) => {
+      headers = req.headers; let d = '';
+      req.on('data', c => { d += c; });
+      req.on('end', () => { res.writeHead(201); res.end('{"timestamp":"1"}'); });
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('signal:main', 'signal', ${sql.json({ group_id: 'group.abc123' })})`;
+
+    const prev = process.env.SIGNAL_API_SECRET;
+    delete process.env.SIGNAL_API_SECRET;
+    try {
+      await makeSignalAdapter(sql, { apiBase: base, account: '+15550000000' })
+        .deliver(ann, 'signal:main', 'publish');
+    } finally {
+      if (prev !== undefined) process.env.SIGNAL_API_SECRET = prev;
+    }
+    server.close();
+
+    expect(headers['x-announce-signal-secret']).toBeUndefined();
+  });
 });

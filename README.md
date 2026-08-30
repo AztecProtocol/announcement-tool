@@ -196,7 +196,7 @@ insert into channel_settings (key, channel, config) values
 ```
 
 - `group_id` (required) — the Signal group id (base64, as returned by `signal-cli listGroups`).
-- **Env vars:** `SIGNAL_ACCOUNT` (required) — the registered sender number, e.g. `+15551234567`. `SIGNAL_API_BASE` (default `http://127.0.0.1:8080`) — base URL of the sidecar.
+- **Env vars:** `SIGNAL_ACCOUNT` (required) — the registered sender number, e.g. `+15551234567`. `SIGNAL_API_BASE` (default `http://127.0.0.1:8080`) — base URL of the sidecar. `SIGNAL_API_SECRET` (unset by default; required on the split deployment) — shared secret sent as `x-announce-signal-secret` to the Caddy proxy in front of the sidecar; unset sends no header, which is what the same-Docker-network VM deployment expects.
 - **Failure mode:** any non-2xx response from the sidecar throws (with body text appended) and retries under standard backoff; a missing `SIGNAL_ACCOUNT` fails every attempt identically.
 
 ## Configuration
@@ -213,6 +213,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `TELEGRAM_BOT_TOKEN` | *(unset)* | Bot token from BotFather; required for any Telegram delivery. |
 | `SIGNAL_API_BASE` | `http://127.0.0.1:8080` | Base URL of the `signal-cli-rest-api` sidecar. |
 | `SIGNAL_ACCOUNT` | *(unset)* | Registered Signal sender number; required for any Signal delivery. |
+| `SIGNAL_API_SECRET` | *(unset)* | Shared secret sent as the `x-announce-signal-secret` header to the `signal-cli-rest-api` sidecar. Unset sends no header at all — correct for the same-Docker-network VM deployment. Required on the split deployment, where a Caddy proxy in front of the publicly-reachable sidecar checks this header and rejects requests without it; this value must match the proxy's configured secret. |
 | `ESP_PROVIDER` | `console` | Email Sending Provider: `console` (logs to stdout, dev default) \| `resend` (dev/staging) \| `brevo` (prod). |
 | `EMAIL_FROM` | *(unset)* | From address; required by both `resend` and `brevo` providers. |
 | `EMAIL_FROM_NAME` | `Aztec Announcements` | From display name; used by `brevo` only. |

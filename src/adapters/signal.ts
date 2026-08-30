@@ -2,6 +2,7 @@ import type { Sql } from 'postgres';
 import type { ChannelAdapter } from './types.js';
 import type { Announcement, DeliveryKind } from '../core/types.js';
 import { renderPlain } from '../core/render.js';
+import { signalAuthHeaders } from '../core/signal-auth.js';
 
 /**
  * Signal has no official bot API. This talks to a signal-cli-rest-api sidecar
@@ -33,7 +34,12 @@ export function makeSignalAdapter(
 
       const res = await doFetch(`${apiBase}/v2/send`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          // See signal-auth.ts for why an unset secret sends no header at
+          // all rather than throwing.
+          ...signalAuthHeaders(process.env.SIGNAL_API_SECRET),
+        },
         body: JSON.stringify({ message: renderPlain(a, kind), number: account, recipients: [groupId] }),
         signal: AbortSignal.timeout(timeoutMs),
       });
