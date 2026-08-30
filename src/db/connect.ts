@@ -37,6 +37,19 @@
  * against whatever the system happens to trust — so the operator would
  * believe they have a verified connection when they do not. Refusing to
  * start is loud and immediate; a false sense of verification is neither.
+ *
+ * DATABASE_SSL_MODE/DATABASE_SSL_ROOT_CERT are NOT the only place TLS could
+ * be set: postgres.js's own parseOptions (node_modules/postgres/src/index.js)
+ * reads `?sslmode=` and `?sslrootcert=system` directly out of the connection
+ * string and turns them into its `ssl` option — including `?sslmode=require`,
+ * which is exactly the half-guarantee this file exists to refuse. If we only
+ * validated our own env vars and passed the URL through untouched, an
+ * operator writing the connection string the way every Postgres tutorial and
+ * managed-provider console does (`?sslmode=require` in DATABASE_URL) would
+ * bypass this file's refusal completely and connect encrypted-but-unverified
+ * with no error and no warning. So buildConnectionOptions parses the URL's
+ * own query string and throws if it carries either parameter: there is
+ * exactly one authority for TLS configuration here, not two competing ones.
  */
 
 import { readFileSync } from 'node:fs';
@@ -67,9 +80,45 @@ const DEFAULT_URL = 'postgres://announce:announce@127.0.0.1:5499/announce';
  */
 export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
   const url = env.databaseUrl ?? DEFAULT_URL;
+
+  // postgres.js reads `sslmode`/`sslrootcert` straight out of the URL's own
+  // query string and turns them into its `ssl` option, bypassing every check
+  // below. Refuse both outright so DATABASE_SSL_MODE/DATABASE_SSL_ROOT_CERT
+  // are the one place TLS is configured, not one of two competing places.
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has('sslmode')) {
+      throw new Error(
+        `DATABASE_URL must not set "sslmode" in its query string (found "?sslmode=`
+        + `${parsed.searchParams.get('sslmode')}"). postgres.js reads that parameter directly and `
+        + 'it would bypass this module\'s checks entirely. Set DATABASE_SSL_MODE instead and '
+        + 'remove sslmode from DATABASE_URL.',
+      );
+    }
+    if (parsed.searchParams.has('sslrootcert')) {
+      throw new Error(
+        `DATABASE_URL must not set "sslrootcert" in its query string (found "?sslrootcert=`
+        + `${parsed.searchParams.get('sslrootcert')}"). postgres.js reads that parameter directly `
+        + '(and "system" silently becomes verify-full) which would bypass this module\'s checks '
+        + 'entirely. Set DATABASE_SSL_ROOT_CERT instead and remove sslrootcert from DATABASE_URL.',
+      );
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('DATABASE_URL must not set')) throw err;
+    // Not a URL the WHATWG parser accepts (e.g. postgres.js also tolerates
+    // multi-host strings) — fall through and let postgres.js parse it itself.
+  }
+
   const options: ConnectionOptions = { url };
 
-  switch (env.sslMode) {
+  // Empty string is "unset" here, matching how ENABLED_CHANNELS treats a
+  // blank value elsewhere (src/core/enabled-channels.ts,
+  // src/core/production-guard.ts): docker-compose, the Netlify UI, and a
+  // .env file with a bare `DATABASE_SSL_MODE=` all produce '' for "present
+  // but blank", not for "deliberately require verify-full".
+  const sslMode = env.sslMode === '' ? undefined : env.sslMode;
+
+  switch (sslMode) {
     case undefined:
       // No ssl mode set: leave `ssl` undefined. Local dev and the
       // docker-compose network both talk plaintext over a private network,
@@ -108,6 +157,21 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
 }
 
 /**
+ * Reads the CA bundle buildConnectionOptions left as an unread path (see the
+ * comment on the `verify-full` case above), mutating `options.ssl` in place.
+ * Exported so every caller that needs a real, connectable set of options —
+ * connect() below, and migrate-cli.ts, which passes options through to
+ * migrate() instead of a bare URL — resolves the CA file the same way, once.
+ * A no-op when there is no ssl.ca path to resolve.
+ */
+export function resolveCaFile(options: ConnectionOptions): void {
+  if (options.ssl && typeof options.ssl === 'object' && 'ca' in options.ssl) {
+    const ca = readFileSync((options.ssl as { ca: string }).ca, 'utf8');
+    options.ssl = { ...options.ssl, ca };
+  }
+}
+
+/**
  * Builds a connection with the given env, applying `max` on top of whatever
  * buildConnectionOptions resolved. `max` is deliberately a separate argument
  * rather than part of DbEnv: pool size is tuned per process (web, worker,
@@ -117,12 +181,7 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
 export function connect(env: DbEnv = {}, max?: number): Sql {
   const options = buildConnectionOptions(env);
   const { url, ...rest } = options;
-  if (rest.ssl && typeof rest.ssl === 'object' && 'ca' in rest.ssl) {
-    // buildConnectionOptions validated the path but left the file unread so
-    // it stays pure; read the real CA bundle now, right before connecting.
-    const ca = readFileSync((rest.ssl as { ca: string }).ca, 'utf8');
-    rest.ssl = { ...rest.ssl, ca };
-  }
+  resolveCaFile(rest);
   return postgres(url ?? DEFAULT_URL, { ...rest, ...(max === undefined ? {} : { max }) });
 }
 

@@ -1,9 +1,21 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import postgres from 'postgres';
+import postgres, { type Options } from 'postgres';
 
-export async function migrate(databaseUrl: string, dir = join(process.cwd(), 'migrations')): Promise<string[]> {
-  const sql = postgres(databaseUrl, { max: 1 });
+/**
+ * `options` is optional and additive so `migrate(url, dir)` — as called by
+ * test/migrate.test.ts and historically by migrate-cli.ts — keeps working
+ * unchanged. migrate-cli.ts now passes the TLS options resolved by
+ * src/db/connect.ts here rather than discarding them: this connects to the
+ * same database the app does, over the same network, so it needs the same
+ * verifying TLS once the database is on an exposed host.
+ */
+export async function migrate(
+  databaseUrl: string,
+  dir = join(process.cwd(), 'migrations'),
+  options: Options<{}> = {},
+): Promise<string[]> {
+  const sql = postgres(databaseUrl, { ...options, max: 1 });
   const applied: string[] = [];
   try {
     await sql`create table if not exists schema_migrations (
