@@ -20,10 +20,15 @@ const TLS_URL = 'postgres://announce:announce@localhost:5500/announce';
 const ready = existsSync(CA_PATH) && existsSync(WRONG_CA_PATH);
 
 describe.skipIf(!ready)('postgres TLS', () => {
-  it('connects with verify-full against the test CA', async () => {
+  it('connects with verify-full against the test CA, over an actually-encrypted session', async () => {
     const sql = connect({ databaseUrl: TLS_URL, sslMode: 'verify-full', sslRootCert: CA_PATH });
     try {
       expect((await sql`select 1 as ok`)[0].ok).toBe(1);
+      // A round-trip alone doesn't prove the session is encrypted — a
+      // plaintext fallback would answer `select 1` just as happily. Ask
+      // Postgres directly whether the current backend's connection is TLS.
+      const [{ ssl }] = await sql`select ssl from pg_stat_ssl where pid = pg_backend_pid()`;
+      expect(ssl).toBe(true);
     } finally {
       await sql.end();
     }
@@ -33,7 +38,14 @@ describe.skipIf(!ready)('postgres TLS', () => {
     // This is the assertion that matters. If it passes when it should not,
     // verify-full is decorative and the exposed port has no real protection.
     const sql = connect({ databaseUrl: TLS_URL, sslMode: 'verify-full', sslRootCert: WRONG_CA_PATH });
-    await expect(sql`select 1`).rejects.toThrow();
+    // A bare .rejects.toThrow() would also accept ECONNREFUSED from a
+    // stopped container, a wrong port, or a timeout — none of which prove
+    // verify-full is doing anything. Assert on the specific TLS failure code
+    // instead of the human-readable message, which can change between
+    // Node/OpenSSL versions while the code is stable. Confirmed live: the
+    // thrown error is a plain Error with `code` as an own top-level
+    // property (no wrapping, no `cause`) — see task-2-report.md.
+    await expect(sql`select 1`).rejects.toMatchObject({ code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' });
     await sql.end().catch(() => {});
   });
 });
