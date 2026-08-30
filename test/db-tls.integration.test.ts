@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { connect } from '../src/db/connect.js';
@@ -47,5 +47,47 @@ describe.skipIf(!ready)('postgres TLS', () => {
     // property (no wrapping, no `cause`) — see task-2-report.md.
     await expect(sql`select 1`).rejects.toMatchObject({ code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' });
     await sql.end().catch(() => {});
+  });
+
+  // Netlify has no filesystem to place a CA bundle on -- DATABASE_SSL_ROOT_CERT
+  // must also work as inline PEM content, not only a path (src/db/connect.ts's
+  // resolveCaFile). A unit test (test/db-connect.test.ts) proves that value
+  // reaches postgres.js's `ssl.ca` option unchanged; it does NOT prove Node's
+  // TLS layer / postgres.js actually accept that string as a real trust
+  // anchor and negotiate TLS with it. These two tests are that proof, run
+  // against the same real TLS Postgres as the path-based tests above.
+  it('connects with verify-full using INLINE PEM content (not a path) for the CA', async () => {
+    const inlineCa = readFileSync(CA_PATH, 'utf8');
+    const sql = connect({ databaseUrl: TLS_URL, sslMode: 'verify-full', sslRootCert: inlineCa });
+    try {
+      expect((await sql`select 1 as ok`)[0].ok).toBe(1);
+      const [{ ssl }] = await sql`select ssl from pg_stat_ssl where pid = pg_backend_pid()`;
+      expect(ssl).toBe(true);
+    } finally {
+      await sql.end();
+    }
+  });
+
+  it('REFUSES a server whose certificate a WRONG inline PEM CA did not sign', async () => {
+    const wrongInlineCa = readFileSync(WRONG_CA_PATH, 'utf8');
+    const sql = connect({ databaseUrl: TLS_URL, sslMode: 'verify-full', sslRootCert: wrongInlineCa });
+    await expect(sql`select 1`).rejects.toMatchObject({ code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' });
+    await sql.end().catch(() => {});
+  });
+
+  it('connects with verify-full using inline PEM whose newlines arrived escaped as literal \\n', async () => {
+    // Simulates the well-known "certificate pasted through a UI that
+    // flattens real newlines" failure mode -- resolveCaFile detects and
+    // un-escapes this before the value ever reaches postgres.js/Node's TLS
+    // layer. Proves the un-escaped result is genuinely usable as a trust
+    // anchor, not just structurally equal to the original PEM string.
+    const flattenedCa = readFileSync(CA_PATH, 'utf8').replace(/\n/g, '\\n');
+    expect(flattenedCa).not.toContain('\n');
+    const sql = connect({ databaseUrl: TLS_URL, sslMode: 'verify-full', sslRootCert: flattenedCa });
+    try {
+      expect((await sql`select 1 as ok`)[0].ok).toBe(1);
+    } finally {
+      await sql.end();
+    }
   });
 });

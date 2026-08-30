@@ -187,9 +187,10 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
           + 'which may not contain the issuer — a connection that looks verified but is not.',
         );
       }
-      // The path is validated here; the file itself is read lazily by
-      // connect() so this function stays pure and testable without a CA
-      // file on disk. `ca` is a placeholder replaced there.
+      // The value is only validated as "present" here; resolveCaFile below
+      // decides whether it is a file path or inline PEM content and reads
+      // it there, lazily, so this function stays pure and testable without
+      // touching the filesystem. `ca` is a placeholder resolved there.
       options.ssl = { ca: env.sslRootCert, rejectUnauthorized: true };
       break;
     }
@@ -204,16 +205,71 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
 }
 
 /**
- * Reads the CA bundle buildConnectionOptions left as an unread path (see the
- * comment on the `verify-full` case above), mutating `options.ssl` in place.
- * Exported so every caller that needs a real, connectable set of options —
- * connect() below, and migrate-cli.ts, which passes options through to
- * migrate() instead of a bare URL — resolves the CA file the same way, once.
- * A no-op when there is no ssl.ca path to resolve.
+ * Matches PEM content that begins (after leading whitespace) with the
+ * standard `-----BEGIN CERTIFICATE-----` header. A real filesystem path
+ * never starts with a dash the way PEM does, so this is an unambiguous way
+ * to tell the two apart without an explicit "is this a path or a value"
+ * flag on DbEnv.
+ */
+const PEM_HEADER = /^\s*-----BEGIN CERTIFICATE-----/;
+
+/**
+ * Resolves DATABASE_SSL_ROOT_CERT's value, mutating `options.ssl.ca` in
+ * place from whatever buildConnectionOptions left there (see the comment on
+ * the `verify-full` case above). Exported so every caller that needs a
+ * real, connectable set of options — connect() below, and migrate-cli.ts,
+ * which passes options through to migrate() instead of a bare URL —
+ * resolves the CA the same way, once. A no-op when there is no ssl.ca value
+ * to resolve.
+ *
+ * ACCEPTS EITHER A FILE PATH OR INLINE PEM CONTENT. A file-path-only
+ * contract works for the VM deployment and local dev, both of which have a
+ * real filesystem to place a CA bundle on — but it is unsatisfiable on
+ * Netlify. A Netlify serverless function has no filesystem to write a
+ * certificate file to before start, and its environment variables can only
+ * hold strings; there is no way to get a CA bundle from "a value Netlify's
+ * UI can store" to "a path this process can read" on that shape. Before
+ * this, DATABASE_SSL_MODE=verify-full (mandatory once Postgres is
+ * internet-reachable — see buildConnectionOptions above) had no valid value
+ * for DATABASE_SSL_ROOT_CERT on Netlify at all: the split deployment this
+ * connector exists to support could not actually connect to its own
+ * database. Detecting inline PEM by its own `-----BEGIN CERTIFICATE-----`
+ * header (PEM_HEADER above) and using it directly, with a filesystem read
+ * as the fallback for everything else, closes that gap without weakening
+ * anything for the shapes that do have a filesystem: a bad path (typo,
+ * wrong mount, missing file) still fails loudly via readFileSync throwing
+ * ENOENT, not a silent unverified connection.
+ *
+ * ESCAPED NEWLINES: Netlify's environment variable UI (and many others)
+ * accept genuine multi-line values, so a PEM pasted in as-is works with no
+ * special handling. But pasting a certificate through some web UIs, or
+ * through tooling that round-trips env vars as single-line JSON/shell
+ * strings, is a well-known way for a certificate's real newlines to arrive
+ * as the two literal characters `\` and `n` instead — the file has a
+ * newline, the clipboard or the intermediate tool does not preserve it. A
+ * PEM whose newlines were escaped this way still starts with the literal
+ * text `-----BEGIN CERTIFICATE-----` (no backslash-n before the dashes),
+ * so PEM_HEADER still matches it — but passing it to postgres.js's `ca`
+ * option with literal `\n` sequences instead of real newlines produces a
+ * cert Node's TLS layer cannot parse, and the resulting failure (an
+ * unhelpful ASN.1/PEM parse error) gives an operator no hint that the fix
+ * is "you pasted this with escaped newlines." So: whenever the detected PEM
+ * value contains the literal two-character sequence `\n` and no *real*
+ * newline character, this unescapes it (`\n` -> an actual newline) before
+ * use. This is unambiguous — genuine PEM content produced by any normal
+ * certificate export already contains real newlines, so a value with real
+ * newlines is left untouched, and this branch only ever fires on the
+ * specific "flattened by a UI" shape it exists to fix.
  */
 export function resolveCaFile(options: ConnectionOptions): void {
   if (options.ssl && typeof options.ssl === 'object' && 'ca' in options.ssl) {
-    const ca = readFileSync((options.ssl as { ca: string }).ca, 'utf8');
+    const raw = (options.ssl as { ca: string }).ca;
+    let ca: string;
+    if (PEM_HEADER.test(raw)) {
+      ca = raw.includes('\\n') && !raw.includes('\n') ? raw.replace(/\\n/g, '\n') : raw;
+    } else {
+      ca = readFileSync(raw, 'utf8');
+    }
     options.ssl = { ...options.ssl, ca };
   }
 }

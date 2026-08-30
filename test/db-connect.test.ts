@@ -1,5 +1,8 @@
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { buildConnectionOptions, connect } from '../src/db/connect.js';
+import { buildConnectionOptions, connect, resolveCaFile, type ConnectionOptions } from '../src/db/connect.js';
 
 describe('buildConnectionOptions', () => {
   it('defaults to the local dev database when DATABASE_URL is unset', () => {
@@ -109,6 +112,80 @@ describe('buildConnectionOptions', () => {
     expect(buildConnectionOptions({
       databaseUrl: 'postgres://u:p%3Fsslmode%3Drequire@h/db',
     }).ssl).toBeUndefined();
+  });
+});
+
+describe('resolveCaFile', () => {
+  // Real PEM structure is irrelevant here -- resolveCaFile only decides
+  // path-vs-inline by the header text and never parses the certificate
+  // itself (that happens later, inside Node's TLS layer / postgres.js).
+  // Using a fake-but-well-formed-looking body keeps these tests fast and
+  // filesystem/network-free; db-tls.integration.test.ts proves a REAL PEM
+  // genuinely negotiates TLS against a real server.
+  const FAKE_PEM = '-----BEGIN CERTIFICATE-----\nMIIFAKECERTDATA\n-----END CERTIFICATE-----\n';
+
+  it('uses inline PEM content directly, without touching the filesystem', () => {
+    // A serverless Netlify function has no filesystem to place a CA bundle
+    // on -- DATABASE_SSL_ROOT_CERT must be usable as a pasted value, not
+    // only as a path, or verify-full (mandatory once the database is
+    // internet-reachable) has no satisfiable configuration on that shape.
+    const options: ConnectionOptions = { ssl: { ca: FAKE_PEM, rejectUnauthorized: true } };
+    resolveCaFile(options);
+    expect((options.ssl as { ca: string }).ca).toBe(FAKE_PEM);
+  });
+
+  it('still reads a file path exactly as before, for the VM and local dev shapes', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'announce-ca-'));
+    const file = path.join(dir, 'ca.pem');
+    try {
+      writeFileSync(file, FAKE_PEM, 'utf8');
+      const options: ConnectionOptions = { ssl: { ca: file, rejectUnauthorized: true } };
+      resolveCaFile(options);
+      expect((options.ssl as { ca: string }).ca).toBe(FAKE_PEM);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('unescapes literal \\n sequences in inline PEM content pasted through a UI that flattened real newlines', () => {
+    // A well-known way certificates get mangled: some web UIs (or tooling
+    // that round-trips env vars through single-line JSON/shell strings)
+    // turn real newlines into the two literal characters `\` and `n`. The
+    // PEM header is still intact (no backslash-n before the dashes), so
+    // this is still detected as PEM, but the raw value would otherwise
+    // reach postgres.js/Node's TLS layer as one unparseable line.
+    const flattened = FAKE_PEM.replace(/\n/g, '\\n');
+    expect(flattened).not.toContain('\n');
+    const options: ConnectionOptions = { ssl: { ca: flattened, rejectUnauthorized: true } };
+    resolveCaFile(options);
+    expect((options.ssl as { ca: string }).ca).toBe(FAKE_PEM);
+  });
+
+  it('leaves a PEM value with real newlines untouched even if it also happens to contain a literal \\n', () => {
+    // Real newlines already present is proof the value was NOT flattened by
+    // a UI -- unescaping in that case would corrupt a certificate that
+    // happens to have been issued with, e.g., a comment or subject field
+    // containing a literal backslash-n. Only fire the unescape path when
+    // there is no real newline at all.
+    const mixed = `${FAKE_PEM}\\n`;
+    const options: ConnectionOptions = { ssl: { ca: mixed, rejectUnauthorized: true } };
+    resolveCaFile(options);
+    expect((options.ssl as { ca: string }).ca).toBe(mixed);
+  });
+
+  it('fails loudly for a value that is neither valid PEM nor an existing file', () => {
+    // A bad path (typo, wrong mount, a value that is actually meant to be
+    // pasted PEM but got truncated before the BEGIN header survived) must
+    // not silently produce an empty/undefined ca and connect unverified --
+    // readFileSync throwing ENOENT is exactly the loud failure this needs.
+    const options: ConnectionOptions = { ssl: { ca: '/definitely/does/not/exist/ca.pem', rejectUnauthorized: true } };
+    expect(() => resolveCaFile(options)).toThrow(/ENOENT|no such file/i);
+  });
+
+  it('is a no-op when there is no ssl.ca to resolve', () => {
+    const options: ConnectionOptions = {};
+    expect(() => resolveCaFile(options)).not.toThrow();
+    expect(options.ssl).toBeUndefined();
   });
 });
 
