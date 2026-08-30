@@ -235,23 +235,74 @@ functions will fail to connect from the first deploy. Run this again after
 every renewal-adjacent change; it is the only check in this runbook that
 proves the client-side chain, not just that Caddy has a valid cert.
 
-### 5. `alter role announce_app with login password ...`
+### 5. Apply the migration, then `alter role announce_app with login password ...`
 
-`migrations/014_app_role.sql` (already applied as part of the app's normal
-migration run — `npm run migrate`, from wherever that is invoked in your
-deploy pipeline) creates `announce_app` **`NOLOGIN`**, on purpose, with no
-password at all. Until this step runs, the role cannot connect —
-regardless of grants:
+Both of the commands in this step use the `announce` **owner** credential —
+the one with full rights, not the least-privilege `announce_app` role from
+step 6 onward. Never send it across the public internet unverified: run
+both **over SSH on the VM, against `127.0.0.1`**, which is simplest, and
+correct anyway for an owner-level operation.
+
+**Apply `migrations/014_app_role.sql` first** (and every other pending
+migration) by running the app's normal migration entrypoint on the VM
+itself, against the local Postgres, as the owner:
 
 ```sh
-psql "$DATABASE_URL" -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+ssh root@<announce_server_ipv4>
+cd /opt/announce
+DATABASE_URL='postgres://announce:<owner password>@127.0.0.1:5432/announce' npm run migrate
 ```
 
-Run this once, as the `announce` owner, against the real deployed database.
+`npm run migrate` (`src/db/migrate-cli.ts`) already routes through
+`buildConnectionOptions`/`resolveCaFile`, the same TLS-enforcing path the
+app itself uses — but only if `DATABASE_SSL_MODE` is actually set. Run
+locally against `127.0.0.1` as above and leave `DATABASE_SSL_MODE` unset;
+Postgres accepts plaintext on the loopback interface inside the VM, and
+that is the point of running it there instead of over the internet. If
+this command is ever run from off the VM instead, `DATABASE_SSL_MODE=verify-full`
+and `DATABASE_SSL_ROOT_CERT` (the ISRG Root X1 PEM — see step 7) **must**
+both be set, or the owner credential — the most powerful one in this
+system — crosses the internet with no TLS at all, silently, by design
+(`buildConnectionOptions`'s `case undefined` leaves `ssl` unset so local
+dev keeps working; it does not know or care that a given invocation is
+actually crossing the internet).
+
+`migrations/014_app_role.sql` creates `announce_app` **`NOLOGIN`**, on
+purpose, with no password at all. Until the `alter role` below runs, the
+role cannot connect — regardless of grants. Still on the SSH session from
+above:
+
+```sh
+psql "postgres://announce:<owner password>@127.0.0.1:5432/announce" \
+  -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+```
+
+psql's default `sslmode` is `prefer`: it negotiates TLS opportunistically
+but silently falls back to plaintext, and never verifies the server either
+way. Running this command against `announce.aztec.network` instead of
+`127.0.0.1` would send the freshly generated password across the internet
+as literal plaintext in the SQL statement itself — worse than a plaintext
+connection alone, because the secret being protected is the text being
+sent. Running it over SSH against the loopback interface, as above, avoids
+this entirely; if you must run it off-VM instead, set
+`PGSSLMODE=verify-full PGSSLROOTCERT=<path to the ISRG Root X1 PEM>`
+explicitly first.
+
+Two more things that bite operators on this exact command:
+
+- `openssl rand -base64 32` can emit `/` and `+` in its output, and both
+  **must** be percent-encoded if you ever place this password into a
+  `DATABASE_URL`'s userinfo section (step 7) — an unencoded `/` or `+`
+  there produces an opaque connection-string parse error, not an obvious
+  "bad character" message.
+- This command puts the generated password in your shell history.
+  Clear it (`history -d`, or your shell's equivalent) once you have
+  stored the password in Netlify's environment variables.
+
 Store the generated password only in Netlify's environment variables (as
 part of `DATABASE_URL` — see step 7), never in git.
 
-**Do not skip this step, and know what it looks like if you do.**
+**Do not skip the `alter role` step, and know what it looks like if you do.**
 `NOLOGIN` fails closed: a connection attempt as `announce_app` before this
 step produces `FATAL: role "announce_app" is not permitted to log in` —
 but that is the message from `psql`/direct Postgres tooling. **The
@@ -266,24 +317,45 @@ role` statement) is easy to miss if you don't already know the role starts
 user "announce_app"` and you have *not* yet run the command above, this is
 why — run it, not a password rotation.
 
-**Verify:**
+**Verify** (still over the same SSH session, against `127.0.0.1`):
 
 ```sh
-psql "$DATABASE_URL" -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
+psql "postgres://announce:<owner password>@127.0.0.1:5432/announce" \
+  -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
 ```
 
 Expect `t`.
 
 ### 6. Seeding the first publisher
 
+This is, like the `alter role` step above, an **owner-run, out-of-band
+action** — not something `announce_app` can do. `migrations/014_app_role.sql`
+deliberately grants `announce_app` **`SELECT` only** on `publishers`, with
+no `INSERT`: this is the four-eyes identity list, and a credential that
+could insert its own row there could manufacture both halves of the
+approval itself (see "The security note" below). Run this as the
+`announce` owner, over the same SSH session on the VM, against
+`127.0.0.1`:
+
 ```sh
-DATABASE_URL='postgres://announce_app:<password>@announce.aztec.network:5432/announce' \
+ssh root@<announce_server_ipv4>
+cd /opt/announce
+DATABASE_URL='postgres://announce:<owner password>@127.0.0.1:5432/announce' \
   npm run seed:publisher -- you@example.com
 ```
 
-(Or run it with the `announce` owner's `DATABASE_URL` if you prefer — the
-script only needs `INSERT`/`SELECT` on `publishers`, which both roles
-have.) The root README's "Startup safety checks" section requires at least
+Running this as `announce_app` instead fails with `permission denied for
+table publishers` — that is expected and correct, not a bug in the
+migration; it is proof the grant in `migrations/014_app_role.sql` is doing
+its job. Running it from off the VM, against
+`announce.aztec.network:5432`, would additionally send the owner
+credential across the internet with no TLS (`scripts/seed-publisher.ts`
+now goes through `src/db/connect.ts`, so `DATABASE_SSL_MODE=verify-full`
+and `DATABASE_SSL_ROOT_CERT` would need to be set explicitly to avoid
+that) — running it on the VM against the loopback interface avoids the
+question entirely, which is why that is the recommended form here.
+
+The root README's "Startup safety checks" section requires at least
 one row in `publishers` before the admin app is safe to expose; while the
 table is empty, every identity is treated as a publisher (see root
 `README.md`, "Publishers and the bootstrap rule").
