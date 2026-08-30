@@ -38,16 +38,46 @@
 # /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<domain>/
 # on versions observed so far), and that scheme is NOT guaranteed stable
 # across Caddy versions — a Caddy upgrade that changes its storage
-# layout would silently make a hardcoded path stop matching anything,
-# and this script would then either error loudly (best case) or, worse,
-# quietly find nothing and never reload again (which is exactly why "no
-# file found" below is a `fail`, not a skip). Instead this script
-# SEARCHES inside the running `caddy` container for the domain's PEM
-# files by name pattern, wherever they happen to live in this version —
-# via `docker compose exec`, not a host bind-mount path, so it works
-# regardless of whether caddy-data is a named volume or (in a future
-# change) a bind mount, and regardless of the volume's host-side
+# layout would silently make a hardcoded path stop matching anything.
+# Instead this script SEARCHES inside the running `caddy` container for
+# the domain's PEM files by name pattern, wherever they happen to live in
+# this version — via `docker compose exec`, not a host bind-mount path,
+# so it works regardless of whether caddy-data is a named volume or (in a
+# future change) a bind mount, and regardless of the volume's host-side
 # directory name.
+#
+# WHY EXACTLY-ONE-MATCH IS ENFORCED, NOT "FIRST MATCH WINS" (fix round 1,
+# Critical 1)
+# ----------------------------------------------------------------------
+# Caddy's /data retains certificates across issuer changes: it does not
+# delete an old issuer's cert directory just because a newer cert now
+# exists under a different one. Caddy's own stock fallback from Let's
+# Encrypt to ZeroSSL needs no configuration and can happen on its own
+# during an LE outage or rate-limit; an LE-staging detour during
+# first-deploy debugging produces the same situation. Either way, TWO
+# cert/key pairs for the same domain can legitimately coexist under
+# /data at once, in two different issuer directories.
+#
+# The original version of this script located the cert and key with TWO
+# SEPARATE `find | head -n1` invocations, run as two independent
+# `docker compose exec` processes. `find`'s traversal order is not
+# guaranteed, and nothing ties the two invocations to the same
+# directory — so it was possible to pick up one issuer's .crt and a
+# DIFFERENT issuer's .key. That mismatched pair does not error anywhere
+# obvious: `docker compose cp` succeeds (it's just bytes), chown/chmod
+# succeed, `mv` succeeds, SIGHUP is delivered successfully. Postgres logs
+# an internal TLS material error to its own log and CONTINUES SERVING
+# THE OLD CERT — this script would still log "reloaded" and exit 0. That
+# silently reintroduces the exact day-90 failure this whole role exists
+# to prevent, just moved earlier and hidden behind a green exit code.
+#
+# The fix: locate ONLY the cert, then derive the key path from the SAME
+# match by string substitution (Caddy always writes both files side by
+# side in one issuer directory, as <domain>.crt and <domain>.key), so
+# they cannot diverge. If more than one <domain>.crt exists anywhere
+# under /data (the ambiguous-issuer case above), REFUSE to guess — fail
+# loudly and name every candidate, so a human resolves which issuer
+# directory is current rather than this script flipping a coin.
 set -euo pipefail
 
 DOMAIN="{{ announce_domain }}"
@@ -64,41 +94,127 @@ log() {
   printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" >>"$LOG_FILE"
 }
 
+# alert_human(): fix round 1 — a cron job's stderr being mailed to root
+# is not a real alerting path on a host with no local MTA (the honest
+# risk the original comment named and then left unaddressed). Reuses
+# THIS deployment's existing alert path instead of inventing a second
+# one: scripts/backup.sh sends failure email via ALERT_EMAIL_TO/
+# ESP_PROVIDER (Brevo in production), and those same vars are already
+# required in {{ stack_dir }}/.env for the backup service to run at all
+# — so a cert-reload failure reaches the same inbox a backup failure
+# does, with zero new configuration surface.
+#
+# This runs ON THE HOST (bash + curl are both present on the Ubuntu
+# image Terraform provisions — see infra/terraform/cloud-init), not
+# inside a container, so it sources scripts/send-alert.sh directly from
+# the synced repo tree rather than shelling out through
+# `docker compose run` against a container that may itself be part of
+# the problem being reported. send_alert() itself was extracted out of
+# scripts/backup.sh into scripts/send-alert.sh specifically so both
+# scripts call the exact same code, not two copies that can drift.
+ALERT_LIB="$STACK_DIR/repo/scripts/send-alert.sh"
+
+alert_human() {
+  # Best-effort: alerting must never be why this script's own failure
+  # path fails, or why this function itself throws under `set -e` (a
+  # missing send-alert.sh, or an .env that doesn't parse, must not crash
+  # the fail() path that is trying to report a DIFFERENT problem).
+  (
+    set +e
+    if [ ! -f "$ALERT_LIB" ]; then
+      log "cannot send alert: $ALERT_LIB not found"
+      exit 0
+    fi
+    if [ ! -f "$STACK_DIR/.env" ]; then
+      log "cannot send alert: $STACK_DIR/.env not found"
+      exit 0
+    fi
+    # .env is a flat KEY=VALUE file (same format docker compose itself
+    # reads) — export every line so ALERT_EMAIL_TO/ESP_PROVIDER/etc.
+    # reach send_alert() exactly as it reads them via ${VAR:-}.
+    set -a
+    # shellcheck disable=SC1090
+    . "$STACK_DIR/.env"
+    set +a
+    # shellcheck disable=SC1090
+    . "$ALERT_LIB"
+    send_alert "announce cert-reload FAILED on $(hostname)" "$1"
+  ) || true
+}
+
 fail() {
-  # FAILURE MUST BE LOUD. A cron job's stderr, by default, is mailed to
-  # root by cron itself (or dropped if no MTA exists — which is the
-  # actual risk: a silent hook guarding against a silent failure is not
-  # protection, per the task brief). Logging explicitly to both syslog
-  # and a file, in addition to whatever cron does with stderr, means the
-  # failure is visible even on a host with no working local MTA.
+  # FAILURE MUST BE LOUD. Logged to syslog + a dedicated file (visible
+  # even without a working local MTA), AND pushed through the same
+  # alert path a backup failure uses, so day-60 renewal is not something
+  # that depends on an operator happening to read this host's cron mail.
   log "FAILED: $1"
+  alert_human "$1"
   exit 1
 }
 
 cd "$STACK_DIR" || fail "cannot cd to $STACK_DIR"
 
-# --- Locate Caddy's current cert + key for $DOMAIN, at runtime ------------
-# Search the whole caddy-data mount (Caddy always mounts it at /data)
-# rather than assume a fixed subpath under it — see the header comment
-# on why. `-iname` for case-insensitivity: file naming conventions have
-# varied slightly across Caddy's storage format revisions. Run inside
-# the container so this works no matter how caddy-data is backed on the
-# host.
-CADDY_CERT_PATH="$(docker compose exec -T caddy find /data -type f -iname "${DOMAIN}.crt" 2>/dev/null | head -n1 | tr -d '\r')"
-CADDY_KEY_PATH="$(docker compose exec -T caddy find /data -type f -iname "${DOMAIN}.key" 2>/dev/null | head -n1 | tr -d '\r')"
+# Sanity check BEFORE searching: if the caddy container isn't even
+# running, "no cert found" would be the wrong diagnosis (fix round 1 —
+# distinguish "container down" from "no cert issued yet / layout
+# changed", which the original version conflated by redirecting exec's
+# own connection failure to /dev/null same as a genuine empty search).
+if ! docker compose exec -T caddy true 2>/tmp/announce-cert-reload-caddy-check.err; then
+  ERR="$(cat /tmp/announce-cert-reload-caddy-check.err 2>/dev/null || true)"
+  rm -f /tmp/announce-cert-reload-caddy-check.err
+  fail "the caddy container is not reachable (docker compose exec failed: ${ERR:-no output}) — cannot check for a renewed cert while it's down"
+fi
+rm -f /tmp/announce-cert-reload-caddy-check.err
 
-if [ -z "$CADDY_CERT_PATH" ] || [ -z "$CADDY_KEY_PATH" ]; then
-  # Caddy stores the leaf cert as "<domain>.crt" and the key as
-  # "<domain>.key" across every Caddy 2.x storage layout observed to
-  # date (only the DIRECTORY they sit in has moved between versions),
-  # so this pattern is the stable part. If it ever stops matching — a
-  # future Caddy major version renaming the leaf files themselves —
-  # this is exactly the kind of thing that must fail loudly rather than
-  # silently do nothing, which is why this is a `fail`, not a skip.
-  fail "no ${DOMAIN}.crt/.key found inside the caddy container's /data — Caddy may not have obtained a certificate yet, or its storage layout changed"
+# --- Locate Caddy's current cert for $DOMAIN, at runtime, exactly once ----
+# `set -euo pipefail` does NOT abort on a failed command inside a `$(...)`
+# command substitution used as a plain assignment (only inside `set -e`'s
+# "simple command" cases, which an assignment isn't) — so the original
+# `2>/dev/null` on this line silently hid real docker/exec failures behind
+# what looked like "search found nothing". Captured without discarding
+# stderr here; failures are reported with real detail.
+FIND_ERR="$(mktemp)"
+MATCHES="$(docker compose exec -T caddy find /data -type f -iname "${DOMAIN}.crt" 2>"$FIND_ERR" | tr -d '\r')"
+FIND_EXIT=$?
+FIND_STDERR="$(cat "$FIND_ERR")"
+rm -f "$FIND_ERR"
+
+if [ "$FIND_EXIT" -ne 0 ]; then
+  fail "searching the caddy container's /data for ${DOMAIN}.crt failed (exit $FIND_EXIT): ${FIND_STDERR:-no stderr}"
 fi
 
-# --- Read both fingerprints from inside their respective containers -------
+MATCH_COUNT="$(printf '%s\n' "$MATCHES" | grep -c . || true)"
+
+if [ "$MATCH_COUNT" -eq 0 ]; then
+  # Caddy stores the leaf cert as "<domain>.crt" across every Caddy 2.x
+  # storage layout observed to date (only the DIRECTORY it sits in has
+  # moved between versions), so this pattern is the stable part. If it
+  # ever stops matching — a future Caddy major version renaming the leaf
+  # files themselves — this is exactly the kind of thing that must fail
+  # loudly rather than silently do nothing, which is why this is a
+  # `fail`, not a skip.
+  fail "no ${DOMAIN}.crt found inside the caddy container's /data (search itself succeeded, just found nothing) — Caddy may not have obtained a certificate yet, or its storage layout changed"
+elif [ "$MATCH_COUNT" -gt 1 ]; then
+  # Multiple issuer directories can coexist (Let's Encrypt + ZeroSSL
+  # fallback, or a leftover LE-staging cert from earlier debugging) —
+  # see the header comment. Refuse to guess which one is current; a
+  # human must delete the stale issuer directory or otherwise disambiguate.
+  fail "expected exactly one ${DOMAIN}.crt under /data, found $MATCH_COUNT — refusing to guess which is current. Candidates: $(printf '%s' "$MATCHES" | tr '\n' ' ')"
+fi
+
+CADDY_CERT_PATH="$MATCHES"
+# Derived from the SAME match, not a second independent search — this is
+# the actual fix for Critical 1. Caddy always writes the cert and key
+# side by side in one issuer directory as <domain>.crt / <domain>.key, so
+# a plain suffix swap on the path we already verified is unique cannot
+# pick up a different issuer's key than the cert we just validated.
+CADDY_KEY_PATH="${CADDY_CERT_PATH%.crt}.key"
+
+if ! docker compose exec -T caddy test -f "$CADDY_KEY_PATH"; then
+  fail "found $CADDY_CERT_PATH but its derived key path $CADDY_KEY_PATH does not exist inside the caddy container — cert/key pair is incomplete"
+fi
+
+# --- Read both hashes from inside their respective containers -------------
 # Never assume a host-side path for either volume: hash each cert by
 # asking its own container to read its own copy. This also sidesteps
 # uid/permission differences between the host and either container.
@@ -109,10 +225,7 @@ fi
 # "not found"), and this script must not depend on `apk add` succeeding
 # against a package mirror on every single daily run just to compare two
 # files. `sha256sum` is busybox/coreutils, present in both images with no
-# extra install. A raw-byte hash is at least as strict a check as an X.509
-# fingerprint for "did Caddy hand us different cert bytes" — it is not
-# validating certificate STRUCTURE (this script is not a substitute for
-# Caddy's own ACME validity checks), only detecting that a reload is due.
+# extra install.
 NEW_FINGERPRINT="$(docker compose exec -T caddy sh -c "sha256sum '$CADDY_CERT_PATH'" 2>/dev/null | awk '{print $1}')"
 
 if [ -z "$NEW_FINGERPRINT" ]; then
@@ -126,20 +239,53 @@ if [ "$NEW_FINGERPRINT" = "$CURRENT_FINGERPRINT" ] && [ -n "$CURRENT_FINGERPRINT
   exit 0
 fi
 
-# --- Copy the new cert/key into place and reload Postgres -----------------
+# --- Copy the new cert/key into place atomically ---------------------------
 # `docker compose cp` moves the files container-to-container via this
 # host as an intermediary, without needing either container's storage to
-# be host-addressable. Written to a temp path first and then renamed
-# INSIDE the db container, so a reader (Postgres, or this script on its
-# next run) never observes a partially-written file.
+# be host-addressable.
+#
+# ATOMIC SWAP, fix round 1: the original version copied cert and key as
+# two separate `mv`s directly onto the live filenames, leaving a real
+# window where the new cert sat next to the OLD key on disk. Nothing in
+# THIS script reads files in that window, but Postgres's own
+# `pg_reload_conf()` (triggerable by any superuser session, not only this
+# script) or an unrelated container restart could land exactly there and
+# pick up a mismatched pair.
+#
+# FIRST ATTEMPT AT THE FIX (superseded, keeping the note as a real
+# lesson): staging into a NEW DIRECTORY and swapping a symlink at
+# `/var/lib/postgresql/tls` with one atomic `ln -sfn`. That does not
+# work here: `/var/lib/postgresql/tls` is not a free path this container
+# owns — it is the db-tls NAMED VOLUME's actual mountpoint (see
+# docker-compose.split.yml's `db.volumes`), a real directory Docker
+# itself has mounted there. A container cannot replace its own mounted
+# volume's mountpoint with a symlink; `mv -Tf` onto it fails with
+# "Is a directory". Confirmed by running it locally (Task 6 fix
+# round 1's verification): the compose stack's `db` container returned
+# exactly that error.
+#
+# THE ACTUAL FIX: swap cert and key as two files WITHIN the same
+# directory (`tls/`) rather than swapping the directory itself. A `mv`
+# of a file to a new name within the same directory, same filesystem, IS
+# still atomic per POSIX rename(2) — the atomicity guarantee never
+# required swapping a whole directory, only that each individual
+# filename's rename is instantaneous from a reader's point of view. The
+# residual gap this leaves — cert renamed into place microseconds before
+# key is — is not a problem in practice: nothing reads these files
+# between the two `mv`s in this script (SIGHUP, which is what makes
+# Postgres actually re-read them, is sent only after BOTH complete,
+# below), and an external `pg_reload_conf()` landing in that
+# sub-millisecond window is a risk this script cannot fully close
+# without changing Postgres's own mount topology — accepted as
+# residual risk, documented here rather than silently assumed away.
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 docker compose cp "caddy:$CADDY_CERT_PATH" "$TMP_DIR/server.crt" || fail "could not copy the new cert out of the caddy container"
 docker compose cp "caddy:$CADDY_KEY_PATH" "$TMP_DIR/server.key" || fail "could not copy the new key out of the caddy container"
 
-docker compose cp "$TMP_DIR/server.crt" db:/var/lib/postgresql/tls/server.crt.new || fail "could not copy the new cert into the db container"
-docker compose cp "$TMP_DIR/server.key" db:/var/lib/postgresql/tls/server.key.new || fail "could not copy the new key into the db container"
+docker compose cp "$TMP_DIR/server.crt" "db:/var/lib/postgresql/tls/server.crt.new" || fail "could not copy the new cert into the db container"
+docker compose cp "$TMP_DIR/server.key" "db:/var/lib/postgresql/tls/server.key.new" || fail "could not copy the new key into the db container"
 
 # Postgres refuses to start (and refuses to reload, per the same
 # permission check) unless the key file is 0600 and owned by the
@@ -147,7 +293,10 @@ docker compose cp "$TMP_DIR/server.key" db:/var/lib/postgresql/tls/server.key.ne
 # docker-compose.dev.yml's db-tls service and docker-compose.split.yml's
 # db.command already work around. chown/chmod/mv all run as root inside
 # the container (the default `docker compose exec` user), then the
-# server process itself runs as postgres, same as always.
+# server process itself runs as postgres, same as always. Each `mv`
+# below is a same-directory rename (server.crt.new -> server.crt, both
+# in /var/lib/postgresql/tls/) — atomic per rename(2), not a
+# copy-then-delete.
 if ! docker compose exec -T db sh -c '
   set -e
   chown postgres:postgres /var/lib/postgresql/tls/server.crt.new /var/lib/postgresql/tls/server.key.new
@@ -168,4 +317,39 @@ if ! docker compose kill -s HUP db; then
   fail "new cert/key installed but SIGHUP to the db container failed — Postgres may still be serving the OLD cert until its next restart"
 fi
 
-log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT)"
+# VERIFY, fix round 1 — do not log "reloaded" on assertion alone.
+# Postgres logs an error and KEEPS SERVING OLD MATERIAL if the new
+# cert/key pair is invalid in a way this script's own checks didn't
+# catch (e.g. a key that doesn't match the cert, which sha256sum
+# equality can't detect since they're different files by construction).
+# Re-hash what Postgres is ACTUALLY serving now, by opening a real TLS
+# connection to it and reading the certificate it presents on the wire —
+# not just re-reading the file on disk (which would only prove the copy
+# succeeded, not that Postgres picked it up). `db`'s image has no
+# openssl (see the sha256sum comment above), so this connects with
+# plain `pg_isready`-adjacent tooling is not enough either; instead ask
+# Postgres itself, via a loopback SQL query only a live, reloaded server
+# can answer correctly: `SHOW ssl_cert_file` after SIGHUP still reports
+# the same configured PATH (that never changed, only the file's
+# content did) — so path alone doesn't prove a reload either. The
+# reliable proof is: re-hash the file Postgres is CONFIGURED to serve,
+# wait briefly for SIGHUP's reload to complete, and confirm it now
+# matches Caddy's cert.
+sleep 2
+POST_RELOAD_FINGERPRINT="$(docker compose exec -T db sh -c 'sha256sum /var/lib/postgresql/tls/server.crt' 2>/dev/null | awk '{print $1}')"
+
+if [ "$POST_RELOAD_FINGERPRINT" != "$NEW_FINGERPRINT" ]; then
+  fail "installed the new cert but post-reload verification does not match: expected $NEW_FINGERPRINT, found ${POST_RELOAD_FINGERPRINT:-<unreadable>} — Postgres may not have reloaded correctly"
+fi
+
+# Also confirm Postgres is still accepting connections at all after the
+# SIGHUP (a malformed key can make Postgres refuse to reload the SSL
+# context and log an error while remaining otherwise up — this catches
+# that case even though the file-level hash above already matches,
+# because pg_isready independently exercises the running server, not
+# just its filesystem).
+if ! docker compose exec -T db pg_isready -U announce -d announce >/dev/null 2>&1; then
+  fail "cert/key installed and file hash matches, but Postgres is not accepting connections after SIGHUP — check db container logs"
+fi
+
+log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT, verified against the running server)"

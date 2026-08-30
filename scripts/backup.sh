@@ -86,43 +86,17 @@ log() { printf '[backup %s] %s\n' "$(date -u +%H:%M:%S)" "$1" >&2; }
 # ---------------------------------------------------------------------------
 # Alerting — fires on the failure path only. Never let an alert-send error
 # override the real exit code; it is logged and swallowed.
+#
+# send_alert() itself now lives in scripts/send-alert.sh, shared with
+# infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 (fix round 1
+# on Task 6 of the split-infrastructure plan: a cert-reload failure now
+# reaches the same inbox a backup failure does, via the identical
+# ALERT_EMAIL_TO/ESP_PROVIDER path, instead of a second bespoke
+# mechanism). Sourced after log() is defined above, since send_alert()
+# calls it.
 # ---------------------------------------------------------------------------
-send_alert() {
-  local subject="$1" body="$2"
-  if [ -z "$ALERT_EMAIL_TO" ]; then
-    log "ALERT_EMAIL_TO not set — alert NOT sent (would have said: $subject)"
-    return 0
-  fi
-  case "$ESP_PROVIDER" in
-    brevo)
-      if [ -z "$BREVO_API_KEY" ] || [ -z "$EMAIL_FROM" ]; then
-        log "ALERT SEND SKIPPED: BREVO_API_KEY/EMAIL_FROM not set"
-        return 0
-      fi
-      curl -fsS -X POST "https://api.brevo.com/v3/smtp/email" \
-        -H "api-key: $BREVO_API_KEY" -H "content-type: application/json" \
-        -d "$(printf '{"sender":{"email":"%s","name":"%s"},"to":[{"email":"%s"}],"subject":"%s","textContent":"%s"}' \
-          "$EMAIL_FROM" "${EMAIL_FROM_NAME:-Aztec Announcements}" "$ALERT_EMAIL_TO" "$subject" "$body")" \
-        >/dev/null && log "alert sent via brevo to $ALERT_EMAIL_TO" \
-        || log "WARNING: alert send via brevo FAILED (backup failure above still stands)"
-      ;;
-    resend)
-      if [ -z "$RESEND_API_KEY" ] || [ -z "$EMAIL_FROM" ]; then
-        log "ALERT SEND SKIPPED: RESEND_API_KEY/EMAIL_FROM not set"
-        return 0
-      fi
-      curl -fsS -X POST "https://api.resend.com/emails" \
-        -H "authorization: Bearer $RESEND_API_KEY" -H "content-type: application/json" \
-        -d "$(printf '{"from":"%s","to":["%s"],"subject":"%s","text":"%s"}' \
-          "$EMAIL_FROM" "$ALERT_EMAIL_TO" "$subject" "$body")" \
-        >/dev/null && log "alert sent via resend to $ALERT_EMAIL_TO" \
-        || log "WARNING: alert send via resend FAILED (backup failure above still stands)"
-      ;;
-    *)
-      log "ALERT (console, ESP_PROVIDER=$ESP_PROVIDER): $subject -- $body"
-      ;;
-  esac
-}
+# shellcheck source=./send-alert.sh
+. "$(dirname "${BASH_SOURCE[0]}")/send-alert.sh"
 
 cleanup() {
   local rc="$1"

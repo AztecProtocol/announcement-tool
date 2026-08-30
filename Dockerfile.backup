@@ -16,6 +16,11 @@
 # plugin happens to be present.
 FROM postgres:16-alpine
 RUN apk add --no-cache bash gnupg curl aws-cli
+# send-alert.sh is copied alongside backup.sh, into the SAME directory,
+# because backup.sh sources it by a path relative to its own location
+# (`dirname "${BASH_SOURCE[0]}"`) — see the comment in backup.sh. Both
+# must land together or backup.sh fails at source-time on container start.
 COPY scripts/backup.sh /usr/local/bin/backup.sh
-RUN chmod +x /usr/local/bin/backup.sh
+COPY scripts/send-alert.sh /usr/local/bin/send-alert.sh
+RUN chmod +x /usr/local/bin/backup.sh /usr/local/bin/send-alert.sh
 ENTRYPOINT ["/usr/local/bin/backup.sh"]

@@ -40,5 +40,32 @@
       {
         "data-root": "{{ data_mount }}/docker"
       }
-  register: volume_mount_docker_daemon_json
   notify: Restart docker
+
+# FIX ROUND 1, CRITICAL 2: Ansible flushes handlers at END OF PLAY by
+# default, not between roles. Both this role's "Point Docker's data-root"
+# task above and the `docker` role's RequiresMountsFor drop-in (which ran
+# BEFORE this role, per site.yml's role order) notify the SAME "Restart
+# docker" handler. Without an explicit flush here, that handler would not
+# actually run until every role in site.yml had finished its own tasks —
+# meaning `compose_up`'s `docker compose up -d --build` would execute
+# against a Docker daemon STILL using its OLD data-root (the default,
+# root-disk one), creating every named volume (db-data included) there.
+# The handler would then restart Docker onto the new, mounted data-root
+# at the very end of the play, and the stack's actual data would be left
+# orphaned under /var/lib/docker/volumes on the root disk while
+# containers on the NEXT run start fresh against an empty volume set.
+#
+# On a first deploy this is invisible — both locations start empty, so
+# nothing looks wrong. It surfaces on a SECOND run after any daemon.json
+# change (or a rescue-mode rebuild where data_mount differs from what an
+# earlier run used): Postgres comes up against an EMPTY DATABASE while
+# the real data sits unreachable on the root disk. This is exactly the
+# silent-data-loss failure RequiresMountsFor (roles/docker) exists to
+# prevent, reintroduced through a different door — a same-play handler
+# ordering gap instead of a systemd boot race.
+#
+# Flushing here, before `compose_up` runs, guarantees Docker is on its
+# final data-root before any volume is created under it.
+- name: Flush handlers so Docker is restarted onto the mounted data-root before any volume is created
+  ansible.builtin.meta: flush_handlers

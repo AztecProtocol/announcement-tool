@@ -7,16 +7,40 @@
 # stop feeding fail2ban without cron's next tick trying again.
 #
 # `--since` is tracked via a small state file (the last line count seen)
-# rather than a timestamp: `docker compose logs --since` accepts
-# timestamps but not "since I last checked", and re-appending the whole
-# log every run would make fail2ban's maxretry counting meaningless
-# (every run would re-count every historical failure as if it just
-# happened). Line-count-based tracking is simpler to reason about than
-# timestamp math across cron's own minute-granularity drift.
+# rather than a bare timestamp: `docker compose logs --since` accepts
+# timestamps but not "since I last checked" in a way that survives
+# cron's own minute-granularity drift as cleanly as a line count does.
+#
+# FIX ROUND 1 (Task 6), two real bugs found in the original version:
+#
+# (a) EVENTS LOST ON JSON-FILE LOG ROTATION. Docker's json-file log
+# driver rotates at 10MB by default. After a rotation, `docker compose
+# logs db | wc -l` legitimately returns FEWER total lines than the
+# previous run counted (the old log file's lines are gone). The
+# original script's guard (`if total_lines > last_seen`) then silently
+# SKIPPED the append entirely on that run AND reset state to the
+# smaller count — every failed-auth line that existed between the
+# rotation and this tick was dropped PERMANENTLY, never mirrored,
+# never seen by fail2ban. This is exactly backwards: a sustained
+# brute-force (the traffic pattern this whole jail exists to catch) is
+# the traffic MOST LIKELY to trigger a 10MB rotation, so the jail goes
+# blind precisely when it matters most. Fixed below by detecting the
+# rotation case (total < last_seen) explicitly and re-mirroring
+# everything available rather than silently skipping.
+#
+# (b) STATE FILE ON TMPFS. /var/run is tmpfs — wiped on every reboot.
+# The FIRST tick after any reboot would previously find no state file,
+# default last_seen to 0, and re-append the container's ENTIRE
+# lifetime log as if every historical failure had just happened.
+# fail2ban would then ban every IP that ever failed a login across the
+# container's whole history in one findtime window — a real,
+# self-inflicted denial of service against this tool's own legitimate
+# traffic (Netlify's egress pool, plausibly included). Fixed by moving
+# the state file to /var/lib, which persists across reboots.
 set -euo pipefail
 
 STACK_DIR="{{ stack_dir }}"
-STATE_FILE="/var/run/announce-pg-auth-log.lines"
+STATE_FILE="/var/lib/announce-pg-auth-log.lines"
 DEST="/var/log/announce-postgres-auth.log"
 
 cd "$STACK_DIR"
@@ -27,8 +51,21 @@ if [ -f "$STATE_FILE" ]; then
   last_seen="$(cat "$STATE_FILE")"
 fi
 
-if [ "$total_lines" -gt "$last_seen" ]; then
+if [ "$total_lines" -lt "$last_seen" ]; then
+  # Rotation (or a container recreate) — the log is shorter than what we
+  # tracked last time, so our line-offset bookkeeping from before is no
+  # longer valid against the current log. Re-mirror everything Docker
+  # currently has rather than silently discarding the gap: this can
+  # duplicate a FEW lines already mirrored before the rotation (fail2ban's
+  # own maxretry/findtime window tolerates a handful of duplicate matches
+  # far better than it tolerates missing ones — a duplicate just makes a
+  # ban trigger microseconds sooner, a miss makes it never trigger), but
+  # it guarantees no failure between the last successful tick and now is
+  # ever silently dropped.
+  docker compose logs db 2>/dev/null >>"$DEST"
+elif [ "$total_lines" -gt "$last_seen" ]; then
   docker compose logs db 2>/dev/null | tail -n "+$((last_seen + 1))" >>"$DEST"
 fi
+# total_lines == last_seen: nothing new, nothing to do.
 
 echo "$total_lines" >"$STATE_FILE"

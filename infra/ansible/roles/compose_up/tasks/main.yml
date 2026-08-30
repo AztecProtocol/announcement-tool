@@ -98,6 +98,110 @@
       not generate or template secrets — see the comment above this task.
   when: not compose_up_env_file.stat.exists
 
+# FIX ROUND 1, CRITICAL 2, defense-in-depth: `volume_mount`'s task list
+# ends with an explicit `meta: flush_handlers` specifically so Docker is
+# already restarted onto {{ data_mount }}/docker before this role ever
+# creates a container or volume — see the long comment there for the
+# failure this prevents (every named volume silently created on the root
+# disk instead of the durable mounted volume). This task does not TRUST
+# that ordering silently; it verifies it, so a future edit that removes
+# or reorders that flush fails loudly here instead of orphaning data
+# again through the same door.
+- name: Assert Docker's data-root is the mounted volume, not the root disk
+  ansible.builtin.command: docker info --format '{{ '{{' }}.DockerRootDir{{ '}}' }}'
+  changed_when: false
+  register: compose_up_docker_root_dir
+
+- name: Fail if Docker is not using the expected data-root
+  ansible.builtin.fail:
+    msg: >-
+      Docker's data-root is "{{ compose_up_docker_root_dir.stdout }}", not
+      the expected "{{ data_mount }}/docker". This means the daemon.json
+      change in the volume_mount role has not taken effect yet (its
+      handler didn't run, or ran against a different data_mount) — DO NOT
+      proceed, or `docker compose up` below will create db-data and every
+      other named volume on the root disk instead of the durable Hetzner
+      volume. Investigate the volume_mount role's handler flush before
+      re-running this playbook.
+  when: compose_up_docker_root_dir.stdout != (data_mount + '/docker')
+
+# FIX ROUND 1 — replaces an `apk add openssl` that used to run inside
+# `db`'s own entrypoint on first start (see docker-compose.split.yml's
+# `db` comment for the full reasoning this replaced). That put a package-
+# mirror network call in the critical boot path of the one service every
+# other part of this deployment depends on; a slow or unreachable mirror
+# at exactly the wrong moment would crash-loop Postgres before it ever
+# started, for a reason unrelated to Postgres or this deployment. Moved
+# here instead: openssl is present on any stock Ubuntu image (no install
+# needed), and this task runs BEFORE `db` ever starts for the first time,
+# so by the time `docker compose up` runs below, a valid (if throwaway)
+# cert/key pair already exists in the `db-tls` named volume.
+#
+# Ask `docker compose` itself for the resolved volume name rather than
+# reconstructing compose's "<project>_<volume>" naming convention by
+# hand — the project name is normally the compose-file directory's
+# basename, but is overridable via COMPOSE_PROJECT_NAME/a `name:` key,
+# and this must stay correct under either. `docker compose config
+# --format json` resolves it the same way `docker compose up` itself
+# will, so there is no risk of the two disagreeing.
+- name: Resolve the db-tls volume's actual compose-qualified name
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker compose config --format json | python3 -c "import json,sys; print(json.load(sys.stdin)['volumes']['db-tls']['name'])"
+  args:
+    chdir: "{{ stack_dir }}"
+  changed_when: false
+  register: compose_up_db_tls_volume_name
+
+# `docker volume create` (idempotent — a no-op if it already exists) so
+# the volume, and therefore a real host-side mountpoint to write into,
+# exists even on a totally fresh deploy where `docker compose up` has
+# never run at all yet.
+- name: Ensure the db-tls named volume exists
+  ansible.builtin.command: docker volume create {{ compose_up_db_tls_volume_name.stdout }}
+  changed_when: false
+
+- name: Find the db-tls volume's host-side mountpoint
+  ansible.builtin.command: docker volume inspect --format '{{ '{{' }}.Mountpoint{{ '}}' }}' {{ compose_up_db_tls_volume_name.stdout }}
+  changed_when: false
+  register: compose_up_db_tls_mountpoint
+
+- name: Check whether a TLS cert already exists in db-tls
+  ansible.builtin.stat:
+    path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.crt"
+  register: compose_up_existing_cert
+
+# 7-day validity, matching the ORIGINAL bootstrap cert's intent: short
+# enough that if the cert-reload role's own immediate post-deploy run
+# (see roles/cert_reload/tasks/main.yml) is ever skipped or silently
+# fails, this placeholder expires quickly and loudly rather than sitting
+# unnoticed for a full 90-day Let's Encrypt cycle. Written directly with
+# `openssl` on the CONTROL/target host (Ubuntu ships openssl by default;
+# no apk, no container, no network dependency), then chowned to uid/gid
+# 70 (postgres:16-alpine's fixed postgres uid — confirmed with
+# `docker run --rm postgres:16-alpine id postgres`) so the container can
+# read it without any in-container chown step.
+- name: Generate a bootstrap placeholder TLS cert if none exists yet
+  when: not compose_up_existing_cert.stat.exists
+  block:
+    - name: Generate the placeholder key + self-signed cert
+      ansible.builtin.command: >-
+        openssl req -x509 -newkey rsa:2048 -sha256 -days 7 -nodes
+        -keyout {{ compose_up_db_tls_mountpoint.stdout }}/server.key
+        -out {{ compose_up_db_tls_mountpoint.stdout }}/server.crt
+        -subj /CN=announce-bootstrap-placeholder
+      changed_when: true
+
+    - name: Set ownership/permissions matching what Postgres requires
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: "70"
+        group: "70"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.crt", mode: "0644" }
+        - { path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.key", mode: "0600" }
+
 # Unconditional: compose up is idempotent, and gating it on whether the
 # repo sync reported a change would leave a manually-stopped stack down
 # forever while the playbook reports green (same reasoning as

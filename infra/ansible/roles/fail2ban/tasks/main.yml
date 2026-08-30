@@ -55,14 +55,45 @@
     mode: "0644"
     content: |
       # Matches Postgres's own auth-failure log lines, as mirrored into
-      # /var/log/announce-postgres-auth.log by pg-auth-log.sh. Covers both
-      # "password authentication failed" (wrong password, right role) and
-      # "no pg_hba.conf entry" / role-does-not-exist style rejections
-      # (guessed role names), since both are brute-force signal.
+      # /var/log/announce-postgres-auth.log by pg-auth-log.sh.
+      #
+      # REWRITTEN in fix round 1 on Task 6 after the original version was
+      # proven, with a real postgres:16-alpine container, to never match
+      # anything. That version assumed the client host appeared as a
+      # trailing `client=<HOST>` (or similar) on the FATAL line — real
+      # output has NO client address anywhere on any line under
+      # Postgres's DEFAULT log_line_prefix ("%m [%p] "). A filter that
+      # cannot match is worse than no filter, because it is believed.
+      #
+      # docker-compose.split.yml's `db.command` now sets
+      # `log_line_prefix=%m [%p] %h ` (note the trailing space — also
+      # load-bearing, see that file's comment: without it the IP runs
+      # directly into "FATAL:" with no separator and this filter fails
+      # to match, the exact same silent-jail failure mode this whole
+      # change exists to fix) specifically so this filter has an IP to
+      # bind <HOST> to. Verified directly (fix round 1) against a real
+      # container running that exact command: the client address appears
+      # in ONE fixed position on every FATAL line — immediately after the
+      # `[pid]` field, before the `FATAL:` keyword itself — for
+      # password-authentication-failed, role-does-not-exist, and
+      # database-does-not-exist cases alike (Postgres 16 folds "no such
+      # role" into the same "password authentication failed" FATAL
+      # wording as a wrong password, so a single pattern covers both
+      # without needing a separate "role does not exist" alternative).
+      # This is why the regex anchors on that fixed prefix position
+      # rather than trying to match several different trailing message
+      # shapes.
+      #
+      # NOTE: a connection over the Unix socket (used by tools running
+      # ON this host, e.g. `docker compose exec db psql`) logs `[local]`
+      # in the %h position instead of an IP. fail2ban's <HOST> only binds
+      # to something it can parse as a real address/hostname, so a line
+      # like that is matched by this regex but then silently skipped by
+      # fail2ban itself rather than counted — correct behaviour, since a
+      # Unix-socket connection did not come over the network and cannot
+      # be IP-banned.
       [Definition]
-      failregex = ^.*FATAL:\s+password authentication failed for user\s+.*,\s*client\s*=\s*<HOST>\s*$
-                  ^.*FATAL:\s+.*no pg_hba\.conf entry for host\s+"<HOST>".*$
-                  ^.*FATAL:\s+role\s+".*"\s+does not exist.*client\s*=\s*<HOST>\s*$
+      failregex = ^.*\[\d+\]\s+<HOST>\s+FATAL:\s
       ignoreregex =
 
 - name: Install the postgres jail
