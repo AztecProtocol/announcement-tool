@@ -45,10 +45,22 @@ all:
 #   # ALERT_EMAIL_TO=
 #   # ESP_PROVIDER=
 #   # EMAIL_FROM=
-#   # EMAIL_FROM_NAME=
+#   # EMAIL_FROM_NAME="Aztec Announcements"
 #   # BREVO_API_KEY=
 #   EOF
 #   chmod 600 /opt/announce/.env
+#
+# QUOTE ANY VALUE CONTAINING A SPACE (fix round 2) — EMAIL_FROM_NAME
+# above is the example that actually needs it. This file is read two
+# ways: docker compose's own KEY=VALUE parser (tolerant of unquoted
+# spaces) AND, on a cert-reload failure,
+# infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2's
+# alert_human() sources it as literal shell (`. .env`) to reach
+# ALERT_EMAIL_TO/ESP_PROVIDER for the alert email. Under shell sourcing,
+# an unquoted `EMAIL_FROM_NAME=Aztec Announcements` parses as
+# EMAIL_FROM_NAME=Aztec followed by a stray `Announcements` command —
+# confirmed directly — silently truncating the value. Quoting works for
+# both readers; leaving it unquoted only works for one of them.
 #
 # THIS IS A SECRET FILE. Never commit it, never echo its contents into
 # Ansible output, never store a copy of it in this repo.

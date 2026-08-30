@@ -132,6 +132,23 @@ alert_human() {
     # .env is a flat KEY=VALUE file (same format docker compose itself
     # reads) — export every line so ALERT_EMAIL_TO/ESP_PROVIDER/etc.
     # reach send_alert() exactly as it reads them via ${VAR:-}.
+    #
+    # NOTE (fix round 2): sourcing .env like this treats it as literal
+    # SHELL syntax, not compose's own KEY=VALUE parser. Verified directly
+    # what an unquoted value containing a space actually does:
+    #   EMAIL_FROM_NAME=Aztec Announcements
+    # bash parses "Aztec" as the value and "Announcements" as a SEPARATE
+    # COMMAND on the same line, producing
+    # ".env: line N: Announcements: command not found" on stderr AND
+    # silently truncating the variable to just "Aztec" — not merely
+    # cosmetic stderr noise, the value itself is wrong from that point
+    # on. The overall alert-sending flow survives (this subshell has
+    # `set +e`, so the stray "command not found" doesn't abort it), but
+    # whichever variable got mangled carries a wrong or truncated value
+    # for the rest of this run. Quote every value in
+    # {{ stack_dir }}/.env that contains spaces (e.g.
+    # EMAIL_FROM_NAME="Aztec Announcements") — see
+    # infra/ansible/inventory.yml.example for the expected format.
     set -a
     # shellcheck disable=SC1090
     . "$STACK_DIR/.env"
@@ -167,15 +184,44 @@ fi
 rm -f /tmp/announce-cert-reload-caddy-check.err
 
 # --- Locate Caddy's current cert for $DOMAIN, at runtime, exactly once ----
-# `set -euo pipefail` does NOT abort on a failed command inside a `$(...)`
-# command substitution used as a plain assignment (only inside `set -e`'s
-# "simple command" cases, which an assignment isn't) — so the original
-# `2>/dev/null` on this line silently hid real docker/exec failures behind
-# what looked like "search found nothing". Captured without discarding
-# stderr here; failures are reported with real detail.
+# FIX ROUND 2 (a real bug found by an independent reviewer, then
+# independently REPRODUCED here before trusting the report — see below):
+# every command substitution in this script whose failure must be
+# HANDLED, not propagated as a script-killing error, is wrapped in an
+# explicit `set +e` / capture `$?` / `set -e` bracket — the SAME pattern
+# scripts/backup.sh already uses correctly (see its restore-verify step).
+#
+# THE BUG THIS REPLACES: a prior version of this comment claimed
+# `set -euo pipefail` does not abort on a failed command inside a
+# `$(...)` substitution used as a plain assignment. That claim is FALSE
+# and was corrected only after independently reproducing the failure,
+# not by taking the report on faith:
+#   $ bash -c 'set -euo pipefail; OUT="$(false | tr -d "\r")"; EXIT=$?; echo "REACHED $EXIT"'
+#   (prints nothing; script exits 1)
+# An assignment IS the "simple command" `set -e` acts on, and its exit
+# status IS the command substitution's — `pipefail` additionally makes
+# that status the *rightmost non-zero* exit code across every stage of
+# the piped command, not just the last stage's own exit code (confirmed
+# separately: `OUT="$(false | wc -l)"` also kills the script under
+# `pipefail`, even though `wc -l` itself always exits 0). So the ORIGINAL
+# form here — assign, then read `$?` on the next line — never reached
+# that next line on a real failure: the script died silently at the
+# assignment itself. For a script run once a day by cron with no
+# interactive terminal watching it, "died silently" means NO log line,
+# NO syslog entry, NO alert — the exact failure class this whole role
+# exists to prevent, reintroduced into the tool built to prevent it.
+#
+# Every substitution below whose command can legitimately fail as part
+# of normal operation (container down, file not found yet, empty
+# result) is now bracketed with `set +e` immediately before it and
+# `set -e` immediately after, with the real `$?` captured while `set -e`
+# is off — so a failure there falls through to this script's OWN
+# explicit handling instead of dying invisibly.
+set +e
 FIND_ERR="$(mktemp)"
 MATCHES="$(docker compose exec -T caddy find /data -type f -iname "${DOMAIN}.crt" 2>"$FIND_ERR" | tr -d '\r')"
 FIND_EXIT=$?
+set -e
 FIND_STDERR="$(cat "$FIND_ERR")"
 rm -f "$FIND_ERR"
 
@@ -226,13 +272,24 @@ fi
 # against a package mirror on every single daily run just to compare two
 # files. `sha256sum` is busybox/coreutils, present in both images with no
 # extra install.
+set +e
 NEW_FINGERPRINT="$(docker compose exec -T caddy sh -c "sha256sum '$CADDY_CERT_PATH'" 2>/dev/null | awk '{print $1}')"
+set -e
 
 if [ -z "$NEW_FINGERPRINT" ]; then
   fail "could not hash $CADDY_CERT_PATH inside the caddy container"
 fi
 
+# `test -f ... && sha256sum ...` legitimately exits non-zero when there
+# is no current cert yet (the very first run, before this script or the
+# Ansible bootstrap task has ever populated db-tls/) — that is NOT an
+# error, it is the expected "nothing to compare against" state that
+# falls through to CURRENT_FINGERPRINT="" and proceeds to install the
+# first real cert below. Bracketed the same way so that expected case
+# does not also kill the script.
+set +e
 CURRENT_FINGERPRINT="$(docker compose exec -T db sh -c "test -f /var/lib/postgresql/tls/server.crt && sha256sum /var/lib/postgresql/tls/server.crt" 2>/dev/null | awk '{print $1}')"
+set -e
 
 if [ "$NEW_FINGERPRINT" = "$CURRENT_FINGERPRINT" ] && [ -n "$CURRENT_FINGERPRINT" ]; then
   log "no change (fingerprint matches, cert=$NEW_FINGERPRINT)"
@@ -313,43 +370,106 @@ fi
 # exists to prevent. `docker compose kill -s HUP` (not `docker kill`,
 # which would need the raw container name) keeps this script portable
 # across compose project-name changes.
+#
+# A timestamp is captured immediately BEFORE sending SIGHUP, in the
+# RFC3339 format `docker compose logs --since` actually requires (its
+# own --help text shows an RFC3339 example; confirmed directly that the
+# more natural-looking "YYYY-MM-DD HH:MM:SS" space-separated form is
+# silently REJECTED — "invalid value for since: parsing time ... extra
+# text" — so this format is not a stylistic choice) — used below to
+# scope the post-SIGHUP log check to only lines emitted by THIS reload,
+# not a coincidentally similar line from hours earlier.
+RELOAD_MARKER="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
 if ! docker compose kill -s HUP db; then
   fail "new cert/key installed but SIGHUP to the db container failed — Postgres may still be serving the OLD cert until its next restart"
 fi
 
-# VERIFY, fix round 1 — do not log "reloaded" on assertion alone.
-# Postgres logs an error and KEEPS SERVING OLD MATERIAL if the new
-# cert/key pair is invalid in a way this script's own checks didn't
-# catch (e.g. a key that doesn't match the cert, which sha256sum
-# equality can't detect since they're different files by construction).
-# Re-hash what Postgres is ACTUALLY serving now, by opening a real TLS
-# connection to it and reading the certificate it presents on the wire —
-# not just re-reading the file on disk (which would only prove the copy
-# succeeded, not that Postgres picked it up). `db`'s image has no
-# openssl (see the sha256sum comment above), so this connects with
-# plain `pg_isready`-adjacent tooling is not enough either; instead ask
-# Postgres itself, via a loopback SQL query only a live, reloaded server
-# can answer correctly: `SHOW ssl_cert_file` after SIGHUP still reports
-# the same configured PATH (that never changed, only the file's
-# content did) — so path alone doesn't prove a reload either. The
-# reliable proof is: re-hash the file Postgres is CONFIGURED to serve,
-# wait briefly for SIGHUP's reload to complete, and confirm it now
-# matches Caddy's cert.
-sleep 2
-POST_RELOAD_FINGERPRINT="$(docker compose exec -T db sh -c 'sha256sum /var/lib/postgresql/tls/server.crt' 2>/dev/null | awk '{print $1}')"
+# VERIFY, fix round 2 — this replaces a fix-round-1 version of this
+# section that only re-hashed the FILE at
+# /var/lib/postgresql/tls/server.crt after SIGHUP. That is the exact
+# file this script itself had just written two steps earlier: matching
+# only proves the `mv` landed on disk, which was never in question — it
+# proves NOTHING about whether Postgres actually accepted the new
+# material. Confirmed directly, reproducing the precise failure Critical
+# 1 named: with a deliberately mismatched key installed, SIGHUP produces
+#   LOG:  could not load private key file ".../server.key": key values mismatch
+#   LOG:  SSL configuration was not reloaded
+# and Postgres SILENTLY KEEPS SERVING THE OLD CERTIFICATE — confirmed by
+# opening a real TLS connection afterward and reading back the exact
+# same old certificate on the wire. The on-disk file (the new, mismatched
+# one) still hashed correctly the whole time. The fix-round-1 check would
+# have logged "reloaded... verified" in exactly this scenario. That
+# wording is corrected below to say what is actually being checked.
+#
+# A NAIVE FIX ATTEMPT, TRIED AND REJECTED: querying
+# `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()` over a fresh
+# TLS connection. This does NOT distinguish a successful reload from a
+# REJECTED one either — confirmed directly: after a rejected reload
+# (Postgres still running the OLD SSL context because the new one failed
+# to load), a brand new client connection still negotiates TLS
+# successfully against that OLD context, so `ssl` reads `t` regardless.
+# Proving "a TLS handshake happened" is not the same as proving "the
+# handshake used the NEW material" — `pg_stat_ssl` doesn't expose which
+# certificate was actually presented, and `db`'s image has no openssl to
+# read it off the wire directly (see the sha256sum comment above for why
+# that dependency is deliberately avoided).
+#
+# THE ACTUAL FIX: Postgres itself already tells us, unambiguously, in
+# its own log, whether a SIGHUP-triggered SSL reload was accepted or
+# rejected — "SSL configuration was not reloaded" is emitted ONLY on the
+# rejection path (confirmed: a genuinely successful reload with a
+# DIFFERENT valid cert/key pair produces no such line at all, and the
+# newly-served certificate does change). So this checks Postgres's own
+# authoritative statement about itself, scoped to only the log lines
+# emitted after RELOAD_MARKER above, rather than trying to reconstruct
+# the same fact indirectly through a side channel that turned out not to
+# carry it.
+set +e
+RELOAD_REJECTED="$(docker compose logs db --since "$RELOAD_MARKER" 2>/dev/null | grep -c 'SSL configuration was not reloaded')"
+set -e
 
-if [ "$POST_RELOAD_FINGERPRINT" != "$NEW_FINGERPRINT" ]; then
-  fail "installed the new cert but post-reload verification does not match: expected $NEW_FINGERPRINT, found ${POST_RELOAD_FINGERPRINT:-<unreadable>} — Postgres may not have reloaded correctly"
+if [ "${RELOAD_REJECTED:-0}" -gt 0 ]; then
+  fail "Postgres logged 'SSL configuration was not reloaded' after SIGHUP — the new cert/key pair was installed on disk but REJECTED by Postgres, which is still serving the OLD certificate. Check db container logs for the specific reason (key mismatch, permission, etc)."
 fi
 
-# Also confirm Postgres is still accepting connections at all after the
-# SIGHUP (a malformed key can make Postgres refuse to reload the SSL
-# context and log an error while remaining otherwise up — this catches
-# that case even though the file-level hash above already matches,
-# because pg_isready independently exercises the running server, not
-# just its filesystem).
-if ! docker compose exec -T db pg_isready -U announce -d announce >/dev/null 2>&1; then
-  fail "cert/key installed and file hash matches, but Postgres is not accepting connections after SIGHUP — check db container logs"
+# Filesystem-level sanity check, KEPT but re-worded honestly: this only
+# confirms the `mv` in the previous step actually landed the bytes we
+# intended — it is NOT proof Postgres picked them up (that is what the
+# log check above is for). Real value here is catching a completely
+# different failure class: a `docker compose exec` that silently
+# targeted the wrong container, or a race with something else writing to
+# this path.
+set +e
+POST_MOVE_FINGERPRINT="$(docker compose exec -T db sh -c 'sha256sum /var/lib/postgresql/tls/server.crt' 2>/dev/null | awk '{print $1}')"
+set -e
+
+if [ "$POST_MOVE_FINGERPRINT" != "$NEW_FINGERPRINT" ]; then
+  fail "installed the new cert but the on-disk file at /var/lib/postgresql/tls/server.crt does not match what was copied: expected $NEW_FINGERPRINT, found ${POST_MOVE_FINGERPRINT:-<unreadable>}"
 fi
 
-log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT, verified against the running server)"
+# LIVE TLS PROOF: open a real encrypted connection to Postgres AFTER the
+# SIGHUP and confirm it negotiates TLS. Connects over TCP to 127.0.0.1
+# from INSIDE the db container, which the image's default pg_hba.conf
+# trusts without a password (`host all all 127.0.0.1/32 trust` — checked
+# directly against a real postgres:16-alpine container's default
+# pg_hba.conf; this script has no business holding real application
+# credentials, and doesn't need to for a same-host loopback liveness
+# check). `PGSSLMODE=require` makes the connection itself fail outright
+# if the server cannot or will not negotiate TLS at all — catching a
+# totally different failure mode than the log check above: not "reload
+# was rejected" (that's the log check's job) but "Postgres stopped
+# accepting encrypted connections entirely" (e.g. crashed the SSL
+# listener some other way the log grep above wouldn't have wording for).
+# The two checks are deliberately not redundant: the log check proves
+# the reload was ACCEPTED; this one proves the server, having accepted
+# it, is actually still working.
+set +e
+LIVE_SSL_CHECK="$(docker compose exec -T db sh -c "PGSSLMODE=require psql 'host=127.0.0.1 port=5432 user=announce dbname=announce' -Atc \"SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()\"" 2>/dev/null)"
+set -e
+
+if [ "$LIVE_SSL_CHECK" != "t" ]; then
+  fail "reload was accepted per Postgres's own log, and the on-disk cert matches, but a live post-reload TLS connection did not report an encrypted session (got: '${LIVE_SSL_CHECK:-<empty>}') — check db container logs"
+fi
+
+log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT; Postgres logged no reload rejection, on-disk file matches, and a live post-SIGHUP TLS connection succeeded)"

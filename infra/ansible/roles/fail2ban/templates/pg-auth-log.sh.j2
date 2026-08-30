@@ -45,7 +45,37 @@ DEST="/var/log/announce-postgres-auth.log"
 
 cd "$STACK_DIR"
 
+# FIX ROUND 2 note: `total_lines="$(docker compose logs db | wc -l)"` looks
+# safe under `set -e` because `wc -l` itself always exits 0 — but
+# `pipefail` (set above) makes the ASSIGNMENT's exit status the
+# rightmost NON-ZERO exit code across every stage of the pipe, not just
+# the last stage's own code. Confirmed directly (same bug class found
+# and fixed in cert-reload.sh.j2's fix round 2, reproduced here before
+# assuming this file shared it): `OUT="$(false | wc -l)"` under
+# `set -euo pipefail` kills the script at that line, silently, before
+# reaching anything below it. If `docker compose logs db` ever fails
+# (container recreated mid-tick, compose project temporarily
+# unavailable), this script would previously die with no output at all
+# — a cron job dying silently once a minute is a much smaller blast
+# radius than cert-reload's once-a-day miss, but it is the identical
+# class of bug, so it gets the identical `set +e` / capture / `set -e`
+# bracket rather than being left as a latent copy of a bug already
+# proven real elsewhere in this codebase.
+set +e
 total_lines="$(docker compose logs db 2>/dev/null | wc -l)"
+LOGS_EXIT=$?
+set -e
+
+if [ "$LOGS_EXIT" -ne 0 ]; then
+  # Not fatal: cron runs this again in a minute. Exiting 0 rather than
+  # failing loudly here is deliberate — a single missed tick is not
+  # itself the fail2ban-relevant failure (a sustained gap over many
+  # ticks would be, but that is outside a single run's ability to
+  # detect, and this script has no alert path of its own the way
+  # cert-reload.sh.j2 does).
+  exit 0
+fi
+
 last_seen="0"
 if [ -f "$STATE_FILE" ]; then
   last_seen="$(cat "$STATE_FILE")"
