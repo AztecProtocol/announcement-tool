@@ -50,7 +50,13 @@ against a real deployment, enable login with a real password, as a
 superuser / the `announce` owner:
 
 ```sh
-psql "$DATABASE_URL" -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+# Run this ON THE VM, against 127.0.0.1 — never across the internet.
+# `psql` defaults to sslmode=prefer, which silently falls back to PLAINTEXT
+# and never verifies the server, so the off-VM form of this command would
+# transmit the new password as literal cleartext SQL. The full procedure,
+# including the off-VM alternative and two gotchas worth knowing, is step 5
+# of the deployment runbook below — prefer that; this is the summary.
+ssh <vm> "sudo -u postgres psql -h 127.0.0.1 -c \"alter role announce_app with login password '\$(openssl rand -base64 32)';\""
 ```
 
 Store the generated password only in the deployment's secret manager / env
@@ -224,7 +230,8 @@ on the VM would hide a real failure):
 ```sh
 curl -o isrgrootx1.pem https://letsencrypt.org/certs/isrgrootx1.pem
 openssl s_client -connect announce.aztec.network:5432 -starttls postgres \
-  -CAfile isrgrootx1.pem -verify_return_error </dev/null
+  -CAfile isrgrootx1.pem -verify_return_error \
+  -verify_hostname announce.aztec.network </dev/null
 ```
 
 The only acceptable result is `Verify return code: 0 (ok)`. Anything else

@@ -43,8 +43,13 @@ _json_escape() {
     # invalid JSON — cert-reload.sh.j2's log excerpts are realistically
     # multi-line, so this fallback has to fold newlines to `\n` too, not
     # just the two characters that break the printf quoting.
-    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '{printf "%s\\n", $0}' \
-      | sed -e '$ s/\\n$//'
+    # Tab and carriage return are folded too, not just newline: this function's
+    # busiest caller passes `docker compose logs db` output, and container log
+    # lines realistically contain tabs. A raw tab or CR inside a JSON string is
+    # invalid JSON, so leaving them would reproduce the exact defect this
+    # function exists to prevent, just from a rarer character.
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' \
+      | awk '{printf "%s\\n", $0}' | sed -e '$ s/\\n$//'
   fi
 }
 
