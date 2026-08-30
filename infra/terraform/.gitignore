@@ -4,9 +4,12 @@
 *.tfstate
 *.tfstate.*
 
-# Provider plugins / init cache.
+# Provider plugin cache only. The lock file (.terraform.lock.hcl) is
+# deliberately NOT ignored — Terraform's own convention is to commit it, so
+# the operator's `terraform init` resolves the exact hcloud/local provider builds
+# this was validated against (hcloud v1.68.0), not whatever `~> 1.49` floats
+# to by the time he applies.
 .terraform/
-.terraform.lock.hcl
 
 # Real variable values (tokens, real CIDRs). The .example file IS committed.
 *.tfvars

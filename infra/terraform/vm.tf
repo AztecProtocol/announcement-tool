@@ -67,7 +67,14 @@ resource "hcloud_volume" "announce_data" {
 
   lifecycle {
     # The database (announcements, subscribers, delivery ledger, audit log)
-    # is the expensive thing to lose.
+    # is the expensive thing to lose. NOTE for whoever runs `terraform
+    # destroy`: this blocks the ENTIRE destroy plan, not just this resource
+    # — Terraform refuses all-or-nothing with "Resource has
+    # lifecycle.prevent_destroy set". To actually tear down (including the
+    # server), either remove this block first, or run
+    # `terraform state rm hcloud_volume.announce_data` to stop tracking the
+    # volume (it is NOT deleted by that command, only untracked), then
+    # destroy the rest.
     prevent_destroy = true
   }
 }

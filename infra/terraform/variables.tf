@@ -17,13 +17,13 @@ variable "hcloud_location" {
 variable "server_type" {
   type        = string
   default     = "cx22"
-  description = "Hetzner server type. This VM is not a metrics TSDB — it runs Postgres for a low-volume workload (a few announcements a month, a subscriber list, and a delivery ledger), plus two small containers (signal-cli-rest-api, Caddy) and a nightly backup job. cx22 (2 shared vCPU / 4 GB RAM) covers that with headroom; the aztec-observability module's ccx23 (4 dedicated vCPU / 16 GB, sized for a ~700GB Prometheus+Loki TSDB) would be paying for ingest capacity this workload never approaches."
+  description = "Hetzner server type. This VM is not a metrics TSDB — it runs Postgres for a low-volume workload (a few announcements a month, a subscriber list, and a delivery ledger), plus two small containers (signal-cli-rest-api, Caddy) and a nightly backup job. Note signal-cli-rest-api is a JVM (signal-cli runs on Java): it idles around 200-400 MB in native/json-rpc mode, more in normal mode where it restarts the JVM per call — real but bounded memory, not negligible. cx22 (2 shared vCPU / 4 GB RAM) still covers Postgres + that JVM + Caddy with headroom; the aztec-observability module's ccx23 (4 dedicated vCPU / 16 GB, sized for a ~700GB Prometheus+Loki TSDB) would be paying for ingest capacity this workload never approaches. Do not resize on account of signal-cli-rest-api alone — it fits."
 }
 
 variable "image" {
   type        = string
   default     = "ubuntu-24.04"
-  description = "Base image. Matches the aztec-observability module's choice for consistency across the author's Hetzner modules; Ansible (Task 6) provisions everything else."
+  description = "Base image. Matches the aztec-observability module's choice for consistency across the author's Hetzner modules; Ansible (Task 6) provisions everything else. NOTE: `image` is in this server's ignore_changes list (see vm.tf), so bumping this variable produces NO plan diff — Terraform will report \"no changes\" even though the value changed. An OS upgrade is a deliberate rebuild (new server, migrate the volume), never a variable bump."
 }
 
 variable "data_volume_size_gb" {
