@@ -41,20 +41,25 @@
 --
 -- No DROP, TRUNCATE, or ALTER is granted on anything, ever, for this role.
 --
--- NO PASSWORD LITERAL IN THIS FILE. The role is created with a placeholder
--- password, and the deployment process must rotate it immediately after
--- this migration runs, e.g.:
---   psql "$DATABASE_URL" -c "alter role announce_app with password '$(openssl rand -base64 32)';"
--- using a superuser/owner connection, with the generated password stored
--- only in the deployment's secret manager / env, never committed. Rotating
--- immediately after creation (rather than leaving the placeholder live)
--- means the placeholder itself is never a usable credential in any
--- environment that has run this migration and then rotated as documented.
+-- NO PASSWORD LITERAL IN THIS FILE, and the role is created NOLOGIN — fail
+-- CLOSED, not open. A committed placeholder password (even a
+-- "CHANGE_ME"-style one) would be a live, working credential the moment
+-- this migration runs, on a port reachable from the public internet, until
+-- someone remembers to rotate it. NOLOGIN means a skipped or failed
+-- rotation step produces `FATAL: role "announce_app" is not permitted to
+-- log in` — loud and immediate, on the very first connection attempt — the
+-- exact opposite failure mode of a working credential nobody noticed. The
+-- deployment process must run, using a superuser/owner connection, after
+-- this migration:
+--   psql "$DATABASE_URL" -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+-- with the generated password stored only in the deployment's secret
+-- manager / env, never committed. Until that step runs, announce_app
+-- cannot connect at all, regardless of grants.
 
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'announce_app') then
-    create role announce_app with login password 'CHANGE_ME_PLACEHOLDER_ROTATE_IMMEDIATELY';
+    create role announce_app nologin;
   end if;
 end
 $$;
@@ -62,13 +67,35 @@ $$;
 grant connect on database announce to announce_app;
 grant usage on schema public to announce_app;
 
--- Full read/write on the operational tables the app writes through its
--- normal publish/subscribe/delivery flows.
-grant select, insert, update on
-  announcements,
-  channel_settings,
-  publishers
-to announce_app;
+-- announcements: full read/write — the app's normal compose/review/publish
+-- flow inserts and updates this table.
+grant select, insert, update on announcements to announce_app;
+
+-- channel_settings: READ ONLY. Every app touch is a select (src/core/outbox.ts,
+-- src/core/preview.ts, app/admin/page.tsx, src/adapters/discord.ts,
+-- telegram.ts, signal.ts). The only write is scripts/setup-channel.ts, an
+-- owner-run operator script. This table holds the Discord webhook URL and
+-- Telegram bot token — SELECT alone already exposes those (unavoidable,
+-- the app has to read them to deliver), but UPDATE would let a leaked
+-- credential silently rewrite the Discord webhook to an attacker-controlled
+-- endpoint or overwrite the bot token to break delivery. Do not add INSERT
+-- or UPDATE here because a setup script wants it; that script should keep
+-- running as the `announce` owner.
+grant select on channel_settings to announce_app;
+
+-- publishers: READ ONLY. This is the four-eyes identity list — it decides
+-- who may author and who may confirm a critical announcement
+-- (src/core/identity.ts:isPublisher/listPublishers, both reads only). The
+-- only write anywhere is scripts/seed-publisher.ts, an owner-run operator
+-- script. Granting INSERT here would be worse than the DELETE this
+-- migration denies on the audit tables: with INSERT, a leaked announce_app
+-- credential could `insert into publishers (email) values
+-- ('attacker@evil.tld')` and then satisfy BOTH sides of four-eyes itself —
+-- one identity to author a critical announcement, a second to confirm it —
+-- without touching audit_log or delivery_ledger at all, so nothing here
+-- would even show tampering. Do not widen this to INSERT/UPDATE for any
+-- reason; adding a publisher must stay an owner-run, out-of-band action.
+grant select on publishers to announce_app;
 
 -- delivery_ledger: the worker inserts and updates delivery attempts
 -- (status, attempts, next_attempt_at, last_error, delivered_at) but must
