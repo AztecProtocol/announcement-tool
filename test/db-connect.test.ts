@@ -80,6 +80,36 @@ describe('buildConnectionOptions', () => {
       sslRootCert: '/etc/ssl/ca.pem',
     })).toThrow(/sslmode/);
   });
+
+  it('rejects sslmode in a multi-host DATABASE_URL, which the WHATWG URL parser cannot parse at all', () => {
+    // postgres.js accepts postgres://u:p@h1:5432,h2:5432/db (a normal
+    // Postgres HA form) by rewriting it to its first host before parsing --
+    // `new URL()` on the raw string throws instead. A version of this check
+    // that only tried `new URL()` and silently skipped validation on failure
+    // would let exactly this combination through: real syntax, confirmed to
+    // reach postgres.js's own sslmode handling, not a hypothetical case.
+    expect(() => buildConnectionOptions({
+      databaseUrl: 'postgres://u:p@h1:5432,h2:5432/db?sslmode=require',
+    })).toThrow(/sslmode/);
+  });
+
+  it('rejects sslrootcert in a multi-host DATABASE_URL', () => {
+    expect(() => buildConnectionOptions({
+      databaseUrl: 'postgres://u:p@h1:5432,h2:5432/db?sslrootcert=system',
+    })).toThrow(/sslrootcert/);
+  });
+
+  it('does not false-positive on a percent-encoded "sslmode=" inside the password', () => {
+    // The regex backstop requires a literal, unescaped `?` or `&` delimiter
+    // immediately before sslmode=/sslrootcert=. A percent-encoded occurrence
+    // inside credentials (%3Fsslmode%3D) has no literal delimiter character,
+    // so it must not trip the check -- a later reader must not "simplify" the
+    // delimiter requirement away and reintroduce false positives on ordinary
+    // passwords.
+    expect(buildConnectionOptions({
+      databaseUrl: 'postgres://u:p%3Fsslmode%3Drequire@h/db',
+    }).ssl).toBeUndefined();
+  });
 });
 
 describe('connect', () => {

@@ -47,9 +47,20 @@
  * operator writing the connection string the way every Postgres tutorial and
  * managed-provider console does (`?sslmode=require` in DATABASE_URL) would
  * bypass this file's refusal completely and connect encrypted-but-unverified
- * with no error and no warning. So buildConnectionOptions parses the URL's
- * own query string and throws if it carries either parameter: there is
- * exactly one authority for TLS configuration here, not two competing ones.
+ * with no error and no warning. So buildConnectionOptions checks the URL for
+ * both parameters and throws if either is present: there is exactly one
+ * authority for TLS configuration here, not two competing ones.
+ *
+ * That check runs in two layers, not one. A `new URL()` parse handles the
+ * common case, but postgres.js also accepts a multi-host connection string
+ * (`postgres://u:p@h1:5432,h2:5432/db`, a normal Postgres HA form) that
+ * `new URL()` rejects outright — postgres.js only manages to parse it by
+ * rewriting the string to its first host before parsing. A version of this
+ * check that silently skipped validation whenever `new URL()` threw would
+ * therefore let exactly the multi-host + `?sslmode=require` combination
+ * through unchecked: real syntax, a real bypass, not a hypothetical one. So a
+ * second, unconditional regex scan of the raw string backs up the parser —
+ * see buildConnectionOptions for both.
  */
 
 import { readFileSync } from 'node:fs';
@@ -85,28 +96,64 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
   // query string and turns them into its `ssl` option, bypassing every check
   // below. Refuse both outright so DATABASE_SSL_MODE/DATABASE_SSL_ROOT_CERT
   // are the one place TLS is configured, not one of two competing places.
+  //
+  // A multi-host connection string (postgres://u:p@h1:5432,h2:5432/db, a
+  // normal Postgres HA form) throws out of `new URL()` directly: postgres.js's
+  // own parseUrl (node_modules/postgres/src/index.js) rewrites the string to
+  // its first host before calling `new URL()` internally, but nothing here
+  // does that rewrite first. So the WHATWG parse below is not a reliable way
+  // to see every query parameter postgres.js will see, and the string-level
+  // regex immediately after it is not a "belt and suspenders" extra — it is
+  // the check that actually covers every URL shape postgres.js accepts. It
+  // runs unconditionally, in addition to the parser-based check, and there is
+  // no catch-and-continue path here: a URL this file cannot make sense of is
+  // exactly the case the regex exists for, not a reason to skip validation.
+  let parsed: URL | undefined;
   try {
-    const parsed = new URL(url);
-    if (parsed.searchParams.has('sslmode')) {
-      throw new Error(
-        `DATABASE_URL must not set "sslmode" in its query string (found "?sslmode=`
-        + `${parsed.searchParams.get('sslmode')}"). postgres.js reads that parameter directly and `
-        + 'it would bypass this module\'s checks entirely. Set DATABASE_SSL_MODE instead and '
-        + 'remove sslmode from DATABASE_URL.',
-      );
-    }
-    if (parsed.searchParams.has('sslrootcert')) {
-      throw new Error(
-        `DATABASE_URL must not set "sslrootcert" in its query string (found "?sslrootcert=`
-        + `${parsed.searchParams.get('sslrootcert')}"). postgres.js reads that parameter directly `
-        + '(and "system" silently becomes verify-full) which would bypass this module\'s checks '
-        + 'entirely. Set DATABASE_SSL_ROOT_CERT instead and remove sslrootcert from DATABASE_URL.',
-      );
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('DATABASE_URL must not set')) throw err;
-    // Not a URL the WHATWG parser accepts (e.g. postgres.js also tolerates
-    // multi-host strings) — fall through and let postgres.js parse it itself.
+    parsed = new URL(url);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed?.searchParams.has('sslmode')) {
+    throw new Error(
+      `DATABASE_URL must not set "sslmode" in its query string (found "?sslmode=`
+      + `${parsed.searchParams.get('sslmode')}"). postgres.js reads that parameter directly and `
+      + 'it would bypass this module\'s checks entirely. Set DATABASE_SSL_MODE instead and '
+      + 'remove sslmode from DATABASE_URL.',
+    );
+  }
+  if (parsed?.searchParams.has('sslrootcert')) {
+    throw new Error(
+      `DATABASE_URL must not set "sslrootcert" in its query string (found "?sslrootcert=`
+      + `${parsed.searchParams.get('sslrootcert')}"). postgres.js reads that parameter directly `
+      + '(and "system" silently becomes verify-full) which would bypass this module\'s checks '
+      + 'entirely. Set DATABASE_SSL_ROOT_CERT instead and remove sslrootcert from DATABASE_URL.',
+    );
+  }
+  // Backstop for URL shapes the WHATWG parser above cannot handle at all
+  // (multi-host being the confirmed live case) — a plain, case-insensitive
+  // scan of the raw string for a `?` or `&`-delimited sslmode/sslrootcert
+  // parameter. Requiring that delimiter is deliberate: a percent-encoded
+  // password containing "%3Fsslmode%3D" does not match (it has no literal
+  // `?`/`&`), and a password containing a literal unescaped `&sslmode=` would
+  // already be a malformed connection string that breaks parsing elsewhere —
+  // so this is not a source of false positives on real credentials.
+  if (/[?&]sslmode=/i.test(url)) {
+    throw new Error(
+      'DATABASE_URL must not set "sslmode" in its query string. postgres.js reads that parameter '
+      + "directly — including from multi-host connection strings this module's own URL parser "
+      + 'cannot read — and it would bypass this module\'s checks entirely. Set DATABASE_SSL_MODE '
+      + 'instead and remove sslmode from DATABASE_URL.',
+    );
+  }
+  if (/[?&]sslrootcert=/i.test(url)) {
+    throw new Error(
+      'DATABASE_URL must not set "sslrootcert" in its query string. postgres.js reads that '
+      + 'parameter directly (and "system" silently becomes verify-full), including from multi-host '
+      + "connection strings this module's own URL parser cannot read, which would bypass this "
+      + 'module\'s checks entirely. Set DATABASE_SSL_ROOT_CERT instead and remove sslrootcert from '
+      + 'DATABASE_URL.',
+    );
   }
 
   const options: ConnectionOptions = { url };
