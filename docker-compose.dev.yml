@@ -6,6 +6,42 @@ services:
       POSTGRES_PASSWORD: announce
       POSTGRES_DB: announce
     ports: ["5499:5432"]
+  # TLS-enabled Postgres for test/db-tls.integration.test.ts. Optional and
+  # additive — it does not replace `db`, which the rest of the suite depends
+  # on. Requires infra/dev/certs (run infra/dev/gen-test-certs.sh first);
+  # `docker compose -f docker-compose.dev.yml up db-tls` fails loudly with a
+  # "no such file" mount error if that hasn't been run yet.
+  #
+  # Postgres refuses to start unless server.key is mode 0600 and owned by the
+  # user running the server (postgres, uid 70 in this image). A bind mount
+  # keeps the host's ownership, which is never uid 70, so server.key cannot be
+  # mounted directly at its final path. Instead the read-only cert dir is
+  # mounted at /certs-ro, and `command` (which replaces the image's own
+  # entrypoint and therefore runs as root, the container's default user)
+  # copies the cert pair into a writable path, chowns it to postgres, sets
+  # 600, then execs the real entrypoint — which drops privilege to postgres
+  # itself before starting the server.
+  db-tls:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: announce
+      POSTGRES_PASSWORD: announce
+      POSTGRES_DB: announce
+    ports: ["5500:5432"]
+    volumes:
+      - ./infra/dev/certs:/certs-ro:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /var/lib/postgresql/tls
+        cp /certs-ro/server.crt /certs-ro/server.key /var/lib/postgresql/tls/
+        chown postgres:postgres /var/lib/postgresql/tls/server.crt /var/lib/postgresql/tls/server.key
+        chmod 600 /var/lib/postgresql/tls/server.key
+        exec docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/var/lib/postgresql/tls/server.crt \
+          -c ssl_key_file=/var/lib/postgresql/tls/server.key
   signal:
     image: bbernhard/signal-cli-rest-api:latest
     environment:

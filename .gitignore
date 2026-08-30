@@ -6,3 +6,7 @@ next-env.d.ts
 
 # subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Generated TLS test fixtures (infra/dev/gen-test-certs.sh) — never commit
+# private keys, even throwaway ones for local test Postgres instances.
+infra/dev/certs/
