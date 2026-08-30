@@ -1,0 +1,9 @@
+# Rendered by Terraform (vm.tf) — do not edit by hand.
+# No tailnet on this deployment: hosts are addressed by PUBLIC IPv4, not a
+# MagicDNS name. Ansible (and any operator) must reach this IP over SSH from
+# a CIDR listed in var.operator_ssh_cidrs — see infra/terraform/vm.tf.
+all:
+  hosts:
+    ${announce_host_ip}:
+      ansible_user: root
+      data_mount: /mnt/HC_Volume_${data_volume_id}

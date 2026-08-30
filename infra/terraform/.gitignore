@@ -1,0 +1,16 @@
+# Local Terraform state (see versions.tf — state is local until this repo
+# graduates to the Foundation org and switches to the S3 backend). State can
+# contain sensitive values; never commit it.
+*.tfstate
+*.tfstate.*
+
+# Provider plugins / init cache.
+.terraform/
+.terraform.lock.hcl
+
+# Real variable values (tokens, real CIDRs). The .example file IS committed.
+*.tfvars
+!*.tfvars.example
+
+# Rendered Ansible inventory (contains the real public IP once applied).
+ansible/inventory.yml
