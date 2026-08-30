@@ -168,6 +168,30 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    logging:
+      # Caps Docker's json-file log driver, which is UNCAPPED by
+      # default (fix round 3). This matters more for `db` than any other
+      # service here: two separate scripts scan its full log on a
+      # recurring basis —
+      # infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2 does
+      # `docker compose logs db | wc -l` every minute, and
+      # infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 reads
+      # it after every SIGHUP. `--since` (used by the cert-reload script)
+      # limits what is PRINTED, not what Docker has to SCAN to get
+      # there — an uncapped log file means both of those get slower,
+      # unboundedly, over the life of a long-running deployment.
+      # 3 files x 10MB caps this service's log at ~30MB on disk while
+      # keeping enough history for the fail2ban mirror (which runs every
+      # minute) and cert-reload (which runs daily) to never miss a
+      # rotation boundary they can't already handle — both scripts
+      # already have explicit rotation-handling logic (see
+      # pg-auth-log.sh.j2's fix-round-1 comment), so this cap does not
+      # introduce a new failure mode, only bounds an existing unbounded
+      # one.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   signal:
     image: bbernhard/signal-cli-rest-api:latest

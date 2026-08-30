@@ -92,6 +92,19 @@ if [ "$total_lines" -lt "$last_seen" ]; then
   # ban trigger microseconds sooner, a miss makes it never trigger), but
   # it guarantees no failure between the last successful tick and now is
   # ever silently dropped.
+  #
+  # These two `docker compose logs db` calls are NOT the same bug class
+  # as `total_lines=` above, and do not need the same bracket (checked,
+  # fix round 3): both are BARE commands (writing straight to `>>"$DEST"`
+  # or through `tail`), not assignments. `set -e`'s "assignment absorbs
+  # the substitution's exit status" gap only applies to assignments —
+  # confirmed directly with `false | tail -n +1 >>out.txt` under
+  # `set -euo pipefail`, which correctly aborts the script, unlike the
+  # `OUT="$(false | wc -l)"` case that motivated the fix above. A
+  # failure here correctly kills the script via ordinary `pipefail`,
+  # which is the right outcome — the state file's `echo > "$STATE_FILE"`
+  # below never runs, so no checkpoint is recorded for a tick that never
+  # actually completed a real read.
   docker compose logs db 2>/dev/null >>"$DEST"
 elif [ "$total_lines" -gt "$last_seen" ]; then
   docker compose logs db 2>/dev/null | tail -n "+$((last_seen + 1))" >>"$DEST"

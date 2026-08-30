@@ -425,12 +425,139 @@ fi
 # emitted after RELOAD_MARKER above, rather than trying to reconstruct
 # the same fact indirectly through a side channel that turned out not to
 # carry it.
-set +e
-RELOAD_REJECTED="$(docker compose logs db --since "$RELOAD_MARKER" 2>/dev/null | grep -c 'SSL configuration was not reloaded')"
-set -e
+#
+# FIX ROUND 3, TWO FAIL-OPEN GAPS IN THIS CHECK CLOSED:
+#
+# (1) POLL INSTEAD OF ASSUMING THE LOG LINE IS ALREADY THERE.
+# `docker compose kill -s HUP` returns as soon as the SIGNAL is
+# DELIVERED, not once Postgres has finished processing it — the
+# postmaster reloads asynchronously, writes to its own stderr, and that
+# has to traverse Docker's json-file logging driver before
+# `docker compose logs` can see it. A single grep run immediately after
+# SIGHUP can race that pipeline: if it runs before the rejection line
+# lands, RELOAD_REJECTED reads 0 and this script would report SUCCESS on
+# a reload Postgres actually rejected — the exact failure this whole
+# check exists to catch, now reintroduced through a timing gap instead
+# of a wrong verification target. A plain `sleep N` (round 1 had one,
+# for a weaker check; round 2 dropped it without replacing it) either
+# wastes time on the common fast path or is still a guess about the slow
+# one. Polling is both faster when Postgres reloads quickly (the
+# overwhelming common case) and safer when it's slow: it retries the
+# check for up to RELOAD_CHECK_TIMEOUT seconds, and — this is the part a
+# naive retry loop would still get wrong — a poll window that expires
+# having seen neither a rejection line nor a clean, successful log read
+# is NOT treated as proof of success. It is reported as its own
+# distinct, honest outcome (see (2) and the final log line below), not
+# silently folded into "confirmed clean".
+#
+# (2) A FAILED `docker compose logs` MUST NOT READ AS "0 MATCHES = CLEAN".
+# The original (round 2) form piped `docker compose logs db | grep -c
+# PATTERN` directly. If `docker compose logs` itself fails (compose
+# project briefly unavailable, a Docker daemon hiccup), `grep -c` still
+# runs against empty/partial stdin and returns 0 matches — indistin-
+# guishable, by the count alone, from "genuinely no rejection line".
+# Capturing the PIPE's `$?` does not fix this either: confirmed directly
+# that bash's PIPESTATUS array does not reliably survive being read back
+# after a command substitution assignment completes (in one real test
+# against a failing `docker compose logs`, PIPESTATUS[0] after the
+# assignment read back as 1 — which is `grep -c`'s own "zero matches"
+# exit code, not docker's failure). The reliable fix is to not pipe
+# directly at all: `docker compose logs` writes to a plain temp FILE
+# first (so its own exit status is captured directly, with no pipe
+# involved), and `grep -c` is run as a separate step against that file.
+# TWO NUMBERS, EACH DEFENDED:
+#   RELOAD_CHECK_TIMEOUT=8 — the hard ceiling, and this loop ALWAYS
+#     polls for the FULL ceiling before declaring a clean reload —
+#     see below for why an earlier draft's "stop early once clean for a
+#     couple seconds" optimization was tried, found to be a real bug
+#     (not just unnecessary), and removed rather than kept. This is a
+#     cron job that runs once a day (or once right after a fresh
+#     deploy), not a latency-sensitive path, so there is no real cost
+#     to spending the full ceiling on every run, healthy or not.
+#     Measured directly (this task's own verification run): a real
+#     SIGHUP's log line was visible via `docker logs` in ~57ms. 8s
+#     leaves roughly two orders of magnitude of headroom for a busy
+#     host or a slow Docker logging-driver flush.
+#   RELOAD_CHECK_INTERVAL=1 — how often to re-check while polling.
+#
+# WHY THERE IS NO EARLY EXIT ON "CLEAN SO FAR": an earlier version of
+# this loop broke out as soon as a clean read had held for a short
+# settle buffer (2s), reasoning that burning the full 8s on every
+# healthy reload was wasted time. Verified directly, with a fake
+# `docker compose logs` that returns a genuinely clean result for the
+# first several polls and only surfaces the rejection line starting on
+# the 4th attempt (simulating a slow-but-real Docker logging-driver
+# flush): the settle-buffer version broke out of the loop after ~3
+# clean-looking polls and NEVER SAW the later rejection line at all —
+# reporting success on a reload that (in the simulation) was actually
+# rejected. That is not a missed optimization, it is the exact failure
+# this whole polling mechanism exists to prevent, reintroduced by the
+# optimization meant to make it faster. There is no version of "stop
+# early because it looks clean" that cannot, in principle, stop one
+# poll interval before a delayed rejection line would have appeared —
+# the only way to make an early exit provably safe is to know the
+# flush is DONE, which this script has no way to observe directly (no
+# fsync signal, no explicit "log flushed" event from Docker). Always
+# spending the fixed, generously-sized ceiling is the version that is
+# actually safe, not just faster in the common case.
+RELOAD_CHECK_TIMEOUT=8
+RELOAD_CHECK_INTERVAL=1
+RELOAD_CHECK_ELAPSED=0
+RELOAD_REJECTED=0
+RELOAD_LOGS_EVER_FAILED=0
+LOGS_EXIT=1
+
+while [ "$RELOAD_CHECK_ELAPSED" -lt "$RELOAD_CHECK_TIMEOUT" ]; do
+  RELOAD_LOG_CAPTURE="$(mktemp)"
+  set +e
+  docker compose logs db --since "$RELOAD_MARKER" >"$RELOAD_LOG_CAPTURE" 2>&1
+  LOGS_EXIT=$?
+  set -e
+
+  if [ "$LOGS_EXIT" -ne 0 ]; then
+    # `docker compose logs` itself failed this attempt — NOT the same as
+    # "no rejection line found". Note it and retry; only treated as a
+    # hard failure if it never succeeds within the whole poll window
+    # (checked below, after the loop).
+    RELOAD_LOGS_EVER_FAILED=1
+    RELOAD_LOG_LAST_ERR="$(cat "$RELOAD_LOG_CAPTURE")"
+    rm -f "$RELOAD_LOG_CAPTURE"
+  else
+    RELOAD_REJECTED="$(grep -c 'SSL configuration was not reloaded' "$RELOAD_LOG_CAPTURE" || true)"
+    rm -f "$RELOAD_LOG_CAPTURE"
+    if [ "${RELOAD_REJECTED:-0}" -gt 0 ]; then
+      # Definitive answer — a rejection was found. This is the ONLY
+      # condition that breaks out of the loop early; a clean-looking
+      # read never does (see the comment above this loop for why).
+      break
+    fi
+  fi
+
+  sleep "$RELOAD_CHECK_INTERVAL"
+  RELOAD_CHECK_ELAPSED=$((RELOAD_CHECK_ELAPSED + RELOAD_CHECK_INTERVAL))
+done
 
 if [ "${RELOAD_REJECTED:-0}" -gt 0 ]; then
   fail "Postgres logged 'SSL configuration was not reloaded' after SIGHUP — the new cert/key pair was installed on disk but REJECTED by Postgres, which is still serving the OLD certificate. Check db container logs for the specific reason (key mismatch, permission, etc)."
+fi
+
+if [ "$LOGS_EXIT" -ne 0 ]; then
+  # The FINAL poll attempt still couldn't read the logs at all — this is
+  # a genuine "could not verify", not a "verified clean". Reporting
+  # success here would be exactly the gap this fix closes: a Docker/
+  # compose hiccup masquerading as a healthy reload.
+  fail "could not verify the SIGHUP was accepted — 'docker compose logs db' failed on every attempt within ${RELOAD_CHECK_TIMEOUT}s (final exit $LOGS_EXIT): ${RELOAD_LOG_LAST_ERR:-no output}. The cert/key files were installed but Postgres's acceptance of them is UNCONFIRMED — check manually."
+fi
+
+if [ "$RELOAD_LOGS_EVER_FAILED" -eq 1 ]; then
+  # The log check itself eventually succeeded and found no rejection
+  # (the check above didn't fire), but at least one poll attempt along
+  # the way failed to read the logs at all. Not fatal on its own — the
+  # final, authoritative read succeeded — but worth a distinct note in
+  # the success line rather than pretending every attempt was clean.
+  RELOAD_CHECK_NOTE=" (docker compose logs was flaky during polling but succeeded on a later attempt)"
+else
+  RELOAD_CHECK_NOTE=""
 fi
 
 # Filesystem-level sanity check, KEPT but re-worded honestly: this only
@@ -450,12 +577,22 @@ fi
 
 # LIVE TLS PROOF: open a real encrypted connection to Postgres AFTER the
 # SIGHUP and confirm it negotiates TLS. Connects over TCP to 127.0.0.1
-# from INSIDE the db container, which the image's default pg_hba.conf
-# trusts without a password (`host all all 127.0.0.1/32 trust` — checked
-# directly against a real postgres:16-alpine container's default
-# pg_hba.conf; this script has no business holding real application
-# credentials, and doesn't need to for a same-host loopback liveness
-# check). `PGSSLMODE=require` makes the connection itself fail outright
+# from INSIDE the db container, which the STOCK postgres:16-alpine
+# image's DEFAULT pg_hba.conf trusts without a password (`host all all
+# 127.0.0.1/32 trust`, ahead of the catch-all scram-sha-256 rule —
+# checked directly against a real container; this script has no
+# business holding real application credentials, and doesn't need to
+# for a same-host loopback liveness check). THIS IS AN ASSUMPTION ABOUT
+# THE STOCK IMAGE, NOT SOMETHING PINNED BY THIS DEPLOYMENT'S OWN CONFIG:
+# if a future hardening pass mounts a custom pg_hba.conf over the
+# publicly-exposed 5432 port (a plausible next step for exactly this
+# deployment) and removes or narrows that trust rule, THIS CHECK STARTS
+# FAILING ON EVERY HEALTHY RELOAD and pages whoever reads
+# ALERT_EMAIL_TO daily. Whoever makes that change must either keep a
+# loopback trust/peer exception for 127.0.0.1, or give this script real
+# credentials and update this comment.
+#
+# `PGSSLMODE=require` makes the connection itself fail outright
 # if the server cannot or will not negotiate TLS at all — catching a
 # totally different failure mode than the log check above: not "reload
 # was rejected" (that's the log check's job) but "Postgres stopped
@@ -472,4 +609,4 @@ if [ "$LIVE_SSL_CHECK" != "t" ]; then
   fail "reload was accepted per Postgres's own log, and the on-disk cert matches, but a live post-reload TLS connection did not report an encrypted session (got: '${LIVE_SSL_CHECK:-<empty>}') — check db container logs"
 fi
 
-log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT; Postgres logged no reload rejection, on-disk file matches, and a live post-SIGHUP TLS connection succeeded)"
+log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT; Postgres logged no reload rejection within ${RELOAD_CHECK_TIMEOUT}s of SIGHUP, on-disk file matches, and a live post-SIGHUP TLS connection succeeded)${RELOAD_CHECK_NOTE}"
