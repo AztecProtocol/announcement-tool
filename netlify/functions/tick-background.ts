@@ -32,7 +32,6 @@
  *
  * https://docs.netlify.com/build/functions/background-functions/
  */
-import postgres from 'postgres';
 import { loadEnv } from '../../src/env.js';
 loadEnv();
 import { checkEnvironment } from '../../src/core/production-guard.js';
@@ -41,6 +40,7 @@ import { tickSecretMatches } from '../../src/core/tick-auth.js';
 import { runTick } from '../../src/worker/tick.js';
 import { buildAdapters } from '../../src/worker/adapters.js';
 import { senderFromEnv } from '../../src/adapters/esp.js';
+import { connect, dbEnvFromProcessEnv } from '../../src/db/connect.js';
 
 export default async (req: Request): Promise<Response | void> => {
   // Refuse with a 404 rather than 401/403: this endpoint is not meant to be
@@ -74,8 +74,7 @@ export default async (req: Request): Promise<Response | void> => {
     return;
   }
 
-  const url = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
-  const sql = postgres(url, { max: 4 });
+  const sql = connect(dbEnvFromProcessEnv(), 4);
 
   try {
     await assertPublishersConfigured(sql, guardEnv);

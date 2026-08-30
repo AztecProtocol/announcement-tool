@@ -1,4 +1,3 @@
-import postgres from 'postgres';
 import { loadEnv } from '../env.js';
 loadEnv();
 import { checkEnvironment } from '../core/production-guard.js';
@@ -6,6 +5,7 @@ import { assertPublishersConfigured } from '../core/identity.js';
 import { runTick } from './tick.js';
 import { buildAdapters } from './adapters.js';
 import { senderFromEnv } from '../adapters/esp.js';
+import { connect, dbEnvFromProcessEnv } from '../db/connect.js';
 
 // The worker does not bind a port, so HOSTNAME is not strictly its own
 // concern — but it shares the environment with the web app, and a wrong
@@ -33,8 +33,7 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-const url = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
-const sql = postgres(url, { max: 4 });
+const sql = connect(dbEnvFromProcessEnv(), 4);
 
 try {
   await assertPublishersConfigured(sql, guardEnv);
