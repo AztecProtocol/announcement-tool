@@ -546,7 +546,11 @@ if [ "$LOGS_EXIT" -ne 0 ]; then
   # a genuine "could not verify", not a "verified clean". Reporting
   # success here would be exactly the gap this fix closes: a Docker/
   # compose hiccup masquerading as a healthy reload.
-  fail "could not verify the SIGHUP was accepted — 'docker compose logs db' failed on every attempt within ${RELOAD_CHECK_TIMEOUT}s (final exit $LOGS_EXIT): ${RELOAD_LOG_LAST_ERR:-no output}. The cert/key files were installed but Postgres's acceptance of them is UNCONFIRMED — check manually."
+  # Wording matters here: this fires when the LAST attempt failed, which is
+  # not always "every attempt failed" — an intermittent daemon can succeed
+  # seven times and fail on the eighth. An alert that misstates what happened
+  # is an alert that gets distrusted, so say only what is true.
+  fail "could not verify the SIGHUP was accepted — the final 'docker compose logs db' attempt failed (exit $LOGS_EXIT) after polling for ${RELOAD_CHECK_ELAPSED}s of a ${RELOAD_CHECK_TIMEOUT}s window: ${RELOAD_LOG_LAST_ERR:-no output}. The cert/key files were installed but Postgres's acceptance of them is UNCONFIRMED — check manually."
 fi
 
 if [ "$RELOAD_LOGS_EVER_FAILED" -eq 1 ]; then
