@@ -213,6 +213,28 @@ the playbook finished, the `cert_reload` role's post-deploy run may have
 failed; check `/var/log/announce-cert-reload.log` on the host and the
 alert email (if `ALERT_EMAIL_TO` is set in `.env`).
 
+**Also close the client-side chain, before pointing Netlify at this VM.**
+The check above exercises Caddy on port 443 — a different protocol, and
+not what Netlify's functions connect to. What they actually connect to is
+Postgres on port 5432, verifying against `DATABASE_SSL_ROOT_CERT` (the
+ISRG Root X1 certificate — see step 7). Prove that chain closes, run from
+a machine OTHER than the VM itself (a local trust store or stale resolver
+on the VM would hide a real failure):
+
+```sh
+curl -o isrgrootx1.pem https://letsencrypt.org/certs/isrgrootx1.pem
+openssl s_client -connect announce.aztec.network:5432 -starttls postgres \
+  -CAfile isrgrootx1.pem -verify_return_error </dev/null
+```
+
+The only acceptable result is `Verify return code: 0 (ok)`. Anything else
+— in particular `UNABLE_TO_VERIFY_LEAF_SIGNATURE` — means the value that
+will go into `DATABASE_SSL_ROOT_CERT` is wrong (most likely the VM's own
+leaf certificate was pasted instead of ISRG Root X1) and Netlify's
+functions will fail to connect from the first deploy. Run this again after
+every renewal-adjacent change; it is the only check in this runbook that
+proves the client-side chain, not just that Caddy has a valid cert.
+
 ### 5. `alter role announce_app with login password ...`
 
 `migrations/014_app_role.sql` (already applied as part of the app's normal
@@ -279,7 +301,7 @@ in this repo:
 |----------|-------|-----|
 | `DATABASE_URL` | `postgres://announce_app:<password from step 5>@announce.aztec.network:5432/announce` | **Do not put `sslmode` or `sslrootcert` in this URL's query string.** `src/db/connect.ts` refuses to build a connection if either is present — they would otherwise let `postgres.js` bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below entirely, including via a `?sslmode=require` (encrypted-but-unverified) that every Postgres tutorial suggests. |
 | `DATABASE_SSL_MODE` | `verify-full` | The only accepted value once the database is reachable over the public internet. `require` is refused outright (see `connect.ts`'s comment for why: it stops a passive eavesdropper, not an active one). |
-| `DATABASE_SSL_ROOT_CERT` | **paste the CA certificate's PEM content directly** — the full text from `-----BEGIN CERTIFICATE-----` through `-----END CERTIFICATE-----` | Required whenever `DATABASE_SSL_MODE=verify-full` — without it, verification falls back to the system trust store, which is a false sense of security, not a lesser one. **On Netlify this must be the inline PEM value, not a path** — a serverless function has no filesystem to hold a CA file on. `resolveCaFile` (`src/db/connect.ts`) detects inline PEM by its `-----BEGIN CERTIFICATE-----` header and uses it directly; anything that doesn't start with that header is instead treated as a filesystem path and read from disk — that's the form used elsewhere on this host and by local dev, where a real file naturally exists (e.g. `infra/dev/certs/ca.crt` locally; the VM's own CA lives wherever Caddy's ACME storage keeps it). If Netlify's UI flattens the pasted value's newlines into literal `\n` characters, `resolveCaFile` detects and un-escapes that automatically — a known failure mode for certificates pasted through some web UIs, not something you need to work around by hand. |
+| `DATABASE_SSL_ROOT_CERT` | **the ISRG Root X1 certificate** — download it from `https://letsencrypt.org/certs/isrgrootx1.pem` and paste its PEM content directly, the full text from `-----BEGIN CERTIFICATE-----` through `-----END CERTIFICATE-----` | Required whenever `DATABASE_SSL_MODE=verify-full` — without it, verification falls back to the system trust store, which is a false sense of security, not a lesser one. **Do not paste the VM's own certificate, and do not paste anything out of Caddy's ACME storage.** Postgres serves the LEAF certificate for `announce.aztec.network` (the file `cert-reload.sh.j2` copies out of Caddy's storage into `server.crt`) — that is what the client receives on the wire, not what it verifies against. TLS verification checks the leaf against its ISSUER, and the issuer of a Let's Encrypt leaf is Let's Encrypt's own root, ISRG Root X1 — a fixed, long-lived certificate that does not change across renewals. Pasting the leaf (or `server.crt`, or anything Caddy stores) fails immediately with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`; the correct value is the root CA, obtained independently of this VM. **On Netlify this must be the inline PEM value, not a path** — a serverless function has no filesystem to hold a CA file on. `resolveCaFile` (`src/db/connect.ts`) detects inline PEM by its `-----BEGIN CERTIFICATE-----` header and uses it directly; anything that doesn't start with that header is instead treated as a filesystem path and read from disk — that's the form used elsewhere on this host and by local dev, where a real file naturally exists (e.g. `infra/dev/certs/ca.crt` locally; on the VM itself, this same ISRG Root X1 PEM, not anything derived from Caddy's storage). If Netlify's UI flattens the pasted value's newlines into literal `\n` characters, `resolveCaFile` detects and un-escapes that automatically — a known failure mode for certificates pasted through some web UIs, not something you need to work around by hand. |
 | `SIGNAL_API_BASE` | `https://announce.aztec.network` | Reaches the Signal sidecar through Caddy's reverse proxy, not directly — the sidecar itself is never published to the host. |
 | `SIGNAL_API_SECRET` | the same value as `ANNOUNCE_SIGNAL_SECRET` in `/opt/announce/.env` on the VM | Sent as the `x-announce-signal-secret` header (`src/core/signal-auth.ts`) and checked by `infra/Caddyfile.split`'s gate. The two values must match exactly, or every Signal request 403s. |
 | `ENABLED_CHANNELS` | e.g. `webhook,discord,telegram,email` — **must NOT include `signal`** | Netlify has no Signal account registered yet (step 0), and `src/core/production-guard.ts`'s startup guard refuses to boot the Netlify shape if `ENABLED_CHANNELS` is unset (which defaults to all five, including Signal) or explicitly names `signal`. Add `signal` here only after a real number is registered and `SIGNAL_API_SECRET`/`SIGNAL_API_BASE` are both live and verified. |
@@ -360,6 +382,19 @@ them:
   produces — not against an actual Caddy renewal event. DNS reachability,
   challenge completion, and Let's Encrypt's own rate limits are all
   unexercised.
+- **The client-side trust chain (Netlify → Postgres over `verify-full`)
+  has never been verified against a real Let's Encrypt certificate.** Every
+  local proof that TLS verification works used
+  `infra/dev/gen-test-certs.sh`, which generates a single self-signed
+  certificate and points both the server and `DATABASE_SSL_ROOT_CERT` at
+  it — the client's trusted CA and the server's own certificate are the
+  SAME file by construction. That is not the topology this deployment
+  actually has: with Let's Encrypt, the server presents a LEAF certificate
+  and the client must trust the ISSUER (ISRG Root X1), two different
+  certificates. Nothing in this branch's test suite or local proofs
+  exercises that two-certificate chain; the `openssl s_client -starttls
+  postgres` command in step 4 above is the first point this chain gets
+  checked at all, and it has not yet been run against a real deployment.
 - **The Hetzner firewall's real behaviour.** No Hetzner resources were ever
   created during development; the firewall rules in `vm.tf` were validated
   by `terraform plan`/`validate` against the real Hetzner API, not by
