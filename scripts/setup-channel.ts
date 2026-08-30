@@ -11,7 +11,6 @@
  * re-run that skipped the webhook-URL prompt silently saved an empty URL and
  * broke every delivery to that destination.
  */
-import postgres from 'postgres';
 import { loadEnv } from '../src/env.js';
 loadEnv();
 import { createInterface } from 'node:readline/promises';
@@ -19,8 +18,8 @@ import { stdin, stdout } from 'node:process';
 import { validatePrefix } from '../src/core/discord-mentions.js';
 import { enabledChannels, isChannelEnabled } from '../src/core/enabled-channels.js';
 import type { ChannelName } from '../src/worker/adapters.js';
+import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const rl = createInterface({ input: stdin, output: stdout });
 
 const ask = async (q: string, fallback = ''): Promise<string> => {
@@ -42,7 +41,7 @@ async function main(): Promise<void> {
   console.log('\nAdd or update a channel destination\n==================================\n');
 
   // Opened before the prompts so an existing row can prefill them.
-  const sql = postgres(DB, { max: 1 });
+  const sql = connect(dbEnvFromProcessEnv(), 1);
   try {
 
   const channel = await ask('Which channel? (discord / telegram / signal)', 'discord');
@@ -146,8 +145,16 @@ async function main(): Promise<void> {
     }
   }
 
+    // `config` is `Record<string, unknown>` because it is built up incrementally
+    // above from ask()/askList() results and conditionally-set fields — every
+    // value actually placed into it is a string, a string array, or an array of
+    // {name,id} objects, all genuinely JSON-safe, but that is not visible to the
+    // type checker from the declaration alone. sql.json's JSONValue type wants a
+    // narrower index signature than `unknown` gives it, so this cast documents
+    // "already checked to be JSON-safe by construction" rather than papering
+    // over a real type mismatch.
     await sql`insert into channel_settings (key, channel, config)
-      values (${key}, ${channel}, ${sql.json(config)})
+      values (${key}, ${channel}, ${sql.json(config as unknown as Record<string, string | string[] | { name: string; id: string }[]>)})
       on conflict (key) do update set channel = excluded.channel, config = excluded.config`;
     const [row] = await sql`select key, channel, config from channel_settings where key = ${key}`;
     console.log('\n✓ Saved this destination:\n');

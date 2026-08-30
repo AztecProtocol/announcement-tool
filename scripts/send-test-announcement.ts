@@ -8,7 +8,6 @@
  * Runs the real publish path (draft -> request -> four-eyes confirm -> fan-out),
  * then drains the delivery queue once and prints what each channel did.
  */
-import postgres from 'postgres';
 import { loadEnv } from '../src/env.js';
 loadEnv();
 import { createDraft, requestPublish, confirmPublish } from '../src/core/announcements.js';
@@ -16,8 +15,8 @@ import { runFanoutOnce } from '../src/worker/fanout.js';
 import { senderFromEnv } from '../src/adapters/esp.js';
 import { buildAdapters } from '../src/worker/adapters.js';
 import type { AnnouncementInput } from '../src/core/types.js';
+import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const flags = process.argv.slice(2);
 
 const deadline = new Date(Date.now() + 12 * 24 * 3600 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -48,7 +47,7 @@ const INFO: AnnouncementInput = {
 const input = flags.includes('--governance') ? GOVERNANCE : flags.includes('--info') ? INFO : UPGRADE;
 
 async function main(): Promise<void> {
-  const sql = postgres(DB, { max: 4 });
+  const sql = connect(dbEnvFromProcessEnv(), 4);
   const sender = senderFromEnv();
   const adapters = buildAdapters(sql, sender);
 

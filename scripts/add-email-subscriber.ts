@@ -7,12 +7,11 @@
  * Real subscribers confirm by clicking a link (that flow is Plan 3). This helper
  * marks the address verified directly so the email channel can be tested now.
  */
-import postgres from 'postgres';
 import { loadEnv } from '../src/env.js';
 loadEnv();
 import { createSubscription, verifySubscription } from '../src/core/subscriptions.js';
+import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const args = process.argv.slice(2);
 const email = args.find(a => a.includes('@'));
 const criticalsOnly = args.includes('--criticals-only');
@@ -24,7 +23,7 @@ if (!email) {
 
 const severities = criticalsOnly ? ['critical'] : ['critical', 'recommended', 'info'];
 
-const sql = postgres(DB, { max: 1 });
+const sql = connect(dbEnvFromProcessEnv(), 1);
 try {
   const existing = await sql`select id from subscriptions where channel = 'email' and endpoint = ${email}`;
   if (existing[0]) {

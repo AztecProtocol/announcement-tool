@@ -4,11 +4,10 @@
  *
  *   npm run seed:publisher -- you@example.com
  */
-import postgres from 'postgres';
 import { loadEnv } from '../src/env.js';
 loadEnv();
+import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const email = process.argv[2];
 
 if (!email) {
@@ -21,7 +20,7 @@ if (!email.includes('@')) {
   process.exit(1);
 }
 
-const sql = postgres(DB, { max: 1 });
+const sql = connect(dbEnvFromProcessEnv(), 1);
 try {
   await sql`insert into publishers (email) values (${email}) on conflict do nothing`;
   const rows = await sql`select email from publishers order by email`;

@@ -5,13 +5,12 @@
  *   npm run test:reset            # clear announcements/deliveries/alerts
  *   npm run test:reset -- --all   # also clear destinations and subscribers
  */
-import postgres from 'postgres';
 import { loadEnv } from '../src/env.js';
 loadEnv();
+import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
 const all = process.argv.includes('--all');
-const sql = postgres(DB, { max: 1 });
+const sql = connect(dbEnvFromProcessEnv(), 1);
 
 try {
   await sql`delete from delivery_ledger`;

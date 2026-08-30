@@ -70,6 +70,12 @@
     // entry above; without an explicit entry they typecheck only when they
     // happen to run, which has already bitten this project twice.
     "netlify",
+    // Operator scripts (scripts/*.ts) run directly against the
+    // internet-exposed VM Postgres — the same class of "never typechecked
+    // until it happens to run" gap as netlify above, but with worse
+    // consequences: an unnoticed type error here surfaces as a live
+    // operator mistake against production data, not a caught build failure.
+    "scripts",
     "next-env.d.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"

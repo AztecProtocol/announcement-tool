@@ -3,12 +3,11 @@
  *
  *   npm run test:status
  */
-import postgres from 'postgres';
 import { loadEnv } from '../src/env.js';
 loadEnv();
+import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const DB = process.env.DATABASE_URL ?? 'postgres://announce:announce@127.0.0.1:5499/announce';
-const sql = postgres(DB, { max: 1 });
+const sql = connect(dbEnvFromProcessEnv(), 1);
 
 try {
   const destinations = await sql`select key, channel, config from channel_settings order by channel, key`;
