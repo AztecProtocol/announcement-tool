@@ -162,8 +162,11 @@ signal-receive` or `docker compose up -d backup`).
 **Check:**
 
 ```sh
-test -f /opt/announce/.env && echo "present"
+stat -c "%a %n" /opt/announce/.env
 ```
+
+The output must be `600 /opt/announce/.env`. Any other mode means the
+secrets file is readable by other users on the host.
 
 ---
 
