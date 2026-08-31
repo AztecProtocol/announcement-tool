@@ -246,7 +246,7 @@ services:
   caddy:
     # Public-facing TLS terminator for this deployment. See
     # infra/Caddyfile.split for what it actually serves: it only obtains
-    # and renews the Let's Encrypt cert for announce.aztec.network, and
+    # and renews the Let's Encrypt cert for db.announce.aztec.network, and
     # reverse-proxies to signal:8080 behind a shared-secret gate. It does
     # not front the public site — Netlify serves that — and there is no
     # admin-404 guard here.

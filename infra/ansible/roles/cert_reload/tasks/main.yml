@@ -1,6 +1,6 @@
 # The certificate renewal hook — see the long comment in
 # templates/cert-reload.sh.j2 for the full reasoning. Short version:
-# Caddy renews announce.aztec.network's Let's Encrypt cert on its own,
+# Caddy renews db.announce.aztec.network's Let's Encrypt cert on its own,
 # silently, around day 60 of a ~90-day cert. Postgres reads
 # ssl_cert_file/ssl_key_file once at startup and does not watch them.
 # It keeps serving the old cert until something tells it to reload,
@@ -97,7 +97,7 @@
   changed_when: true
   # This deliberately does not swallow a non-zero exit. If Caddy has not
   # obtained a certificate yet at all (e.g. very first run, before DNS for
-  # announce.aztec.network points at this host), the script's own `fail`
+  # db.announce.aztec.network points at this host), the script's own `fail`
   # path is the correct, loud outcome — surfacing it here in Ansible's own
   # output, on the very run that caused it, beats discovering it only via
   # syslog after the fact.

@@ -31,7 +31,7 @@ all:
 #   mkdir -p /opt/announce
 #   cat > /opt/announce/.env <<'EOF'
 #   POSTGRES_PASSWORD=<openssl rand -base64 32>
-#   ANNOUNCE_DOMAIN=announce.aztec.network
+#   ANNOUNCE_DOMAIN=db.announce.aztec.network
 #   ANNOUNCE_SIGNAL_SECRET=<openssl rand -base64 32 — MUST match the
 #     Netlify app's SIGNAL_API_SECRET env var, see src/core/signal-auth.ts>
 #   SIGNAL_ACCOUNT=<the registered Signal number, e.g. +15551234567>

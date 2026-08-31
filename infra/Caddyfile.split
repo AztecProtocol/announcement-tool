@@ -1,5 +1,5 @@
 # Caddy config for the split deployment's Hetzner VM
-# (announce.aztec.network).
+# (db.announce.aztec.network).
 #
 # ---------------------------------------------------------------------------
 # This Caddy does not front the public site or the admin console.
@@ -14,7 +14,7 @@
 # only Postgres (fronted by nothing — clients speak the Postgres wire
 # protocol directly to the published 5432 port, not through Caddy) and
 # signal-cli-rest-api. So this Caddy instance has exactly one job: terminate
-# TLS for announce.aztec.network and reverse-proxy to the Signal sidecar,
+# TLS for db.announce.aztec.network and reverse-proxy to the Signal sidecar,
 # gated by a shared secret.
 #
 # Do not add a /admin block, a Tailscale-User-Login strip, or any of

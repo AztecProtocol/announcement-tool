@@ -88,7 +88,7 @@ credential reachable from the public internet.
 
 ## Deploying the split infrastructure — the runbook
 
-This is the procedure for standing up `announce.aztec.network`: one
+This is the procedure for standing up `db.announce.aztec.network`: one
 Hetzner VM (Postgres, the Signal sidecar, and Caddy), with the app and
 worker running on Netlify, not on this VM.
 
@@ -106,7 +106,7 @@ procedure that live outside Terraform.
 **Provisions:** Postgres (port 5432, publicly reachable — see the
 security note below), `signal-cli-rest-api` (not published to the host
 directly), and Caddy (port 443). Caddy obtains and renews the Let's
-Encrypt certificate for `announce.aztec.network` and reverse-proxies to
+Encrypt certificate for `db.announce.aztec.network` and reverse-proxies to
 the Signal sidecar behind a shared-secret gate. The VM also runs a
 nightly backup job. See `infra/docker-compose.split.yml`'s top comment
 and `infra/Caddyfile.split` for exactly what runs and why.
@@ -131,7 +131,7 @@ and `infra/Caddyfile.split` for exactly what runs and why.
 - A Hetzner Cloud API token for the project this VM will live in
   (`TF_VAR_hcloud_token`, or a git-ignored `terraform.tfvars` — see
   `terraform/terraform.tfvars.example`).
-- DNS control for `announce.aztec.network`. You will need to create an A
+- DNS control for `db.announce.aztec.network`. You will need to create an A
   record once the VM exists (step 3).
 - An SSH public key. This key's material must differ from any other
   Hetzner module's key in the same project (for example,
@@ -163,12 +163,26 @@ its shape if you want to look before applying.
 
 ### 3. The DNS A record, and confirming it has propagated
 
-Point an A record for `announce.aztec.network` at the
+**Why this VM has its own hostname.** The VM answers on
+`db.announce.aztec.network`. Netlify serves `announce.aztec.network`, the
+app's public site. These are two different hosts. One DNS A record can
+point at only one address, so the VM cannot share the public hostname.
+The A record you add in this step is for the VM only. It does not change
+where `announce.aztec.network` points, and it does not affect the public
+site.
+
+Warning: `ANNOUNCE_DOMAIN` in the VM's `/opt/announce/.env` must match
+the Terraform `domain` value exactly. Caddy requests its Let's Encrypt
+certificate for whatever `ANNOUNCE_DOMAIN` names. If the two values
+disagree, the ACME challenge fails, and the failure looks like a DNS
+problem rather than a configuration mismatch.
+
+Point an A record for `db.announce.aztec.network` at the
 `announce_server_ipv4` output from step 2, in whatever system controls
 the `aztec.network` nameservers.
 
 **This is a hard prerequisite for step 4, not an optional check.** Caddy
-performs its ACME challenge for `announce.aztec.network` on first run. If
+performs its ACME challenge for `db.announce.aztec.network` on first run. If
 the A record has not propagated yet, the challenge fails. That failure
 surfaces inside Ansible or Caddy, and it looks like something is broken
 in the playbook or the Terraform. It is not: the domain simply does not
@@ -177,14 +191,14 @@ resolve to this host yet.
 **Verify propagation before running Ansible:**
 
 ```sh
-dig +short announce.aztec.network
+dig +short db.announce.aztec.network
 ```
 
 Compare the output to the `announce_server_ipv4` value from step 2. Do
 not proceed to step 4 until they match. If you query a resolver that has
 cached the old answer, or no answer, either wait for the TTL to expire or
 query a public resolver directly, for example
-`dig +short announce.aztec.network @1.1.1.1`.
+`dig +short db.announce.aztec.network @1.1.1.1`.
 
 ### 4. Running Ansible
 
@@ -225,7 +239,7 @@ Expect `db`, `signal`, `caddy`, and `backup` all `Up`/`healthy`.
 succeeded.
 
 ```sh
-echo | openssl s_client -connect announce.aztec.network:443 2>/dev/null | openssl x509 -noout -issuer -dates
+echo | openssl s_client -connect db.announce.aztec.network:443 2>/dev/null | openssl x509 -noout -issuer -dates
 ```
 
 Expect a Let's Encrypt issuer and a `notAfter` roughly 90 days out. You
@@ -247,9 +261,9 @@ VM would hide a real failure.
 
 ```sh
 curl -o isrgrootx1.pem https://letsencrypt.org/certs/isrgrootx1.pem
-openssl s_client -connect announce.aztec.network:5432 -starttls postgres \
+openssl s_client -connect db.announce.aztec.network:5432 -starttls postgres \
   -CAfile isrgrootx1.pem -verify_return_error \
-  -verify_hostname announce.aztec.network </dev/null
+  -verify_hostname db.announce.aztec.network </dev/null
 ```
 
 The only acceptable result is `Verify return code: 0 (ok)`. Any other
@@ -312,7 +326,7 @@ psql "postgres://announce:<owner password>@127.0.0.1:5432/announce" \
 Warning: psql's default `sslmode` is `prefer`. It negotiates TLS
 opportunistically, but falls back to plaintext silently, and never
 verifies the server either way. Running this command against
-`announce.aztec.network` instead of `127.0.0.1` would send the freshly
+`db.announce.aztec.network` instead of `127.0.0.1` would send the freshly
 generated password across the internet as literal plaintext, inside the
 SQL statement itself. This is worse than a plaintext connection alone,
 because the text being sent is the secret you are trying to protect.
@@ -382,7 +396,7 @@ the migration. It is proof that the grant in `migrations/014_app_role.sql`
 is doing its job.
 
 Warning: running this command from off the VM, against
-`announce.aztec.network:5432`, would also send the owner credential
+`db.announce.aztec.network:5432`, would also send the owner credential
 across the internet with no TLS. (`scripts/seed-publisher.ts` now goes
 through `src/db/connect.ts`, so you would need to set
 `DATABASE_SSL_MODE=verify-full` and `DATABASE_SSL_ROOT_CERT` explicitly
@@ -406,10 +420,10 @@ environment configuration, not in this repo:
 
 | Variable | Value | Why |
 |----------|-------|-----|
-| `DATABASE_URL` | `postgres://announce_app:<password from step 5>@announce.aztec.network:5432/announce` | Do not put `sslmode` or `sslrootcert` in this URL's query string. `src/db/connect.ts` refuses to build a connection if either is present. Otherwise they could let `postgres.js` bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below entirely, including through a `?sslmode=require` value (encrypted but unverified) that every Postgres tutorial suggests. |
+| `DATABASE_URL` | `postgres://announce_app:<password from step 5>@db.announce.aztec.network:5432/announce` | Do not put `sslmode` or `sslrootcert` in this URL's query string. `src/db/connect.ts` refuses to build a connection if either is present. Otherwise they could let `postgres.js` bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below entirely, including through a `?sslmode=require` value (encrypted but unverified) that every Postgres tutorial suggests. |
 | `DATABASE_SSL_MODE` | `verify-full` | This is the only accepted value once the database is reachable over the public internet. `require` is refused outright. See `connect.ts`'s comment for why: `require` stops a passive eavesdropper, but not an active one. |
-| `DATABASE_SSL_ROOT_CERT` | The ISRG Root X1 certificate. Download it from `https://letsencrypt.org/certs/isrgrootx1.pem` and paste its PEM content directly, the full text from `-----BEGIN CERTIFICATE-----` through `-----END CERTIFICATE-----`. | Required whenever `DATABASE_SSL_MODE=verify-full`. Without it, verification falls back to the system trust store. That gives a false sense of security, not a lesser one. Warning: do not paste the VM's own certificate, and do not paste anything out of Caddy's ACME storage. Postgres serves the leaf certificate for `announce.aztec.network` (the file `cert-reload.sh.j2` copies out of Caddy's storage into `server.crt`). That is what the client receives on the wire, not what it verifies against. TLS verification checks the leaf against its issuer. The issuer of a Let's Encrypt leaf is Let's Encrypt's own root, ISRG Root X1. ISRG Root X1 is a fixed, long-lived certificate that does not change across renewals. Pasting the leaf, `server.crt`, or anything Caddy stores fails immediately with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. The correct value is the root CA, obtained independently of this VM. On Netlify this value must be the inline PEM value, not a path: a serverless function has no filesystem to hold a CA file on. `resolveCaFile` (`src/db/connect.ts`) detects inline PEM by its `-----BEGIN CERTIFICATE-----` header and uses it directly. Anything that does not start with that header is instead treated as a filesystem path and read from disk. That form is used elsewhere on this host and by local dev, where a real file naturally exists (for example, `infra/dev/certs/ca.crt` locally; on the VM itself, this same ISRG Root X1 PEM, not anything derived from Caddy's storage). If Netlify's UI flattens the pasted value's newlines into literal `\n` characters, `resolveCaFile` detects and un-escapes that automatically. This is a known failure mode for certificates pasted through some web UIs, not something you need to work around by hand. |
-| `SIGNAL_API_BASE` | `https://announce.aztec.network` | Reaches the Signal sidecar through Caddy's reverse proxy, not directly. The sidecar itself is never published to the host. |
+| `DATABASE_SSL_ROOT_CERT` | The ISRG Root X1 certificate. Download it from `https://letsencrypt.org/certs/isrgrootx1.pem` and paste its PEM content directly, the full text from `-----BEGIN CERTIFICATE-----` through `-----END CERTIFICATE-----`. | Required whenever `DATABASE_SSL_MODE=verify-full`. Without it, verification falls back to the system trust store. That gives a false sense of security, not a lesser one. Warning: do not paste the VM's own certificate, and do not paste anything out of Caddy's ACME storage. Postgres serves the leaf certificate for `db.announce.aztec.network` (the file `cert-reload.sh.j2` copies out of Caddy's storage into `server.crt`). That is what the client receives on the wire, not what it verifies against. TLS verification checks the leaf against its issuer. The issuer of a Let's Encrypt leaf is Let's Encrypt's own root, ISRG Root X1. ISRG Root X1 is a fixed, long-lived certificate that does not change across renewals. Pasting the leaf, `server.crt`, or anything Caddy stores fails immediately with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. The correct value is the root CA, obtained independently of this VM. On Netlify this value must be the inline PEM value, not a path: a serverless function has no filesystem to hold a CA file on. `resolveCaFile` (`src/db/connect.ts`) detects inline PEM by its `-----BEGIN CERTIFICATE-----` header and uses it directly. Anything that does not start with that header is instead treated as a filesystem path and read from disk. That form is used elsewhere on this host and by local dev, where a real file naturally exists (for example, `infra/dev/certs/ca.crt` locally; on the VM itself, this same ISRG Root X1 PEM, not anything derived from Caddy's storage). If Netlify's UI flattens the pasted value's newlines into literal `\n` characters, `resolveCaFile` detects and un-escapes that automatically. This is a known failure mode for certificates pasted through some web UIs, not something you need to work around by hand. |
+| `SIGNAL_API_BASE` | `https://db.announce.aztec.network` | Reaches the Signal sidecar through Caddy's reverse proxy, not directly. The sidecar itself is never published to the host. |
 | `SIGNAL_API_SECRET` | The same value as `ANNOUNCE_SIGNAL_SECRET` in `/opt/announce/.env` on the VM. | Sent as the `x-announce-signal-secret` header (`src/core/signal-auth.ts`) and checked by `infra/Caddyfile.split`'s gate. The two values must match exactly, or every Signal request returns 403. |
 | `ENABLED_CHANNELS` | For example `webhook,discord,telegram,email`. Must not include `signal`. | Netlify has no Signal account registered yet (step 0). `src/core/production-guard.ts`'s startup guard refuses to boot the Netlify shape if `ENABLED_CHANNELS` is unset (which defaults to all five, including Signal) or explicitly names `signal`. Add `signal` here only after a real number is registered, and after `SIGNAL_API_SECRET`/`SIGNAL_API_BASE` are both live and verified. |
 
@@ -479,7 +493,7 @@ real exercise on an actual apply, and you should know which before
 relying on them:
 
 - **Real ACME issuance, and the roughly day-60 renewal against Let's
-  Encrypt for `announce.aztec.network`.** The cert-reload hook's own
+  Encrypt for `db.announce.aztec.network`.** The cert-reload hook's own
   logic (detecting a changed certificate, copying it into Postgres, and
   confirming Postgres accepted the reload from its own log line, rather
   than assuming) was proven against a seeded stand-in certificate placed

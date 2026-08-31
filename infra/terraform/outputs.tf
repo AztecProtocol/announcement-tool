@@ -1,6 +1,6 @@
 output "announce_server_ipv4" {
   value       = hcloud_server.announce.ipv4_address
-  description = "Public IPv4 of the VM. Terraform does not manage DNS: before Caddy's ACME challenge for announce.aztec.network can complete, an A record for announce.aztec.network (var.domain) must be pointed at this address in whatever system controls the aztec.network nameservers."
+  description = "Public IPv4 of the VM. Terraform does not manage DNS: before Caddy's ACME challenge for db.announce.aztec.network can complete, an A record for db.announce.aztec.network (var.domain) must be pointed at this address in whatever system controls the aztec.network nameservers."
 }
 
 output "announce_server_name" {
@@ -15,5 +15,5 @@ output "announce_data_volume_id" {
 
 output "domain" {
   value       = var.domain
-  description = "The hostname this deployment is for (announce.aztec.network), echoed back for convenience when setting the DNS A record above."
+  description = "The hostname this deployment is for (db.announce.aztec.network), echoed back for convenience when setting the DNS A record above."
 }

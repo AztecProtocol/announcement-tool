@@ -20,4 +20,4 @@ operator_ssh_cidrs = ["203.0.113.4/32"]
 # server_type          = "cx22"
 # image                = "ubuntu-24.04"
 # data_volume_size_gb  = 20
-# domain               = "announce.aztec.network"
+# domain               = "db.announce.aztec.network"

@@ -48,6 +48,6 @@ variable "operator_ssh_cidrs" {
 
 variable "domain" {
   type        = string
-  default     = "announce.aztec.network"
+  default     = "db.announce.aztec.network"
   description = "Public hostname this VM will serve. Terraform does not manage DNS here (the aztec.network nameservers are outside this repo's control) — this value is only used to make the required manual DNS step explicit in outputs.tf. An A record for this name must point at the VM's public IPv4 (see the observability apply pattern) before Caddy's ACME challenge can complete."
 }

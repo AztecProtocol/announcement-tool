@@ -88,7 +88,7 @@ resource "hcloud_volume_attachment" "announce_data" {
 # No tailnet on this deployment (decided 2026-08-27). Public TCP ports are
 # the actual access path, not a firewall-blocked fallback behind a private
 # network. Every rule here is a deliberate choice, not a default left in place:
-#   443/tcp  — Caddy: ACME HTTP-01/TLS-ALPN challenge for announce.aztec.network,
+#   443/tcp  — Caddy: ACME HTTP-01/TLS-ALPN challenge for db.announce.aztec.network,
 #              and the reverse-proxy path to signal-cli-rest-api.
 #   5432/tcp — Postgres, reachable directly from Netlify's egress. Netlify
 #              functions egress from a shifting pool of 80+ IPs with no

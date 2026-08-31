@@ -12,7 +12,7 @@ looks like a Terraform bug (see below).
 
 ```
 1. terraform apply
-2. DNS: point an A record for announce.aztec.network at the IPv4
+2. DNS: point an A record for db.announce.aztec.network at the IPv4
    printed by the `announce_server_ipv4` output
 3. Ansible — installs Postgres, signal-cli-rest-api, Caddy
 4. alter role announce_app with login password '...'
@@ -36,7 +36,7 @@ actually been checked, not assumed.
 
 ### Why step 2 must happen before step 3
 
-Caddy performs the ACME challenge for `announce.aztec.network` as part of
+Caddy performs the ACME challenge for `db.announce.aztec.network` as part of
 its first run. If Ansible (step 3) runs before the DNS A record (step 2)
 has propagated, Caddy cannot complete the challenge, and certificate
 issuance fails. That failure surfaces as an Ansible or Caddy error, and

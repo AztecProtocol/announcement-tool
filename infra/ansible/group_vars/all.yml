@@ -3,4 +3,4 @@
 # through to Caddy, which obtains the cert this value is used to find) —
 # kept here as a single Ansible-side source of truth rather than trying to
 # read it back out of the host's own .env at playbook time.
-announce_domain: announce.aztec.network
+announce_domain: db.announce.aztec.network
