@@ -159,7 +159,9 @@ and `infra/Caddyfile.split` for exactly what runs and why.
   Hetzner module's key in the same project (for example,
   `aztec-observability`'s). Hetzner rejects a duplicate fingerprint
   outright, and the apply fails. This is no longer the day-2 access path
-  (see below) — it is break-glass only, for the Hetzner web console.
+  (see below). It is not an access path: the Hetzner console is a VNC
+  session at a login prompt and never presents this key, and root's password
+  is locked on a stock image. Recovery is Hetzner rescue mode.
 - The tailnet this VM joins (`var.tailnet`) and its ACL tag
   (`var.tailscale_acl_tag`, `tag:announce` by default). `tailnet` has no
   default: Terraform refuses to plan without it. The tag is a harder
@@ -546,8 +548,8 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    needs no inbound port of its own. This protects operator access only —
    it does nothing for 5432 or 443, which stay open to `0.0.0.0/0` and
    `::/0` as described above. The `ssh_public_key` variable still exists,
-   but only as break-glass for the Hetzner web console if the tailnet join
-   itself fails; it is not the normal access path.
+   but it is not an access path. If the tailnet join itself fails, recovery is
+   Hetzner rescue mode, not this key.
 
 None of these four layers is optional, and none compensates for a
 failure in another. Removing any one weakens the justification for the

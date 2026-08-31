@@ -40,7 +40,12 @@ provider "tailscale" {
   tailnet = var.tailnet
 }
 
+# Created only when var.ssh_public_key is set. The key is not an access path
+# (see the variable's description): day-2 access is `tailscale ssh`, and
+# recovery is Hetzner rescue mode. Making it optional means an operator is not
+# required to generate and de-duplicate key material for a path nothing uses.
 resource "hcloud_ssh_key" "announce" {
+  count      = var.ssh_public_key == null ? 0 : 1
   name       = "aztec-announce"
   public_key = var.ssh_public_key
 }
@@ -72,7 +77,7 @@ resource "hcloud_server" "announce" {
   server_type  = var.server_type
   image        = var.image
   location     = var.hcloud_location
-  ssh_keys     = [hcloud_ssh_key.announce.id]
+  ssh_keys     = hcloud_ssh_key.announce[*].id
   firewall_ids = [hcloud_firewall.announce.id]
 
   labels = {

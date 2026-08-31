@@ -18,14 +18,13 @@ answers on `db.announce.aztec.network`.
 
 ## Before you start
 
-You need all six of these. Collect them first.
+You need all five of these. Collect them first.
 
 | What | Notes |
 |---|---|
 | A Hetzner Cloud API token | For the project the VM will live in. |
 | AWS credentials for `aztec-foundation-terraform-state` | `eu-west-2`. Terraform stores its state there. `terraform init` fails without them. |
 | A Tailscale API key (or OAuth client secret) | `var.tailscale_api_key` (`TF_VAR_tailscale_api_key`). Authenticates Terraform to `api.tailscale.com` so it can mint this VM's tailnet auth key. Without it, `terraform apply` fails creating `tailscale_tailnet_key.announce` with an authentication error — see the troubleshooting table below, and do not confuse this with the separate ACL-tag failure covered there. |
-| An SSH public key | Must be different key material from any other Hetzner module in the same project. Hetzner rejects a duplicate fingerprint and the apply fails. Break-glass only — see "The tailnet ACL tag" warning below for the normal access path, and "If something failed" for what break-glass actually means on this VM. |
 | The tailnet this VM joins, and the `tag:announce` ACL tag | `var.tailnet` and `var.tailscale_acl_tag`. Warning: `tag:announce` must already exist in that tailnet's ACL before you apply — see below. |
 | DNS control for `aztec.network` | You add one A record in step 3. |
 

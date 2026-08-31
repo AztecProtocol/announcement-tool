@@ -22,7 +22,9 @@ tailscale_api_key = "REPLACE_ME"
 # project consistency with the aztec-observability sibling. Must be
 # DIFFERENT key material from any other module's ssh_public_key applied
 # into the same Hetzner project (Hetzner rejects duplicate fingerprints).
-ssh_public_key = "ssh-ed25519 AAAA... REPLACE_ME"
+# OPTIONAL, defaults to null. Leave it commented out unless you specifically
+# want a key on the box for a path you plan to open yourself.
+# ssh_public_key = "ssh-ed25519 AAAA... REPLACE_ME"
 
 # REQUIRED, no default. The tailnet this VM joins on first boot.
 tailnet = "example.com"
