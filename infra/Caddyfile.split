@@ -1,16 +1,16 @@
-# Caddy config for the SPLIT DEPLOYMENT's Hetzner VM
+# Caddy config for the split deployment's Hetzner VM
 # (announce.aztec.network).
 #
 # ---------------------------------------------------------------------------
-# THIS IS NOT `main`'s Caddyfile — do not copy that file's structure here.
+# This is not `main`'s Caddyfile. Do not copy that file's structure here.
 # ---------------------------------------------------------------------------
-# `main`'s Caddyfile fronts a VM that serves the PUBLIC SITE (Next.js, every
-# route from one process) and therefore needs the load-bearing /admin 404
-# block plus a Tailscale-User-Login header strip to keep the forgeable admin
-# identity header from ever reaching the app over the public internet.
+# `main`'s Caddyfile fronts a VM that serves the public site (Next.js, every
+# route from one process). It needs the /admin 404 block plus a
+# Tailscale-User-Login header strip to keep the forgeable admin identity
+# header from ever reaching the app over the public internet.
 #
-# NEITHER of those protections is needed on THIS VM, because THIS VM does not
-# serve the public site or the admin console at all — Netlify does (see
+# Neither protection is needed on this VM, because this VM does not serve
+# the public site or the admin console at all — Netlify does (see
 # feat/netlify-deployment / the split-infrastructure plan). This VM runs only
 # Postgres (fronted by nothing — clients speak the Postgres wire protocol
 # directly to the published 5432 port, not through Caddy) and
@@ -18,81 +18,81 @@
 # TLS for announce.aztec.network and reverse-proxy to the Signal sidecar,
 # gated by a shared secret.
 #
-# Do NOT add a /admin block, a Tailscale-User-Login strip, or any of
-# main's public-route list here — there is nothing on this host for them to
+# Do not add a /admin block, a Tailscale-User-Login strip, or any of
+# main's public-route list here. There is nothing on this host for them to
 # protect, and copying them in gives a false sense that this file guards
 # something it does not.
 # ---------------------------------------------------------------------------
-# ACME EMAIL — same reasoning as main's Caddyfile: deliberately not set via a
-# global `email` directive here (breaks the config outright, crash-loop, if
-# ACME_EMAIL is present-but-empty, which an unset value in compose's `.env`
-# produces). Caddy issues certs fine without an account email.
+# ACME email: same reasoning as main's Caddyfile. This is not set via a
+# global `email` directive here, because that breaks the config outright
+# (crash-loop) if ACME_EMAIL is present but empty, which an unset value in
+# compose's `.env` produces. Caddy issues certs fine without an account
+# email.
 # ---------------------------------------------------------------------------
-# THE SHARED-SECRET GATE
+# The shared-secret gate
 #
 # signal-cli-rest-api has no authentication of its own. On `main`'s
 # deployment that's fine — the sidecar is unreachable from outside the
-# private compose network. On THIS deployment it is reverse-proxied through
+# private compose network. On this deployment it is reverse-proxied through
 # a Caddy instance whose 443 is open to the public internet (no tailnet —
 # see infra/terraform/vm.tf), so something has to stand in for the network
 # isolation `main` relied on. That something is this header check.
 #
 # The header name and the client that sends it live in
 # src/core/signal-auth.ts (SIGNAL_AUTH_HEADER = 'x-announce-signal-secret',
-# built by signalAuthHeaders()) — a Caddyfile is plain text and cannot
+# built by signalAuthHeaders()). A Caddyfile is plain text and cannot
 # import that TS constant, so this is a manual cross-reference: if the
-# header name ever changes in signal-auth.ts, it MUST change here too, or
-# the gate silently stops matching and every request gets refused (fails
-# closed, so at least it's a loud break, not a leak — but still update both
-# together).
+# header name ever changes in signal-auth.ts, it must change here too, or
+# the gate silently stops matching and every request gets refused. That
+# fails closed, so it is a loud break rather than a leak, but still update
+# both together.
 #
-# FAIL-CLOSED REQUIREMENT: this must behave like tickSecretMatches() in
-# src/core/tick-auth.ts — an unset/empty configured secret refuses EVERY
+# Fail-closed requirement: this must behave like tickSecretMatches() in
+# src/core/tick-auth.ts — an unset or empty configured secret refuses every
 # request, never allows them. Caddy has no built-in "compare header to env
 # var" primitive, so the gate is a `header` matcher compared against
 # {$ANNOUNCE_SIGNAL_SECRET}.
 #
-# CAUGHT LOCALLY, NOT OBVIOUS FROM READING THE DOCS: a `header` matcher's
-# argument cannot be EMPTY — `header x-announce-signal-secret {$VAR}` with
-# $VAR expanding to an empty string produces a directive with a MISSING
-# value, and Caddy refuses to even START ("malformed header matcher:
+# Caught locally, not obvious from reading the docs: a `header` matcher's
+# argument cannot be empty. `header x-announce-signal-secret {$VAR}` with
+# $VAR expanding to an empty string produces a directive with a missing
+# value, and Caddy refuses to even start ("malformed header matcher:
 # expected both field and value"), crash-looping the container instead of
-# serving a clean refusal. That is a WORSE failure than "closed": the naive
+# serving a clean refusal. That is a worse failure than closed: the naive
 # `{$ANNOUNCE_SIGNAL_SECRET}` form (no default) looked correct on paper —
 # "no header matches an empty string, so every request 403s" — right up
 # until the config failed to load at all. Verified locally: the naive
 # form crash-looped Caddy the moment ANNOUNCE_SIGNAL_SECRET was empty.
 #
-# UPDATE: docker-compose.split.yml's `caddy.environment` now
-# sets `ANNOUNCE_SIGNAL_SECRET: ${ANNOUNCE_SIGNAL_SECRET:?...}` — a hard
-# guard, matching every other secret in that file (POSTGRES_PASSWORD,
+# Update: docker-compose.split.yml's `caddy.environment` now
+# sets `ANNOUNCE_SIGNAL_SECRET: ${ANNOUNCE_SIGNAL_SECRET:?...}`, a hard
+# guard matching every other secret in that file (POSTGRES_PASSWORD,
 # SIGNAL_ACCOUNT, BACKUP_ENCRYPTION_KEY, ANNOUNCE_DOMAIN). An unset
-# ANNOUNCE_SIGNAL_SECRET now refuses to bring `caddy` up AT ALL — compose
+# ANNOUNCE_SIGNAL_SECRET now refuses to bring `caddy` up at all. Compose
 # never even reaches the point of starting this container with an empty
-# value, so the "present-but-empty-string" case this section originally
+# value, so the present-but-empty-string case this section originally
 # spent most of its length defending against can no longer occur via the
 # normal `docker compose up` path this deployment actually uses.
 #
-# That REMOVES the sentinel's role as the thing standing between an
+# That removes the sentinel's role as the thing standing between an
 # operator's mistake and a working (if inert) proxy — an unset secret is
 # now a hard stack-up failure, not a silently-inert 403-everything proxy.
-# The `{$ANNOUNCE_SIGNAL_SECRET:...}` default below is kept anyway, as
-# genuine belt-and-braces for the one case `:?` in the compose file
-# cannot cover: this Caddyfile invoked directly (`caddy run` / `caddy
-# validate`) outside docker-compose.split.yml entirely, where the
-# variable may be truly unset rather than compose-guarded. In that
-# narrower case, Caddy's own `{$VAR:default}` placeholder DOES correctly
-# substitute (it only fails to help against a present-but-empty string,
-# which `:?` upstream now prevents from ever reaching here) — verified
-# directly: `caddy validate` against this exact file with
-# ANNOUNCE_SIGNAL_SECRET genuinely unset in the environment succeeds and
-# still fails every request closed via the sentinel mismatch, same as
-# before.
+# The `{$ANNOUNCE_SIGNAL_SECRET:...}` default below is kept anyway, for
+# the one case `:?` in the compose file cannot cover: this Caddyfile
+# invoked directly (`caddy run` / `caddy validate`) outside
+# docker-compose.split.yml entirely, where the variable may be truly
+# unset rather than compose-guarded. In that narrower case, Caddy's own
+# `{$VAR:default}` placeholder does correctly substitute (it only fails
+# to help against a present-but-empty string, which `:?` upstream now
+# prevents from ever reaching here) — verified directly: `caddy validate`
+# against this exact file with ANNOUNCE_SIGNAL_SECRET actually unset in
+# the environment succeeds and still fails every request closed via the
+# sentinel mismatch, same as before.
 #
-# The sentinel itself is unchanged: a long, structurally-implausible
+# The sentinel itself is unchanged: a long, structurally implausible
 # value no real client's header will ever equal (a real client either
 # sends the actual configured secret, or sends no header at all per
-# signalAuthHeaders() in src/core/signal-auth.ts) — so this still fails
+# signalAuthHeaders() in src/core/signal-auth.ts). So this still fails
 # closed exactly like tickSecretMatches()'s
 # `if (!configured || !presented) return false`, just expressed as
 # "compare against a value nothing will ever send" instead of "refuse to
@@ -102,7 +102,7 @@
 # @authorized matches only when the incoming header equals that value (or
 # the real secret, once set); handle @authorized reverse-proxies; the
 # catch-all handle{} below 403s everything else — missing header, wrong
-# value, AND the standalone-Caddyfile sentinel-mismatch case, all the
+# value, and the standalone-Caddyfile sentinel-mismatch case, all the
 # same path.
 #
 # The domain is supplied by the environment, never hardcoded. Compose passes
@@ -110,19 +110,18 @@
 # it automatically. Renewal and Postgres's cert-reload hook are handled
 # entirely outside this file — see infra/ansible/roles/cert_reload.
 # ---------------------------------------------------------------------------
-# ACME CHALLENGE TYPE. Nothing about this file previously
-# disabled HTTP-01, so if TLS-ALPN-01 ever failed for any reason, Caddy
-# would fall back to attempting an HTTP-01 challenge on port 80 — a port
-# infra/terraform/vm.tf's firewall does NOT open (only 443, 5432, and 22
-# are open there; 80 is closed, deliberately, per that file's comment).
-# The result would not be a clean, visible error: it would be Caddy
-# quietly retrying a challenge type that can never succeed on this host,
-# indistinguishable at a glance from ordinary ACME retry/backoff
-# behaviour. The `tls { issuer acme { disable_http_challenge } }` block
-# below makes the intent explicit: only TLS-ALPN-01 (needs just 443,
-# already open) is ever attempted, so a failure there surfaces as a real
-# ACME error immediately instead of a silent, unwinnable HTTP-01 retry
-# loop.
+# ACME challenge type: nothing about this file previously disabled HTTP-01,
+# so if TLS-ALPN-01 ever failed for any reason, Caddy would fall back to
+# attempting an HTTP-01 challenge on port 80. That port is not open in
+# infra/terraform/vm.tf's firewall (only 443, 5432, and 22 are open there;
+# 80 is closed on purpose, per that file's comment). The result would not
+# be a clean, visible error: Caddy would quietly retry a challenge type
+# that can never succeed on this host, indistinguishable at a glance from
+# ordinary ACME retry/backoff behaviour. The
+# `tls { issuer acme { disable_http_challenge } }` block below makes the
+# intent explicit: only TLS-ALPN-01 (needs just 443, already open) is ever
+# attempted, so a failure there surfaces as a real ACME error immediately
+# instead of a silent, unwinnable HTTP-01 retry loop.
 {$ANNOUNCE_DOMAIN} {
 	tls {
 		issuer acme {
@@ -139,9 +138,9 @@
 	}
 
 	# Catch-all: anything that didn't match @authorized above — missing
-	# header, wrong value, or ANNOUNCE_SIGNAL_SECRET unset. Kept LAST and
-	# unconditional so there is no path through this Caddyfile that reaches
-	# the sidecar without the check above.
+	# header, wrong value, or ANNOUNCE_SIGNAL_SECRET unset. It is kept last
+	# and unconditional so there is no path through this Caddyfile that
+	# reaches the sidecar without the check above.
 	handle {
 		error 403
 	}

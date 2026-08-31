@@ -2,8 +2,8 @@
 # Mirrors new lines from the `db` container's Docker-managed log into a
 # real host file, so fail2ban (which tails host files, not Docker's own
 # log driver) can see them. Run every minute by cron
-# (roles/fail2ban/tasks/main.yml) — NOT a long-running `docker compose
-# logs -f`, so a stuck/crashed instance of this script cannot silently
+# (roles/fail2ban/tasks/main.yml), not a long-running `docker compose
+# logs -f`, so a stuck or crashed instance of this script cannot silently
 # stop feeding fail2ban without cron's next tick trying again.
 #
 # `--since` is tracked via a small state file (the last line count seen)
@@ -13,27 +13,27 @@
 #
 # Two real bugs found in the original version:
 #
-# (a) EVENTS LOST ON JSON-FILE LOG ROTATION. Docker's json-file log
+# (a) Events lost on JSON-file log rotation. Docker's json-file log
 # driver rotates at 10MB by default. After a rotation, `docker compose
-# logs db | wc -l` legitimately returns FEWER total lines than the
+# logs db | wc -l` legitimately returns fewer total lines than the
 # previous run counted (the old log file's lines are gone). The
 # original script's guard (`if total_lines > last_seen`) then silently
-# SKIPPED the append entirely on that run AND reset state to the
-# smaller count — every failed-auth line that existed between the
-# rotation and this tick was dropped PERMANENTLY, never mirrored,
+# skipped the append entirely on that run and reset state to the
+# smaller count. Every failed-auth line that existed between the
+# rotation and this tick was dropped permanently: never mirrored,
 # never seen by fail2ban. This is exactly backwards: a sustained
 # brute-force (the traffic pattern this whole jail exists to catch) is
-# the traffic MOST LIKELY to trigger a 10MB rotation, so the jail goes
+# the traffic most likely to trigger a 10MB rotation, so the jail goes
 # blind precisely when it matters most. Fixed below by detecting the
 # rotation case (total < last_seen) explicitly and re-mirroring
 # everything available rather than silently skipping.
 #
-# (b) STATE FILE ON TMPFS. /var/run is tmpfs — wiped on every reboot.
-# The FIRST tick after any reboot would previously find no state file,
-# default last_seen to 0, and re-append the container's ENTIRE
+# (b) State file on tmpfs. /var/run is tmpfs, wiped on every reboot.
+# The first tick after any reboot would previously find no state file,
+# default last_seen to 0, and re-append the container's entire
 # lifetime log as if every historical failure had just happened.
 # fail2ban would then ban every IP that ever failed a login across the
-# container's whole history in one findtime window — a real,
+# container's whole history in one findtime window: a real,
 # self-inflicted denial of service against this tool's own legitimate
 # traffic (Netlify's egress pool, plausibly included). Fixed by moving
 # the state file to /var/lib, which persists across reboots.
@@ -45,22 +45,21 @@ DEST="/var/log/announce-postgres-auth.log"
 
 cd "$STACK_DIR"
 
-# NOTE: `total_lines="$(docker compose logs db | wc -l)"` looks
-# safe under `set -e` because `wc -l` itself always exits 0 — but
-# `pipefail` (set above) makes the ASSIGNMENT's exit status the
-# rightmost NON-ZERO exit code across every stage of the pipe, not just
-# the last stage's own code. Confirmed directly (same bug class found
-# and fixed in cert-reload.sh.j2's equivalent check, reproduced here before
-# assuming this file shared it): `OUT="$(false | wc -l)"` under
-# `set -euo pipefail` kills the script at that line, silently, before
-# reaching anything below it. If `docker compose logs db` ever fails
-# (container recreated mid-tick, compose project temporarily
-# unavailable), this script would previously die with no output at all
-# — a cron job dying silently once a minute is a much smaller blast
-# radius than cert-reload's once-a-day miss, but it is the identical
-# class of bug, so it gets the identical `set +e` / capture / `set -e`
-# bracket rather than being left as a latent copy of a bug already
-# proven real elsewhere in this codebase.
+# Note: `total_lines="$(docker compose logs db | wc -l)"` looks safe
+# under `set -e` because `wc -l` itself always exits 0. But `pipefail`
+# (set above) makes the assignment's exit status the rightmost non-zero
+# exit code across every stage of the pipe, not just the last stage's
+# own code. Confirmed directly (same bug class found and fixed in
+# cert-reload.sh.j2's equivalent check, reproduced here rather than
+# assumed to apply): `OUT="$(false | wc -l)"` under `set -euo pipefail`
+# kills the script at that line, silently, before reaching anything
+# below it. If `docker compose logs db` ever fails (container recreated
+# mid-tick, compose project temporarily unavailable), this script would
+# previously die with no output at all. A cron job dying silently once
+# a minute is a much smaller blast radius than cert-reload's once-a-day
+# miss, but it is the same class of bug, so it gets the same `set +e` /
+# capture / `set -e` bracket rather than being left as a latent copy of
+# a bug already proven real elsewhere in this codebase.
 set +e
 total_lines="$(docker compose logs db 2>/dev/null | wc -l)"
 LOGS_EXIT=$?
@@ -82,27 +81,27 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 if [ "$total_lines" -lt "$last_seen" ]; then
-  # Rotation (or a container recreate) — the log is shorter than what we
+  # Rotation (or a container recreate): the log is shorter than what we
   # tracked last time, so our line-offset bookkeeping from before is no
   # longer valid against the current log. Re-mirror everything Docker
-  # currently has rather than silently discarding the gap: this can
-  # duplicate a FEW lines already mirrored before the rotation (fail2ban's
+  # currently has rather than silently discarding the gap. This can
+  # duplicate a few lines already mirrored before the rotation (fail2ban's
   # own maxretry/findtime window tolerates a handful of duplicate matches
   # far better than it tolerates missing ones — a duplicate just makes a
   # ban trigger microseconds sooner, a miss makes it never trigger), but
   # it guarantees no failure between the last successful tick and now is
   # ever silently dropped.
   #
-  # These two `docker compose logs db` calls are NOT the same bug class
+  # These two `docker compose logs db` calls are not the same bug class
   # as `total_lines=` above, and do not need the same bracket (checked):
-  # both are BARE commands (writing straight to `>>"$DEST"`
+  # both are bare commands (writing straight to `>>"$DEST"`
   # or through `tail`), not assignments. `set -e`'s "assignment absorbs
   # the substitution's exit status" gap only applies to assignments —
   # confirmed directly with `false | tail -n +1 >>out.txt` under
   # `set -euo pipefail`, which correctly aborts the script, unlike the
   # `OUT="$(false | wc -l)"` case that motivated the fix above. A
   # failure here correctly kills the script via ordinary `pipefail`,
-  # which is the right outcome — the state file's `echo > "$STATE_FILE"`
+  # which is the right outcome: the state file's `echo > "$STATE_FILE"`
   # below never runs, so no checkpoint is recorded for a tick that never
   # actually completed a real read.
   docker compose logs db 2>/dev/null >>"$DEST"

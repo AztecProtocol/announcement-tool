@@ -25,9 +25,9 @@
 
 # db-data / caddy-data / caddy-config / signal-data / db-tls in
 # docker-compose.split.yml are compose-managed named volumes, which Docker
-# by default stores under /var/lib/docker/volumes — on the ROOT disk, not
+# by default stores under /var/lib/docker/volumes, on the root disk, not
 # this data volume, regardless of RequiresMountsFor. RequiresMountsFor only
-# protects against Docker STARTING early; it does not relocate where named
+# protects against Docker starting early; it does not relocate where named
 # volumes live. Point Docker's own data-root at the mounted volume instead,
 # so every named volume (and every other image/layer Docker stores) lives
 # on the durable, resizable, detachable disk rather than the ephemeral
@@ -42,25 +42,25 @@
       }
   notify: Restart docker
 
-# Ansible flushes handlers at END OF PLAY by
+# Ansible flushes handlers at the end of the play by
 # default, not between roles. Both this role's "Point Docker's data-root"
 # task above and the `docker` role's RequiresMountsFor drop-in (which ran
-# BEFORE this role, per site.yml's role order) notify the SAME "Restart
+# before this role, per site.yml's role order) notify the same "Restart
 # docker" handler. Without an explicit flush here, that handler would not
-# actually run until every role in site.yml had finished its own tasks —
-# meaning `compose_up`'s `docker compose up -d --build` would execute
-# against a Docker daemon STILL using its OLD data-root (the default,
+# actually run until every role in site.yml had finished its own tasks.
+# That means `compose_up`'s `docker compose up -d --build` would execute
+# against a Docker daemon still using its old data-root (the default,
 # root-disk one), creating every named volume (db-data included) there.
 # The handler would then restart Docker onto the new, mounted data-root
 # at the very end of the play, and the stack's actual data would be left
 # orphaned under /var/lib/docker/volumes on the root disk while
-# containers on the NEXT run start fresh against an empty volume set.
+# containers on the next run start fresh against an empty volume set.
 #
 # On a first deploy this is invisible — both locations start empty, so
-# nothing looks wrong. It surfaces on a SECOND run after any daemon.json
+# nothing looks wrong. It surfaces on a second run after any daemon.json
 # change (or a rescue-mode rebuild where data_mount differs from what an
-# earlier run used): Postgres comes up against an EMPTY DATABASE while
-# the real data sits unreachable on the root disk. This is exactly the
+# earlier run used): Postgres comes up against an empty database while
+# the real data sits unreachable on the root disk. This is the same
 # silent-data-loss failure RequiresMountsFor (roles/docker) exists to
 # prevent, reintroduced through a different door — a same-play handler
 # ordering gap instead of a systemd boot race.

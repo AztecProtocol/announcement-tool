@@ -10,7 +10,7 @@ output "announce_server_name" {
 
 output "announce_data_volume_id" {
   value       = hcloud_volume.announce_data.id
-  description = "Data volume id; hcloud automounts it at /mnt/HC_Volume_<id>. Resizing this volume later is `terraform apply` + a MANUAL `xfs_growfs` on the host."
+  description = "Data volume id; hcloud automounts it at /mnt/HC_Volume_<id>. Resizing this volume later is `terraform apply` plus a manual `xfs_growfs` on the host."
 }
 
 output "domain" {

@@ -9,7 +9,7 @@
 # (decided 2026-08-27, see variables.tf `operator_ssh_cidrs`).
 #
 # Sizing: see the `server_type` and `data_volume_size_gb` variable
-# descriptions in variables.tf for the justification. In short — this is a
+# descriptions in variables.tf for the justification. In short, this is a
 # low-volume application database plus two small containers, not a TSDB, so
 # it is sized far below the aztec-observability sibling module's ccx23/512GB.
 
@@ -50,8 +50,8 @@ resource "hcloud_server" "announce" {
 }
 
 # Postgres data (and nightly backup archives) live on a volume, not the root
-# disk: grows without downtime (terraform resize + a MANUAL `xfs_growfs` on
-# the host — Terraform cannot do the filesystem step), survives a server
+# disk: it grows without downtime (terraform resize + a manual `xfs_growfs`
+# on the host — Terraform cannot do the filesystem step), survives a server
 # rebuild, and is detachable if the stack ever moves hosts.
 #
 # Boot-ordering note for Ansible: Docker must not start Postgres's
@@ -67,13 +67,13 @@ resource "hcloud_volume" "announce_data" {
 
   lifecycle {
     # The database (announcements, subscribers, delivery ledger, audit log)
-    # is the expensive thing to lose. NOTE for whoever runs `terraform
-    # destroy`: this blocks the ENTIRE destroy plan, not just this resource
-    # — Terraform refuses all-or-nothing with "Resource has
+    # is the expensive thing to lose. Note for whoever runs `terraform
+    # destroy`: this blocks the entire destroy plan, not just this resource.
+    # Terraform refuses all-or-nothing with "Resource has
     # lifecycle.prevent_destroy set". To actually tear down (including the
     # server), either remove this block first, or run
     # `terraform state rm hcloud_volume.announce_data` to stop tracking the
-    # volume (it is NOT deleted by that command, only untracked), then
+    # volume (it is not deleted by that command, only untracked), then
     # destroy the rest.
     prevent_destroy = true
   }
@@ -85,9 +85,9 @@ resource "hcloud_volume_attachment" "announce_data" {
   automount = true
 }
 
-# No tailnet on this deployment (decided 2026-08-27) — public TCP ports are
+# No tailnet on this deployment (decided 2026-08-27). Public TCP ports are
 # the actual access path, not a firewall-blocked fallback behind a private
-# network. Every rule here is deliberate:
+# network. Every rule here is a deliberate choice, not a default left in place:
 #   443/tcp  — Caddy: ACME HTTP-01/TLS-ALPN challenge for announce.aztec.network,
 #              and the reverse-proxy path to signal-cli-rest-api.
 #   5432/tcp — Postgres, reachable directly from Netlify's egress. Netlify
@@ -96,7 +96,7 @@ resource "hcloud_volume_attachment" "announce_data" {
 #              workable alternative to opening the port; connection auth
 #              (TLS + the least-privilege announce_app role, see
 #              infra/README.md) is the real control.
-#   22/tcp   — restricted to var.operator_ssh_cidrs (REQUIRED, no default —
+#   22/tcp   — restricted to var.operator_ssh_cidrs (required, no default —
 #              see that variable). Without a tailnet there is no
 #              `tailscale ssh`; this is Ansible's and any operator's only
 #              way in, so it must be explicit, not 0.0.0.0/0.
@@ -134,7 +134,7 @@ resource "hcloud_firewall" "announce" {
 
 # Render the Ansible inventory from Terraform outputs, mirroring
 # aztec-observability's inventory.tf pattern — but addressed by the server's
-# PUBLIC IPv4, not a tailnet MagicDNS name, since there is no tailnet here.
+# public IPv4, not a tailnet MagicDNS name, since there is no tailnet here.
 resource "local_file" "ansible_inventory" {
   filename        = "${path.module}/ansible/inventory.yml"
   file_permission = "0644"

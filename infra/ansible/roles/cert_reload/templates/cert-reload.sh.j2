@@ -3,26 +3,26 @@
 # obtained from Let's Encrypt for announce.aztec.network. Run daily by
 # cron (roles/cert_reload/tasks/main.yml).
 #
-# THE PROBLEM THIS SOLVES
+# The problem this solves
 # ------------------------
-# Caddy renews certs automatically and SILENTLY, typically around day 60
-# of a Let's Encrypt cert's ~90-day life — no operator action, no
+# Caddy renews certs automatically and silently, typically around day 60
+# of a Let's Encrypt cert's ~90-day life. There is no operator action, no
 # deploy, no log anyone is watching by default. Postgres, unlike Caddy,
-# does NOT watch its cert files for changes: `ssl_cert_file` /
+# does not watch its cert files for changes: `ssl_cert_file` /
 # `ssl_key_file` (see docker-compose.split.yml's `db.command`) are read
 # once at startup and held until something explicitly tells Postgres to
-# reload — for TLS material specifically, that means SIGHUP
+# reload. For TLS material specifically, that means SIGHUP
 # (`pg_reload_conf()` reloads postgresql.conf settings including ssl_*,
 # same signal). Without this script, the sequence is:
 #   day 0:  deploy. Everything works. Everyone moves on.
 #   day 60: Caddy silently renews. Postgres does not notice.
-#   day 90: the OLD cert Postgres is still serving expires. Every client
-#           enforcing verify-full (src/db/connect.ts — ALL of them)
+#   day 90: the old cert Postgres is still serving expires. Every client
+#           enforcing verify-full (src/db/connect.ts — all of them)
 #           starts refusing the connection. Total outage.
 # This is the worst possible failure shape: a long, quiet gap between
 # cause (day 60) and effect (day 90), with nothing in between to notice.
 #
-# WHY A DAILY CRON, NOT inotifywait OR A CADDY PLUGIN
+# Why a daily cron, not inotifywait or a Caddy plugin
 # ----------------------------------------------------
 # See the comment in roles/cert_reload/tasks/main.yml for the full
 # comparison. Short version: this is deliberately the least clever
@@ -31,50 +31,50 @@
 # this file top to bottom and understand the entire mechanism in one
 # pass, rather than needing to first find a plugin.
 #
-# WHY THE CERT PATH IS LOCATED AT RUNTIME, NOT HARDCODED
+# Why the cert path is located at runtime, not hardcoded
 # ---------------------------------------------------------
 # Caddy stores obtained certificates under a path keyed by the ACME
 # issuer's own naming (e.g.
 # /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/<domain>/
-# on versions observed so far), and that scheme is NOT guaranteed stable
+# on versions observed so far), and that scheme is not guaranteed stable
 # across Caddy versions — a Caddy upgrade that changes its storage
 # layout would silently make a hardcoded path stop matching anything.
-# Instead this script SEARCHES inside the running `caddy` container for
+# Instead this script searches inside the running `caddy` container for
 # the domain's PEM files by name pattern, wherever they happen to live in
 # this version — via `docker compose exec`, not a host bind-mount path,
 # so it works regardless of whether caddy-data is a named volume or (in a
 # future change) a bind mount, and regardless of the volume's host-side
 # directory name.
 #
-# WHY EXACTLY-ONE-MATCH IS ENFORCED, NOT "FIRST MATCH WINS"
+# Why exactly one match is enforced, not "first match wins"
 # ----------------------------------------------------------------------
 # Caddy's /data retains certificates across issuer changes: it does not
 # delete an old issuer's cert directory just because a newer cert now
 # exists under a different one. Caddy's own stock fallback from Let's
 # Encrypt to ZeroSSL needs no configuration and can happen on its own
 # during an LE outage or rate-limit; an LE-staging detour during
-# first-deploy debugging produces the same situation. Either way, TWO
+# first-deploy debugging produces the same situation. Either way, two
 # cert/key pairs for the same domain can legitimately coexist under
 # /data at once, in two different issuer directories.
 #
-# The original version of this script located the cert and key with TWO
-# SEPARATE `find | head -n1` invocations, run as two independent
+# The original version of this script located the cert and key with two
+# separate `find | head -n1` invocations, run as two independent
 # `docker compose exec` processes. `find`'s traversal order is not
 # guaranteed, and nothing ties the two invocations to the same
-# directory — so it was possible to pick up one issuer's .crt and a
-# DIFFERENT issuer's .key. That mismatched pair does not error anywhere
+# directory, so it was possible to pick up one issuer's .crt and a
+# different issuer's .key. That mismatched pair does not error anywhere
 # obvious: `docker compose cp` succeeds (it's just bytes), chown/chmod
 # succeed, `mv` succeeds, SIGHUP is delivered successfully. Postgres logs
-# an internal TLS material error to its own log and CONTINUES SERVING
-# THE OLD CERT — this script would still log "reloaded" and exit 0. That
+# an internal TLS material error to its own log and continues serving
+# the old cert — this script would still log "reloaded" and exit 0. That
 # silently reintroduces the exact day-90 failure this whole role exists
 # to prevent, just moved earlier and hidden behind a green exit code.
 #
-# The fix: locate ONLY the cert, then derive the key path from the SAME
+# The fix: locate only the cert, then derive the key path from the same
 # match by string substitution (Caddy always writes both files side by
 # side in one issuer directory, as <domain>.crt and <domain>.key), so
 # they cannot diverge. If more than one <domain>.crt exists anywhere
-# under /data (the ambiguous-issuer case above), REFUSE to guess — fail
+# under /data (the ambiguous-issuer case above), refuse to guess: fail
 # loudly and name every candidate, so a human resolves which issuer
 # directory is current rather than this script flipping a coin.
 set -euo pipefail
@@ -96,14 +96,14 @@ log() {
 # alert_human(): a cron job's stderr being mailed to root
 # is not a real alerting path on a host with no local MTA (the honest
 # risk the original comment named and then left unaddressed). Reuses
-# THIS deployment's existing alert path instead of inventing a second
+# this deployment's existing alert path instead of inventing a second
 # one: scripts/backup.sh sends failure email via ALERT_EMAIL_TO/
 # ESP_PROVIDER (Brevo in production), and those same vars are already
-# required in {{ stack_dir }}/.env for the backup service to run at all
-# — so a cert-reload failure reaches the same inbox a backup failure
+# required in {{ stack_dir }}/.env for the backup service to run at all,
+# so a cert-reload failure reaches the same inbox a backup failure
 # does, with zero new configuration surface.
 #
-# This runs ON THE HOST (bash + curl are both present on the Ubuntu
+# This runs on the host (bash + curl are both present on the Ubuntu
 # image Terraform provisions — see infra/terraform/cloud-init), not
 # inside a container, so it sources scripts/send-alert.sh directly from
 # the synced repo tree rather than shelling out through
@@ -117,7 +117,7 @@ alert_human() {
   # Best-effort: alerting must never be why this script's own failure
   # path fails, or why this function itself throws under `set -e` (a
   # missing send-alert.sh, or an .env that doesn't parse, must not crash
-  # the fail() path that is trying to report a DIFFERENT problem).
+  # the fail() path that is trying to report a different problem).
   (
     set +e
     if [ ! -f "$ALERT_LIB" ]; then
@@ -129,18 +129,18 @@ alert_human() {
       exit 0
     fi
     # .env is a flat KEY=VALUE file (same format docker compose itself
-    # reads) — export every line so ALERT_EMAIL_TO/ESP_PROVIDER/etc.
+    # reads). Export every line so ALERT_EMAIL_TO/ESP_PROVIDER/etc.
     # reach send_alert() exactly as it reads them via ${VAR:-}.
     #
-    # NOTE: sourcing .env like this treats it as literal
-    # SHELL syntax, not compose's own KEY=VALUE parser. Verified directly
+    # Note: sourcing .env like this treats it as literal
+    # shell syntax, not compose's own KEY=VALUE parser. Verified directly
     # what an unquoted value containing a space actually does:
     #   EMAIL_FROM_NAME=Aztec Announcements
-    # bash parses "Aztec" as the value and "Announcements" as a SEPARATE
-    # COMMAND on the same line, producing
-    # ".env: line N: Announcements: command not found" on stderr AND
-    # silently truncating the variable to just "Aztec" — not merely
-    # cosmetic stderr noise, the value itself is wrong from that point
+    # bash parses "Aztec" as the value and "Announcements" as a separate
+    # command on the same line, producing
+    # ".env: line N: Announcements: command not found" on stderr and
+    # silently truncating the variable to just "Aztec". This is not merely
+    # cosmetic stderr noise: the value itself is wrong from that point
     # on. The overall alert-sending flow survives (this subshell has
     # `set +e`, so the stray "command not found" doesn't abort it), but
     # whichever variable got mangled carries a wrong or truncated value
@@ -159,10 +159,11 @@ alert_human() {
 }
 
 fail() {
-  # FAILURE MUST BE LOUD. Logged to syslog + a dedicated file (visible
-  # even without a working local MTA), AND pushed through the same
-  # alert path a backup failure uses, so day-60 renewal is not something
-  # that depends on an operator happening to read this host's cron mail.
+  # A failure here must be loud. It is logged to syslog plus a dedicated
+  # file (visible even without a working local MTA), and pushed through
+  # the same alert path a backup failure uses, so day-60 renewal is not
+  # something that depends on an operator happening to read this host's
+  # cron mail.
   log "FAILED: $1"
   alert_human "$1"
   exit 1
@@ -170,11 +171,11 @@ fail() {
 
 cd "$STACK_DIR" || fail "cannot cd to $STACK_DIR"
 
-# Sanity check BEFORE searching: if the caddy container isn't even
-# running, "no cert found" would be the wrong diagnosis —
-# distinguish "container down" from "no cert issued yet / layout
+# Sanity check before searching: if the caddy container isn't even
+# running, "no cert found" would be the wrong diagnosis. This
+# distinguishes "container down" from "no cert issued yet / layout
 # changed", which the original version conflated by redirecting exec's
-# own connection failure to /dev/null same as a genuine empty search).
+# own connection failure to /dev/null same as a genuine empty search.
 if ! docker compose exec -T caddy true 2>/tmp/announce-cert-reload-caddy-check.err; then
   ERR="$(cat /tmp/announce-cert-reload-caddy-check.err 2>/dev/null || true)"
   rm -f /tmp/announce-cert-reload-caddy-check.err
@@ -183,37 +184,37 @@ fi
 rm -f /tmp/announce-cert-reload-caddy-check.err
 
 # --- Locate Caddy's current cert for $DOMAIN, at runtime, exactly once ----
-# A real bug, independently REPRODUCED here before trusting it (see below):
+# A real bug, independently reproduced here before trusting it (see below):
 # every command substitution in this script whose failure must be
-# HANDLED, not propagated as a script-killing error, is wrapped in an
-# explicit `set +e` / capture `$?` / `set -e` bracket — the SAME pattern
+# handled, not propagated as a script-killing error, is wrapped in an
+# explicit `set +e` / capture `$?` / `set -e` bracket — the same pattern
 # scripts/backup.sh already uses correctly (see its restore-verify step).
 #
-# THE BUG THIS REPLACES: a prior version of this comment claimed
+# The bug this replaces: a prior version of this comment claimed
 # `set -euo pipefail` does not abort on a failed command inside a
-# `$(...)` substitution used as a plain assignment. That claim is FALSE
+# `$(...)` substitution used as a plain assignment. That claim is false,
 # and was corrected only after independently reproducing the failure,
 # not by taking the report on faith:
 #   $ bash -c 'set -euo pipefail; OUT="$(false | tr -d "\r")"; EXIT=$?; echo "REACHED $EXIT"'
 #   (prints nothing; script exits 1)
-# An assignment IS the "simple command" `set -e` acts on, and its exit
-# status IS the command substitution's — `pipefail` additionally makes
-# that status the *rightmost non-zero* exit code across every stage of
+# An assignment is the "simple command" `set -e` acts on, and its exit
+# status is the command substitution's. `pipefail` additionally makes
+# that status the rightmost non-zero exit code across every stage of
 # the piped command, not just the last stage's own exit code (confirmed
 # separately: `OUT="$(false | wc -l)"` also kills the script under
-# `pipefail`, even though `wc -l` itself always exits 0). So the ORIGINAL
+# `pipefail`, even though `wc -l` itself always exits 0). So the original
 # form here — assign, then read `$?` on the next line — never reached
 # that next line on a real failure: the script died silently at the
 # assignment itself. For a script run once a day by cron with no
-# interactive terminal watching it, "died silently" means NO log line,
-# NO syslog entry, NO alert — the exact failure class this whole role
+# interactive terminal watching it, "died silently" means no log line,
+# no syslog entry, no alert: the exact failure class this whole role
 # exists to prevent, reintroduced into the tool built to prevent it.
 #
 # Every substitution below whose command can legitimately fail as part
 # of normal operation (container down, file not found yet, empty
 # result) is now bracketed with `set +e` immediately before it and
 # `set -e` immediately after, with the real `$?` captured while `set -e`
-# is off — so a failure there falls through to this script's OWN
+# is off, so a failure there falls through to this script's own
 # explicit handling instead of dying invisibly.
 set +e
 FIND_ERR="$(mktemp)"
@@ -231,12 +232,11 @@ MATCH_COUNT="$(printf '%s\n' "$MATCHES" | grep -c . || true)"
 
 if [ "$MATCH_COUNT" -eq 0 ]; then
   # Caddy stores the leaf cert as "<domain>.crt" across every Caddy 2.x
-  # storage layout observed to date (only the DIRECTORY it sits in has
+  # storage layout observed to date (only the directory it sits in has
   # moved between versions), so this pattern is the stable part. If it
   # ever stops matching — a future Caddy major version renaming the leaf
-  # files themselves — this is exactly the kind of thing that must fail
-  # loudly rather than silently do nothing, which is why this is a
-  # `fail`, not a skip.
+  # files themselves — this must fail loudly rather than silently do
+  # nothing, which is why this is a `fail`, not a skip.
   fail "no ${DOMAIN}.crt found inside the caddy container's /data (search itself succeeded, just found nothing) — Caddy may not have obtained a certificate yet, or its storage layout changed"
 elif [ "$MATCH_COUNT" -gt 1 ]; then
   # Multiple issuer directories can coexist (Let's Encrypt + ZeroSSL
@@ -247,7 +247,7 @@ elif [ "$MATCH_COUNT" -gt 1 ]; then
 fi
 
 CADDY_CERT_PATH="$MATCHES"
-# Derived from the SAME match, not a second independent search — this is
+# Derived from the same match, not a second independent search. This is
 # the actual fix for Critical 1. Caddy always writes the cert and key
 # side by side in one issuer directory as <domain>.crt / <domain>.key, so
 # a plain suffix swap on the path we already verified is unique cannot
@@ -263,7 +263,7 @@ fi
 # asking its own container to read its own copy. This also sidesteps
 # uid/permission differences between the host and either container.
 #
-# `sha256sum` over the raw PEM bytes, NOT `openssl x509 -fingerprint`:
+# `sha256sum` over the raw PEM bytes, not `openssl x509 -fingerprint`:
 # neither caddy:2-alpine nor postgres:16-alpine ships openssl by default
 # (confirmed locally — both `docker exec ... openssl version` fail with
 # "not found"), and this script must not depend on `apk add` succeeding
@@ -280,11 +280,11 @@ fi
 
 # `test -f ... && sha256sum ...` legitimately exits non-zero when there
 # is no current cert yet (the very first run, before this script or the
-# Ansible bootstrap task has ever populated db-tls/) — that is NOT an
+# Ansible bootstrap task has ever populated db-tls/). That is not an
 # error, it is the expected "nothing to compare against" state that
 # falls through to CURRENT_FINGERPRINT="" and proceeds to install the
-# first real cert below. Bracketed the same way so that expected case
-# does not also kill the script.
+# first real cert below. It is bracketed the same way so that expected
+# case does not also kill the script.
 set +e
 CURRENT_FINGERPRINT="$(docker compose exec -T db sh -c "test -f /var/lib/postgresql/tls/server.crt && sha256sum /var/lib/postgresql/tls/server.crt" 2>/dev/null | awk '{print $1}')"
 set -e
@@ -299,39 +299,38 @@ fi
 # host as an intermediary, without needing either container's storage to
 # be host-addressable.
 #
-# ATOMIC SWAP: the original version copied cert and key as
+# Atomic swap: the original version copied cert and key as
 # two separate `mv`s directly onto the live filenames, leaving a real
-# window where the new cert sat next to the OLD key on disk. Nothing in
-# THIS script reads files in that window, but Postgres's own
+# window where the new cert sat next to the old key on disk. Nothing in
+# this script reads files in that window, but Postgres's own
 # `pg_reload_conf()` (triggerable by any superuser session, not only this
 # script) or an unrelated container restart could land exactly there and
 # pick up a mismatched pair.
 #
-# FIRST ATTEMPT AT THE FIX (superseded, keeping the note as a real
-# lesson): staging into a NEW DIRECTORY and swapping a symlink at
+# First attempt at the fix (superseded, keeping the note as a real
+# lesson): staging into a new directory and swapping a symlink at
 # `/var/lib/postgresql/tls` with one atomic `ln -sfn`. That does not
 # work here: `/var/lib/postgresql/tls` is not a free path this container
-# owns — it is the db-tls NAMED VOLUME's actual mountpoint (see
+# owns. It is the db-tls named volume's actual mountpoint (see
 # docker-compose.split.yml's `db.volumes`), a real directory Docker
 # itself has mounted there. A container cannot replace its own mounted
 # volume's mountpoint with a symlink; `mv -Tf` onto it fails with
 # "Is a directory". Confirmed by running it locally: the compose
-# stack's `db` container returned
-# exactly that error.
+# stack's `db` container returned exactly that error.
 #
-# THE ACTUAL FIX: swap cert and key as two files WITHIN the same
+# The actual fix: swap cert and key as two files within the same
 # directory (`tls/`) rather than swapping the directory itself. A `mv`
-# of a file to a new name within the same directory, same filesystem, IS
+# of a file to a new name within the same directory, same filesystem, is
 # still atomic per POSIX rename(2) — the atomicity guarantee never
 # required swapping a whole directory, only that each individual
 # filename's rename is instantaneous from a reader's point of view. The
 # residual gap this leaves — cert renamed into place microseconds before
 # key is — is not a problem in practice: nothing reads these files
 # between the two `mv`s in this script (SIGHUP, which is what makes
-# Postgres actually re-read them, is sent only after BOTH complete,
+# Postgres actually re-read them, is sent only after both complete,
 # below), and an external `pg_reload_conf()` landing in that
 # sub-millisecond window is a risk this script cannot fully close
-# without changing Postgres's own mount topology — accepted as
+# without changing Postgres's own mount topology. This is accepted as
 # residual risk, documented here rather than silently assumed away.
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -363,19 +362,19 @@ if ! docker compose exec -T db sh -c '
   fail "could not install the new cert/key inside the db container — old cert is still in place, Postgres NOT reloaded"
 fi
 
-# SIGHUP reloads postgresql.conf, including ssl_cert_file/ssl_key_file —
-# this is the actual fix for the silent-expiry problem this whole script
+# SIGHUP reloads postgresql.conf, including ssl_cert_file/ssl_key_file.
+# This is the actual fix for the silent-expiry problem this whole script
 # exists to prevent. `docker compose kill -s HUP` (not `docker kill`,
 # which would need the raw container name) keeps this script portable
 # across compose project-name changes.
 #
-# A timestamp is captured immediately BEFORE sending SIGHUP, in the
+# A timestamp is captured immediately before sending SIGHUP, in the
 # RFC3339 format `docker compose logs --since` actually requires (its
 # own --help text shows an RFC3339 example; confirmed directly that the
 # more natural-looking "YYYY-MM-DD HH:MM:SS" space-separated form is
-# silently REJECTED — "invalid value for since: parsing time ... extra
-# text" — so this format is not a stylistic choice) — used below to
-# scope the post-SIGHUP log check to only lines emitted by THIS reload,
+# silently rejected — "invalid value for since: parsing time ... extra
+# text" — so this format is not a stylistic choice). It is used below to
+# scope the post-SIGHUP log check to only lines emitted by this reload,
 # not a coincidentally similar line from hours earlier.
 RELOAD_MARKER="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
@@ -383,17 +382,17 @@ if ! docker compose kill -s HUP db; then
   fail "new cert/key installed but SIGHUP to the db container failed — Postgres may still be serving the OLD cert until its next restart"
 fi
 
-# VERIFY: this replaces an earlier version of this
-# section that only re-hashed the FILE at
+# Verify: this replaces an earlier version of this
+# section that only re-hashed the file at
 # /var/lib/postgresql/tls/server.crt after SIGHUP. That is the exact
 # file this script itself had just written two steps earlier: matching
-# only proves the `mv` landed on disk, which was never in question — it
-# proves NOTHING about whether Postgres actually accepted the new
+# only proves the `mv` landed on disk, which was never in question. It
+# proves nothing about whether Postgres actually accepted the new
 # material. Confirmed directly, reproducing the precise failure Critical
 # 1 named: with a deliberately mismatched key installed, SIGHUP produces
 #   LOG:  could not load private key file ".../server.key": key values mismatch
 #   LOG:  SSL configuration was not reloaded
-# and Postgres SILENTLY KEEPS SERVING THE OLD CERTIFICATE — confirmed by
+# and Postgres silently keeps serving the old certificate — confirmed by
 # opening a real TLS connection afterward and reading back the exact
 # same old certificate on the wire. The on-disk file (the new, mismatched
 # one) still hashed correctly the whole time. An earlier version of this
@@ -402,40 +401,41 @@ fi
 # reads Postgres's own log line for whether the reload was accepted or
 # rejected, as described below.
 #
-# A NAIVE FIX ATTEMPT, TRIED AND REJECTED: querying
+# A naive fix attempt, tried and rejected: querying
 # `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()` over a fresh
-# TLS connection. This does NOT distinguish a successful reload from a
-# REJECTED one either — confirmed directly: after a rejected reload
-# (Postgres still running the OLD SSL context because the new one failed
+# TLS connection. This does not distinguish a successful reload from a
+# rejected one either — confirmed directly: after a rejected reload
+# (Postgres still running the old SSL context because the new one failed
 # to load), a brand new client connection still negotiates TLS
-# successfully against that OLD context, so `ssl` reads `t` regardless.
+# successfully against that old context, so `ssl` reads `t` regardless.
 # Proving "a TLS handshake happened" is not the same as proving "the
-# handshake used the NEW material" — `pg_stat_ssl` doesn't expose which
-# certificate was actually presented, and `db`'s image has no openssl to
-# read it off the wire directly (see the sha256sum comment above for why
-# that dependency is deliberately avoided).
+# handshake used the new material" — `pg_stat_ssl` reports cipher, bits,
+# and protocol version, but does not expose which certificate was
+# actually presented, and `db`'s image has no openssl to read it off the
+# wire directly (see the sha256sum comment above for why that dependency
+# is deliberately avoided).
 #
-# THE ACTUAL FIX: Postgres itself already tells us, unambiguously, in
+# The actual fix: Postgres itself already tells us, unambiguously, in
 # its own log, whether a SIGHUP-triggered SSL reload was accepted or
-# rejected — "SSL configuration was not reloaded" is emitted ONLY on the
-# rejection path (confirmed: a genuinely successful reload with a
-# DIFFERENT valid cert/key pair produces no such line at all, and the
+# rejected. "SSL configuration was not reloaded" is emitted only on the
+# rejection path (confirmed: an actually successful reload with a
+# different valid cert/key pair produces no such line at all, and the
 # newly-served certificate does change). So this checks Postgres's own
 # authoritative statement about itself, scoped to only the log lines
 # emitted after RELOAD_MARKER above, rather than trying to reconstruct
 # the same fact indirectly through a side channel that turned out not to
 # carry it.
 #
-# TWO FAIL-OPEN GAPS IN THIS CHECK CLOSED:
+# Two fail-open gaps in this check, closed:
 #
-# (1) POLL INSTEAD OF ASSUMING THE LOG LINE IS ALREADY THERE.
-# `docker compose kill -s HUP` returns as soon as the SIGNAL is
-# DELIVERED, not once Postgres has finished processing it — the
+# (1) Poll instead of assuming the log line is already there.
+# `docker compose kill -s HUP` returns as soon as the signal is
+# delivered, not once Postgres has finished processing it. The
 # postmaster reloads asynchronously, writes to its own stderr, and that
 # has to traverse Docker's json-file logging driver before
 # `docker compose logs` can see it. A single grep run immediately after
 # SIGHUP can race that pipeline: if it runs before the rejection line
-# lands, RELOAD_REJECTED reads 0 and this script would report SUCCESS on
+# lands, RELOAD_REJECTED reads 0 and this script would report success on
 # a reload Postgres actually rejected — the exact failure this whole
 # check exists to catch, now reintroduced through a timing gap instead
 # of a wrong verification target. A plain `sleep N` either wastes time
@@ -445,29 +445,29 @@ fi
 # check for up to RELOAD_CHECK_TIMEOUT seconds, and — this is the part a
 # naive retry loop would still get wrong — a poll window that expires
 # having seen neither a rejection line nor a clean, successful log read
-# is NOT treated as proof of success. It is reported as its own
+# is not treated as proof of success. It is reported as its own
 # distinct, honest outcome (see (2) and the final log line below), not
 # silently folded into "confirmed clean".
 #
-# (2) A FAILED `docker compose logs` MUST NOT READ AS "0 MATCHES = CLEAN".
+# (2) A failed `docker compose logs` must not read as "0 matches = clean".
 # An earlier form piped `docker compose logs db | grep -c
 # PATTERN` directly. If `docker compose logs` itself fails (compose
 # project briefly unavailable, a Docker daemon hiccup), `grep -c` still
-# runs against empty/partial stdin and returns 0 matches — indistin-
-# guishable, by the count alone, from "genuinely no rejection line".
-# Capturing the PIPE's `$?` does not fix this either: confirmed directly
+# runs against empty/partial stdin and returns 0 matches, indistin-
+# guishable, by the count alone, from "no rejection line at all".
+# Capturing the pipe's `$?` does not fix this either: confirmed directly
 # that bash's PIPESTATUS array does not reliably survive being read back
 # after a command substitution assignment completes (in one real test
 # against a failing `docker compose logs`, PIPESTATUS[0] after the
-# assignment read back as 1 — which is `grep -c`'s own "zero matches"
+# assignment read back as 1, which is `grep -c`'s own "zero matches"
 # exit code, not docker's failure). The reliable fix is to not pipe
-# directly at all: `docker compose logs` writes to a plain temp FILE
+# directly at all: `docker compose logs` writes to a plain temp file
 # first (so its own exit status is captured directly, with no pipe
 # involved), and `grep -c` is run as a separate step against that file.
-# TWO NUMBERS, EACH DEFENDED:
-#   RELOAD_CHECK_TIMEOUT=8 — the hard ceiling, and this loop ALWAYS
-#     polls for the FULL ceiling before declaring a clean reload —
-#     see below for why an earlier draft's "stop early once clean for a
+# Two numbers, each defended:
+#   RELOAD_CHECK_TIMEOUT=8 — the hard ceiling, and this loop always
+#     polls for the full ceiling before declaring a clean reload.
+#     See below for why an earlier draft's "stop early once clean for a
 #     couple seconds" optimization was tried, found to be a real bug
 #     (not just unnecessary), and removed rather than kept. This is a
 #     cron job that runs once a day (or once right after a fresh
@@ -479,25 +479,25 @@ fi
 #     host or a slow Docker logging-driver flush.
 #   RELOAD_CHECK_INTERVAL=1 — how often to re-check while polling.
 #
-# WHY THERE IS NO EARLY EXIT ON "CLEAN SO FAR": an earlier version of
+# Why there is no early exit on "clean so far": an earlier version of
 # this loop broke out as soon as a clean read had held for a short
 # settle buffer (2s), reasoning that burning the full 8s on every
 # healthy reload was wasted time. Verified directly, with a fake
-# `docker compose logs` that returns a genuinely clean result for the
+# `docker compose logs` that returns an actually clean result for the
 # first several polls and only surfaces the rejection line starting on
 # the 4th attempt (simulating a slow-but-real Docker logging-driver
 # flush): the settle-buffer version broke out of the loop after ~3
-# clean-looking polls and NEVER SAW the later rejection line at all —
+# clean-looking polls and never saw the later rejection line at all,
 # reporting success on a reload that (in the simulation) was actually
 # rejected. That is not a missed optimization, it is the exact failure
 # this whole polling mechanism exists to prevent, reintroduced by the
 # optimization meant to make it faster. There is no version of "stop
 # early because it looks clean" that cannot, in principle, stop one
-# poll interval before a delayed rejection line would have appeared —
-# the only way to make an early exit provably safe is to know the
-# flush is DONE, which this script has no way to observe directly (no
+# poll interval before a delayed rejection line would have appeared.
+# The only way to make an early exit provably safe is to know the
+# flush is done, which this script has no way to observe directly (no
 # fsync signal, no explicit "log flushed" event from Docker). Always
-# spending the fixed, generously-sized ceiling is the version that is
+# spending the fixed, generously sized ceiling is the version that is
 # actually safe, not just faster in the common case.
 RELOAD_CHECK_TIMEOUT=8
 RELOAD_CHECK_INTERVAL=1
@@ -514,7 +514,7 @@ while [ "$RELOAD_CHECK_ELAPSED" -lt "$RELOAD_CHECK_TIMEOUT" ]; do
   set -e
 
   if [ "$LOGS_EXIT" -ne 0 ]; then
-    # `docker compose logs` itself failed this attempt — NOT the same as
+    # `docker compose logs` itself failed this attempt — not the same as
     # "no rejection line found". Note it and retry; only treated as a
     # hard failure if it never succeeds within the whole poll window
     # (checked below, after the loop).
@@ -525,7 +525,7 @@ while [ "$RELOAD_CHECK_ELAPSED" -lt "$RELOAD_CHECK_TIMEOUT" ]; do
     RELOAD_REJECTED="$(grep -c 'SSL configuration was not reloaded' "$RELOAD_LOG_CAPTURE" || true)"
     rm -f "$RELOAD_LOG_CAPTURE"
     if [ "${RELOAD_REJECTED:-0}" -gt 0 ]; then
-      # Definitive answer — a rejection was found. This is the ONLY
+      # Definitive answer — a rejection was found. This is the only
       # condition that breaks out of the loop early; a clean-looking
       # read never does (see the comment above this loop for why).
       break
@@ -541,11 +541,11 @@ if [ "${RELOAD_REJECTED:-0}" -gt 0 ]; then
 fi
 
 if [ "$LOGS_EXIT" -ne 0 ]; then
-  # The FINAL poll attempt still couldn't read the logs at all — this is
+  # The final poll attempt still couldn't read the logs at all — this is
   # a genuine "could not verify", not a "verified clean". Reporting
-  # success here would be exactly the gap this fix closes: a Docker/
+  # success here would reopen the gap this fix closes: a Docker/
   # compose hiccup masquerading as a healthy reload.
-  # Wording matters here: this fires when the LAST attempt failed, which is
+  # Wording matters here: this fires when the last attempt failed, which is
   # not always "every attempt failed" — an intermittent daemon can succeed
   # seven times and fail on the eighth. An alert that misstates what happened
   # is an alert that gets distrusted, so say only what is true.
@@ -563,10 +563,10 @@ else
   RELOAD_CHECK_NOTE=""
 fi
 
-# Filesystem-level sanity check, KEPT but re-worded honestly: this only
+# Filesystem-level sanity check, kept but reworded honestly: this only
 # confirms the `mv` in the previous step actually landed the bytes we
-# intended — it is NOT proof Postgres picked them up (that is what the
-# log check above is for). Real value here is catching a completely
+# intended. It is not proof Postgres picked them up (that is what the
+# log check above is for). Its real value is catching a completely
 # different failure class: a `docker compose exec` that silently
 # targeted the wrong container, or a race with something else writing to
 # this path.
@@ -578,19 +578,19 @@ if [ "$POST_MOVE_FINGERPRINT" != "$NEW_FINGERPRINT" ]; then
   fail "installed the new cert but the on-disk file at /var/lib/postgresql/tls/server.crt does not match what was copied: expected $NEW_FINGERPRINT, found ${POST_MOVE_FINGERPRINT:-<unreadable>}"
 fi
 
-# LIVE TLS PROOF: open a real encrypted connection to Postgres AFTER the
-# SIGHUP and confirm it negotiates TLS. Connects over TCP to 127.0.0.1
-# from INSIDE the db container, which the STOCK postgres:16-alpine
-# image's DEFAULT pg_hba.conf trusts without a password (`host all all
+# Live TLS proof: open a real encrypted connection to Postgres after the
+# SIGHUP and confirm it negotiates TLS. It connects over TCP to 127.0.0.1
+# from inside the db container, which the stock postgres:16-alpine
+# image's default pg_hba.conf trusts without a password (`host all all
 # 127.0.0.1/32 trust`, ahead of the catch-all scram-sha-256 rule —
 # checked directly against a real container; this script has no
 # business holding real application credentials, and doesn't need to
-# for a same-host loopback liveness check). THIS IS AN ASSUMPTION ABOUT
-# THE STOCK IMAGE, NOT SOMETHING PINNED BY THIS DEPLOYMENT'S OWN CONFIG:
+# for a same-host loopback liveness check). This is an assumption about
+# the stock image, not something pinned by this deployment's own config:
 # if a future hardening pass mounts a custom pg_hba.conf over the
-# publicly-exposed 5432 port (a plausible next step for exactly this
-# deployment) and removes or narrows that trust rule, THIS CHECK STARTS
-# FAILING ON EVERY HEALTHY RELOAD and pages whoever reads
+# publicly exposed 5432 port (a plausible next step for exactly this
+# deployment) and removes or narrows that trust rule, this check starts
+# failing on every healthy reload and pages whoever reads
 # ALERT_EMAIL_TO daily. Whoever makes that change must either keep a
 # loopback trust/peer exception for 127.0.0.1, or give this script real
 # credentials and update this comment.
@@ -602,7 +602,7 @@ fi
 # accepting encrypted connections entirely" (e.g. crashed the SSL
 # listener some other way the log grep above wouldn't have wording for).
 # The two checks are deliberately not redundant: the log check proves
-# the reload was ACCEPTED; this one proves the server, having accepted
+# the reload was accepted; this one proves the server, having accepted
 # it, is actually still working.
 set +e
 LIVE_SSL_CHECK="$(docker compose exec -T db sh -c "PGSSLMODE=require psql 'host=127.0.0.1 port=5432 user=announce dbname=announce' -Atc \"SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()\"" 2>/dev/null)"

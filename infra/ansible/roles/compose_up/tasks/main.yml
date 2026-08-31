@@ -3,7 +3,7 @@
 # are never generated or templated by this role — see the note on
 # `stack_dir + /.env` below.
 #
-# WHY THE WHOLE REPO, NOT JUST THE COMPOSE FILE + CADDYFILE: `backup` and
+# Why the whole repo, not just the compose file and Caddyfile: `backup` and
 # `signal-receive` in docker-compose.split.yml build their images from
 # `context: ..` (relative to infra/, i.e. the repo root) plus
 # Dockerfile.backup / Dockerfile.signal-receive / scripts/backup.sh /
@@ -42,7 +42,7 @@
   notify: Restart caddy
 
 # Symlinks, not copies: docker-compose.split.yml's `backup`/`signal-receive`
-# build contexts are `..` RELATIVE TO WHERE THE COMPOSE FILE LIVES, so the
+# build contexts are `..` relative to where the compose file lives, so the
 # compose file must actually live inside the synced repo tree (at
 # {{ stack_dir }}/repo/infra/), not be copied out to {{ stack_dir }}/ where
 # `..` would resolve to {{ stack_dir }}/ itself and find no Dockerfiles.
@@ -63,7 +63,7 @@
     state: link
     force: true
 
-# THE .env FILE IS DELIBERATELY NOT MANAGED HERE.
+# The .env file is deliberately not managed here.
 #
 # POSTGRES_PASSWORD, BACKUP_ENCRYPTION_KEY, BACKUP_S3_*, ANNOUNCE_DOMAIN,
 # ANNOUNCE_SIGNAL_SECRET, SIGNAL_ACCOUNT, and ALERT_EMAIL_TO are all real
@@ -98,12 +98,12 @@
       not generate or template secrets — see the comment above this task.
   when: not compose_up_env_file.stat.exists
 
-# Defense-in-depth: `volume_mount`'s task list
+# Defense in depth: `volume_mount`'s task list
 # ends with an explicit `meta: flush_handlers` specifically so Docker is
 # already restarted onto {{ data_mount }}/docker before this role ever
 # creates a container or volume — see the long comment there for the
 # failure this prevents (every named volume silently created on the root
-# disk instead of the durable mounted volume). This task does not TRUST
+# disk instead of the durable mounted volume). This task does not trust
 # that ordering silently; it verifies it, so a future edit that removes
 # or reorders that flush fails loudly here instead of orphaning data
 # again through the same door.
@@ -130,10 +130,10 @@
 # `db` comment for the full reasoning this replaced). That put a package-
 # mirror network call in the critical boot path of the one service every
 # other part of this deployment depends on; a slow or unreachable mirror
-# at exactly the wrong moment would crash-loop Postgres before it ever
+# at the wrong moment would crash-loop Postgres before it ever
 # started, for a reason unrelated to Postgres or this deployment. Moved
 # here instead: openssl is present on any stock Ubuntu image (no install
-# needed), and this task runs BEFORE `db` ever starts for the first time,
+# needed), and this task runs before `db` ever starts for the first time,
 # so by the time `docker compose up` runs below, a valid (if throwaway)
 # cert/key pair already exists in the `db-tls` named volume.
 #
@@ -171,12 +171,12 @@
     path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.crt"
   register: compose_up_existing_cert
 
-# 7-day validity, matching the ORIGINAL bootstrap cert's intent: short
+# 7-day validity, matching the original bootstrap cert's intent: short
 # enough that if the cert-reload role's own immediate post-deploy run
 # (see roles/cert_reload/tasks/main.yml) is ever skipped or silently
 # fails, this placeholder expires quickly and loudly rather than sitting
 # unnoticed for a full 90-day Let's Encrypt cycle. Written directly with
-# `openssl` on the CONTROL/target host (Ubuntu ships openssl by default;
+# `openssl` on the control/target host (Ubuntu ships openssl by default;
 # no apk, no container, no network dependency), then chowned to uid/gid
 # 70 (postgres:16-alpine's fixed postgres uid — confirmed with
 # `docker run --rm postgres:16-alpine id postgres`) so the container can
@@ -209,7 +209,7 @@
 # to Dockerfile.backup / Dockerfile.signal-receive / scripts/*.sh from
 # this run's repo sync; compose only rebuilds an image whose inputs
 # actually changed, so this is not a wasted rebuild on every run. Runs
-# BEFORE handlers flush, so if `docker compose up` created the caddy
+# before handlers flush, so if `docker compose up` created the caddy
 # container for the first time, the "Restart caddy" handler (if
 # triggered) still finds a real container to restart.
 - name: Start / converge the stack

@@ -3,16 +3,16 @@
 # container, including `db` writing to db-data) waits for the Hetzner
 # volume to be mounted before it starts.
 #
-# WHY THIS MATTERS (carried forward from infra/terraform/vm.tf's comment,
+# Why this matters (carried forward from infra/terraform/vm.tf's comment,
 # which explicitly deferred this fix to this task): on a reboot, systemd
 # starts services in parallel unless something orders them. If Docker wins
 # the race against the volume mount, `db`'s bind/named volume paths
-# resolve against the ROOT disk, Postgres initializes a fresh empty
+# resolve against the root disk, Postgres initializes a fresh empty
 # cluster there, and the volume mount that completes moments later is
-# silently mounted OVER that directory — the real data (announcements,
+# silently mounted over that directory. The real data (announcements,
 # subscribers, delivery ledger, audit log) still exists on the Hetzner
 # volume but is now invisible underneath the mountpoint, and the
-# container is running against an empty database with no error anywhere.
+# container runs against an empty database with no error anywhere.
 # This is the single scenario this role exists to prevent.
 - name: Docker apt keyring
   ansible.builtin.get_url:

@@ -23,7 +23,7 @@ variable "server_type" {
 variable "image" {
   type        = string
   default     = "ubuntu-24.04"
-  description = "Base image. Matches the aztec-observability module's choice for consistency across the author's Hetzner modules; Ansible provisions everything else. NOTE: `image` is in this server's ignore_changes list (see vm.tf), so bumping this variable produces NO plan diff — Terraform will report \"no changes\" even though the value changed. An OS upgrade is a deliberate rebuild (new server, migrate the volume), never a variable bump."
+  description = "Base image. Matches the aztec-observability module's choice for consistency across the author's Hetzner modules; Ansible provisions everything else. Note: `image` is in this server's ignore_changes list (see vm.tf), so bumping this variable produces no plan diff — Terraform will report \"no changes\" even though the value changed. An OS upgrade is a deliberate rebuild (new server, migrate the volume), never a variable bump."
 }
 
 variable "data_volume_size_gb" {
@@ -34,14 +34,14 @@ variable "data_volume_size_gb" {
 
 variable "ssh_public_key" {
   type        = string
-  description = "SSH public key installed on this VM for Ansible and break-glass access. Must be DIFFERENT key material from any other module's ssh_public_key applied into the same Hetzner project (e.g. aztec-observability's) — Hetzner rejects a duplicate fingerprint outright, so reusing a key here would fail the apply."
+  description = "SSH public key installed on this VM for Ansible and break-glass access. Must be different key material from any other module's ssh_public_key applied into the same Hetzner project (e.g. aztec-observability's) — Hetzner rejects a duplicate fingerprint outright, so reusing a key here would fail the apply."
 }
 
 # --- firewall ---
 
 variable "operator_ssh_cidrs" {
   type        = list(string)
-  description = "CIDRs allowed to reach port 22. REQUIRED, no default — Terraform must refuse to plan until this is set explicitly. There is no tailnet on this deployment (decided 2026-08-27), so there is no `tailscale ssh`; Ansible and any operator login need a real, direct path to port 22, which means this firewall rule is the only thing standing between the VM and the whole internet on that port. Defaulting this to 0.0.0.0/0 to make the plan 'just work' would silently open SSH to everyone; leaving it unset and erroring is the safe failure mode. Set to your actual office/VPN/home CIDR(s), e.g. [\"203.0.113.4/32\"]."
+  description = "CIDRs allowed to reach port 22. Required, no default: Terraform must refuse to plan until this is set explicitly. There is no tailnet on this deployment (decided 2026-08-27), so there is no `tailscale ssh`; Ansible and any operator login need a real, direct path to port 22, which means this firewall rule is the only thing standing between the VM and the whole internet on that port. Defaulting this to 0.0.0.0/0 to make the plan 'just work' would silently open SSH to everyone; leaving it unset and erroring is the safe failure mode. Set it to your actual office/VPN/home CIDR(s), e.g. [\"203.0.113.4/32\"]."
 }
 
 # --- application context (used only in output/inventory text, not to configure the VM directly) ---
@@ -49,5 +49,5 @@ variable "operator_ssh_cidrs" {
 variable "domain" {
   type        = string
   default     = "announce.aztec.network"
-  description = "Public hostname this VM will serve. Terraform does NOT manage DNS here (the aztec.network nameservers are outside this repo's control) — this value is only used to make the required manual DNS step explicit in outputs.tf. An A record for this name must point at the VM's public IPv4 (see the observability apply pattern) before Caddy's ACME challenge can complete."
+  description = "Public hostname this VM will serve. Terraform does not manage DNS here (the aztec.network nameservers are outside this repo's control) — this value is only used to make the required manual DNS step explicit in outputs.tf. An A record for this name must point at the VM's public IPv4 (see the observability apply pattern) before Caddy's ACME challenge can complete."
 }
