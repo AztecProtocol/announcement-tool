@@ -5,15 +5,21 @@
 # Hetzner Cloud API token for the project this VM is created in.
 hcloud_token = "REPLACE_ME"
 
-# SSH public key for this VM. Must be DIFFERENT key material from any other
-# module's ssh_public_key applied into the same Hetzner project (Hetzner
-# rejects duplicate fingerprints).
+# SSH public key for this VM. Break-glass only now (Hetzner console access
+# if the tailnet join fails) — day-2 operator access is `tailscale ssh`, not
+# this key directly. Must be DIFFERENT key material from any other module's
+# ssh_public_key applied into the same Hetzner project (Hetzner rejects
+# duplicate fingerprints).
 ssh_public_key = "ssh-ed25519 AAAA... REPLACE_ME"
 
-# REQUIRED, no default. CIDR(s) allowed to reach port 22 — there is no
-# tailnet here, so this is the real (and only) SSH path in. Never set this
-# to 0.0.0.0/0.
-operator_ssh_cidrs = ["203.0.113.4/32"]
+# REQUIRED, no default. The tailnet this VM joins on first boot.
+tailnet = "example.com"
+
+# PREREQUISITE: tag:announce must already exist in that tailnet's ACL,
+# added by rpc.aztec.foundation/tailscale.tf in AztecProtocol/foundation-iac
+# and applied BEFORE this module. See variables.tf `tailscale_acl_tag` for
+# what happens if this is skipped. Usually left at its default.
+# tailscale_acl_tag = "tag:announce"
 
 # Optional overrides (defaults shown in variables.tf are usually fine):
 # hcloud_location      = "fsn1"

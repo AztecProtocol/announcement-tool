@@ -2,11 +2,12 @@
 hostname: ${hostname}
 fqdn: ${hostname}
 
-# Minimal first-boot bootstrap. Unlike aztec-observability, this does NOT
-# join a tailnet — there is no tailnet on this deployment (decided
-# 2026-08-27). The only day-1 requirement is that the host is reachable over
-# SSH (restricted to var.operator_ssh_cidrs by the Terraform firewall) so
-# Ansible can install Postgres, signal-cli-rest-api, and Caddy.
+# Minimal first-boot bootstrap, mirroring rpc.aztec.foundation and the
+# aztec-observability sibling: join the tailnet so Ansible and operators can
+# reach the host over `tailscale ssh`. Postgres (5432) and Caddy (443) stay
+# on the public internet — Netlify's functions cannot join a tailnet — so
+# this join is for operator/Ansible access only, not for the application
+# ports Netlify depends on.
 
 package_update: true
 package_upgrade: true
@@ -16,3 +17,7 @@ packages:
   - ca-certificates
   - gnupg
   - lsb-release
+
+runcmd:
+  - "curl -fsSL https://tailscale.com/install.sh | sh"
+  - "tailscale up --authkey=${tailscale_auth_key} --ssh --hostname=${hostname}"

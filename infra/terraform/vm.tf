@@ -3,10 +3,15 @@
 # One Hetzner VM runs Postgres (the app's database, reachable from Netlify's
 # egress pool on 5432) plus signal-cli-rest-api and a Caddy reverse proxy
 # (443 — ACME challenge + the Signal proxy) in Docker, deployed
-# by Ansible after Terraform creates the host. cloud-init here does nothing
-# but prepare the host for Ansible — no tailnet join, unlike
-# aztec-observability, because there is no tailnet on this deployment
-# (decided 2026-08-27, see variables.tf `operator_ssh_cidrs`).
+# by Ansible after Terraform creates the host. cloud-init joins the tailnet
+# on first boot, following the rpc.aztec.foundation Hetzner idiom the
+# aztec-observability sibling module also follows (decided 2026-08-31,
+# replacing the operator_ssh_cidrs-gated port-22 approach from 2026-08-27):
+# day-2 operator access is `tailscale ssh`, not a public SSH port. This does
+# NOT touch 443 or 5432 — those stay open to 0.0.0.0/0 and ::/0 because
+# Netlify's serverless functions reach Postgres and the Signal proxy from a
+# shifting IP pool that cannot join a tailnet (see the firewall comment
+# below and variables.tf `tailnet`/`tailscale_acl_tag`).
 #
 # Sizing: see the `server_type` and `data_volume_size_gb` variable
 # descriptions in variables.tf for the justification. In short, this is a
@@ -20,6 +25,28 @@ provider "hcloud" {
 resource "hcloud_ssh_key" "announce" {
   name       = "aztec-announce"
   public_key = var.ssh_public_key
+}
+
+# PREREQUISITE (owner-decided, cross-repo): `tag:announce` (var.tailscale_acl_tag)
+# must already exist in the tailnet ACL before this applies. That ACL is a
+# singleton owned by rpc.aztec.foundation/tailscale.tf in
+# AztecProtocol/foundation-iac, which applies with
+# overwrite_existing_content = true — add the tag there, in code, and apply
+# that module first. A console-only edit does not survive its next apply.
+# See the full failure mode in variables.tf `tailscale_acl_tag`.
+#
+# ⚠️ SECRET IN STATE: this key's plaintext value is stored in Terraform
+# state (see versions.tf and infra/README.md's "Prerequisites" section, both
+# of which now flag that the state bucket holds credential-bearing
+# material, not just outputs). Reusable + pre-authorized + tagged mirrors
+# the aztec-observability sibling's key exactly, for the same reason: a
+# one-shot ephemeral key would force a manual re-auth step on every rebuild.
+resource "tailscale_tailnet_key" "announce" {
+  reusable      = true
+  ephemeral     = false
+  preauthorized = true
+  tags          = [var.tailscale_acl_tag]
+  description   = "aztec-announce vm bootstrap"
 }
 
 resource "hcloud_server" "announce" {
@@ -36,7 +63,8 @@ resource "hcloud_server" "announce" {
   }
 
   user_data = templatefile("${path.module}/cloud-init/announce.yaml.tftpl", {
-    hostname = "aztec-announce-${var.hcloud_location}"
+    hostname           = "aztec-announce-${var.hcloud_location}"
+    tailscale_auth_key = tailscale_tailnet_key.announce.key
   })
 
   lifecycle {
@@ -85,22 +113,36 @@ resource "hcloud_volume_attachment" "announce_data" {
   automount = true
 }
 
-# No tailnet on this deployment (decided 2026-08-27). Public TCP ports are
-# the actual access path, not a firewall-blocked fallback behind a private
-# network. Every rule here is a deliberate choice, not a default left in place:
+# Operator access moved onto the tailnet (decided 2026-08-31); the VM's
+# public surface is now only what Netlify's functions actually need. Every
+# rule here is a deliberate choice, not a default left in place:
 #   443/tcp  — Caddy: ACME HTTP-01/TLS-ALPN challenge for db.announce.aztec.network,
-#              and the reverse-proxy path to signal-cli-rest-api.
+#              and the reverse-proxy path to signal-cli-rest-api. UNCHANGED —
+#              Netlify's functions cannot join a tailnet, so this must stay
+#              open to 0.0.0.0/0 and ::/0. Do not restrict this rule.
 #   5432/tcp — Postgres, reachable directly from Netlify's egress. Netlify
 #              functions egress from a shifting pool of 80+ IPs with no
 #              stable range to allowlist, so an IP allowlist here is not a
 #              workable alternative to opening the port; connection auth
 #              (TLS + the least-privilege announce_app role, see
-#              infra/README.md) is the real control.
-#   22/tcp   — restricted to var.operator_ssh_cidrs (required, no default —
-#              see that variable). Without a tailnet there is no
-#              `tailscale ssh`; this is Ansible's and any operator's only
-#              way in, so it must be explicit, not 0.0.0.0/0.
+#              infra/README.md) is the real control. UNCHANGED — same
+#              cannot-join-a-tailnet constraint as 443. Do not restrict this
+#              rule either.
+#   41641/udp — Tailscale's direct-path port (see var.tailnet /
+#              var.tailscale_acl_tag). Left open to 0.0.0.0/0 and ::/0, same
+#              as the aztec-observability sibling: this is how two tailnet
+#              peers negotiate a direct connection, not a general listener.
+#              If this path is blocked, Tailscale still connects — falls
+#              back to relaying over DERP — so this rule is an optimization,
+#              not the tailnet's only path in.
 #   icmp     — diagnostic ping, harmless to leave open.
+#
+# Port 22 is gone. There is no `operator_ssh_cidrs` rule to keep in sync
+# with a CIDR list anymore; day-2 operator access is `tailscale ssh`, which
+# needs no inbound firewall rule of its own (it rides the UDP path above,
+# or DERP relay if that is blocked). See variables.tf `ssh_public_key` for
+# the one path that still exists outside the tailnet: the Hetzner web
+# console, for when the tailnet join itself is the thing that's broken.
 resource "hcloud_firewall" "announce" {
   name = "aztec-announce"
 
@@ -120,9 +162,9 @@ resource "hcloud_firewall" "announce" {
 
   rule {
     direction  = "in"
-    protocol   = "tcp"
-    port       = "22"
-    source_ips = var.operator_ssh_cidrs
+    protocol   = "udp"
+    port       = "41641"
+    source_ips = ["0.0.0.0/0", "::/0"]
   }
 
   rule {

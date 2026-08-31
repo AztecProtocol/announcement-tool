@@ -34,14 +34,20 @@ variable "data_volume_size_gb" {
 
 variable "ssh_public_key" {
   type        = string
-  description = "SSH public key installed on this VM for Ansible and break-glass access. Must be different key material from any other module's ssh_public_key applied into the same Hetzner project (e.g. aztec-observability's) — Hetzner rejects a duplicate fingerprint outright, so reusing a key here would fail the apply."
+  description = "SSH public key installed on this VM. No longer the operator's day-2 access path — that is `tailscale ssh` over the tailnet now (see the tailnet variables below) — but kept for the same reason the aztec-observability sibling keeps its own: last-resort access via the Hetzner web console if the tailnet join fails on first boot or the tailnetd process wedges later, the console gives a root shell with no network path required, and that shell is only useful if a key is already installed to get past it cleanly. Must be different key material from any other module's ssh_public_key applied into the same Hetzner project (e.g. aztec-observability's) — Hetzner rejects a duplicate fingerprint outright, so reusing a key here would fail the apply."
 }
 
-# --- firewall ---
+# --- tailnet ---
 
-variable "operator_ssh_cidrs" {
-  type        = list(string)
-  description = "CIDRs allowed to reach port 22. Required, no default: Terraform must refuse to plan until this is set explicitly. There is no tailnet on this deployment (decided 2026-08-27), so there is no `tailscale ssh`; Ansible and any operator login need a real, direct path to port 22, which means this firewall rule is the only thing standing between the VM and the whole internet on that port. Defaulting this to 0.0.0.0/0 to make the plan 'just work' would silently open SSH to everyone; leaving it unset and erroring is the safe failure mode. Set it to your actual office/VPN/home CIDR(s), e.g. [\"203.0.113.4/32\"]."
+variable "tailnet" {
+  type        = string
+  description = "The Tailscale tailnet (organization) this VM joins, e.g. \"example.com\" or a tailnet's -example.ts.net name. Matches the aztec-observability sibling's tailnet — this VM and the fleet it needs to be reachable alongside share one tailnet, not one per module. Getting this wrong does not fail loudly: the auth key still generates and `tailscale up` still runs, but the VM joins the wrong organization's network and stays unreachable from where operators actually are, which looks identical to a boot failure until someone checks which tailnet the host landed in."
+}
+
+variable "tailscale_acl_tag" {
+  type        = string
+  default     = "tag:announce"
+  description = "The ACL tag applied to this VM's tailnet auth key, and therefore to the node once it joins. PREREQUISITE, decided by the owner, and NOT something this module can satisfy on its own: `tag:announce` must already exist in the tailnet's ACL policy before this module is applied. That ACL is a singleton owned by a different repository and module — `rpc.aztec.foundation/tailscale.tf` in AztecProtocol/foundation-iac, applied with `overwrite_existing_content = true` — so the tag has to be added there, in code, and that module applied, before this one runs; it cannot be added by hand in the Tailscale admin console, because the next apply of that module treats the console edit as drift and reverts it. If the tag is missing when this module applies, `tailscale_tailnet_key` creation (or the `tailscale up` call in cloud-init, depending on where Tailscale rejects it) fails with an unknown-tag error, and if that failure is somehow missed, the VM boots with no reachable path in at all — no SSH port, and no working tailnet join. Do not attempt to create this tag from this repository; it is owned elsewhere."
 }
 
 # --- application context (used only in output/inventory text, not to configure the VM directly) ---

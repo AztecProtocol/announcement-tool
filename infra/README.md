@@ -138,7 +138,11 @@ and `infra/Caddyfile.split` for exactly what runs and why.
   bucket, `aztec-foundation-terraform-state` in `eu-west-2`. `terraform init`
   fails without them. State lives there rather than on one machine, so
   anyone with bucket access can read the outputs this runbook needs. See
-  `terraform/versions.tf`.
+  `terraform/versions.tf`. State does not hold only outputs: it also holds
+  the plaintext `tailscale_tailnet_key.announce` auth key (see
+  `terraform/vm.tf`), the same way it would hold any other secret-bearing
+  resource. Bucket access is credential access, not just read access to
+  non-sensitive values.
 - DNS control for `db.announce.aztec.network`. You will need to create an A
   record once the VM exists (step 3). The person who runs `terraform apply`
   and the person who sets the record do not have to be the same person: the
