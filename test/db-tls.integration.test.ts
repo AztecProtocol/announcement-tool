@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { connect } from '../src/db/connect.js';
 
 /**
- * Proves TLS against a REAL Postgres, not just that buildConnectionOptions
+ * Proves TLS against a real Postgres, not just that buildConnectionOptions
  * shapes an options object correctly (test/db-connect.test.ts covers that
  * without a network or filesystem). Requires the db-tls docker-compose
  * service and infra/dev/gen-test-certs.sh's output — see docker-compose.dev.yml.
@@ -52,7 +52,7 @@ describe.skipIf(!ready)('postgres TLS', () => {
   // Netlify has no filesystem to place a CA bundle on -- DATABASE_SSL_ROOT_CERT
   // must also work as inline PEM content, not only a path (src/db/connect.ts's
   // resolveCaFile). A unit test (test/db-connect.test.ts) proves that value
-  // reaches postgres.js's `ssl.ca` option unchanged; it does NOT prove Node's
+  // reaches postgres.js's `ssl.ca` option unchanged; it does not prove Node's
   // TLS layer / postgres.js actually accept that string as a real trust
   // anchor and negotiate TLS with it. These two tests are that proof, run
   // against the same real TLS Postgres as the path-based tests above.
@@ -79,7 +79,7 @@ describe.skipIf(!ready)('postgres TLS', () => {
     // Simulates the well-known "certificate pasted through a UI that
     // flattens real newlines" failure mode -- resolveCaFile detects and
     // un-escapes this before the value ever reaches postgres.js/Node's TLS
-    // layer. Proves the un-escaped result is genuinely usable as a trust
+    // layer. Proves the un-escaped result is usable as a trust
     // anchor, not just structurally equal to the original PEM string.
     const flattenedCa = readFileSync(CA_PATH, 'utf8').replace(/\n/g, '\\n');
     expect(flattenedCa).not.toContain('\n');

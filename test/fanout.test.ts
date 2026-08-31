@@ -71,10 +71,10 @@ describe('runFanoutOnce', () => {
   });
 
   it('a pending row is left untouched when its channel key maps to no adapter, not exhausted', async () => {
-    // Distinct from the test above: that one passes an EMPTY adapters map,
+    // Distinct from the test above: that one passes an empty adapters map,
     // so `known` is empty and the query's `channel in ${known}` filter
     // returns zero rows — the per-row branch never runs. Here `known`
-    // (Object.keys(adapters)) still includes 'webhook', so the row IS
+    // (Object.keys(adapters)) still includes 'webhook', so the row is
     // selected by the query; it is the per-row `adapters[row.channel]`
     // lookup that comes back falsy, exercising the loop-body branch itself.
     // buildAdapters() never produces a map shaped this way (it only sets a

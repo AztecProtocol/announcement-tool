@@ -48,9 +48,9 @@ const announcement = (overrides: Partial<Announcement> = {}): Announcement => ({
 });
 
 describe('editPrefillFromAnnouncement', () => {
-  // The regression guard named in the task-4 review: someone later
-  // "simplifying" the edit branch in page.tsx into a templateFromAnnouncement
-  // call would silently strip exactly these two fields, breaking edit mode.
+  // Regression guard: someone later "simplifying" the edit branch in page.tsx
+  // into a templateFromAnnouncement call would silently strip these two
+  // fields, breaking edit mode.
   it('retains the slug — unlike templateFromAnnouncement, which strips it for the copy-into-new-draft path', () => {
     const out = editPrefillFromAnnouncement(announcement());
     expect(out.slug).toBe('fixed-slug-2026');

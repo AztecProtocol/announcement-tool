@@ -82,7 +82,7 @@ describe('email double-opt-in', () => {
   // unique-violation. A true concurrent race (two separate requests interleaving at
   // the database level) is not reliably reproducible from a single test process —
   // a `Promise.all` of two `startEmailSubscription` calls was tried and empirically
-  // did NOT trigger the catch(23505) path in repeated runs (postgres.js appears to
+  // did not trigger the catch(23505) path in repeated runs (postgres.js appears to
   // serialize the pooled queries such that the second call's select already sees the
   // first call's committed insert, so it never reaches its own insert). So this test
   // takes the honest, deterministic route instead: pre-create the row directly via
@@ -117,7 +117,7 @@ describe('email double-opt-in', () => {
   // webhook-flow.test.ts's equivalent test), rather than only covering the
   // fallback logic via a pre-created row. startEmailSubscription's
   // `createSubscriptionImpl` override first calls the real createSubscription (so
-  // the row genuinely gets created — simulating the concurrent winner committing
+  // the row actually gets created — simulating the concurrent winner committing
   // first) and then throws a Postgres-shaped 23505 error, so startEmailSubscription's
   // own insert branch truly hits the catch block, re-selects the row, and falls
   // through to updateExistingAndNotify — proving that exact code path never throws

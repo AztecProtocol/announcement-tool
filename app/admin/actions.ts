@@ -145,8 +145,8 @@ export async function requestPublishAction(id: string): Promise<PublishResult> {
 
 /**
  * FourEyesError (confirmer === requester) must reach the page as a visible
- * message, never an unhandled throw / 500 — that's the whole point of the
- * four-eyes control.
+ * message, never an unhandled throw / 500 — that is what the four-eyes
+ * control is for.
  */
 export async function confirmPublishAction(id: string): Promise<PublishResult> {
   const db = getDb();

@@ -24,7 +24,7 @@ export function makeDiscordAdapter(
 
       const prefix = composeMentionLine(cfg, a.mentionRoleIds);
       // Blank line between the mention prefix and the body, so the tag line is not
-      // crowded against the role pings. The expression MUST stay byte-identical to
+      // crowded against the role pings. The expression must stay byte-identical to
       // the one in src/core/preview.ts — that identity is what makes the Raw preview
       // a trustworthy record of what goes on the wire.
       const content = prefix ? `${prefix}\n\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);

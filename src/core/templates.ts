@@ -75,7 +75,7 @@ export function stripPerAnnouncementFields(input: AnnouncementInput): Announceme
  * a reused announcement can never carry a stale, already-passed deadline
  * into a new draft. Everything else (text, applies_to, links,
  * type/network/severity/audiences) is preserved. `mentionRoleIds` is
- * deliberately NOT carried over — see stripPerAnnouncementFields above for
+ * deliberately not carried over — see stripPerAnnouncementFields above for
  * why.
  */
 export function templateFromAnnouncement(a: Announcement): AnnouncementInput {

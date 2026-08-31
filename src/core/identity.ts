@@ -9,23 +9,23 @@ export interface Identity { email: string; name?: string; source: 'auth0' | 'tai
  * precedence order: verified Auth0 (Netlify), Tailscale (VM), then a dev fallback.
  *
  * ── Why the Auth0 header can be trusted ──────────────────────────────────────
- * `AUTH0_IDENTITY_HEADER` is a PLAIN, UNSIGNED header. Read on its own it proves
+ * `AUTH0_IDENTITY_HEADER` is a plain, unsigned header. Read on its own it proves
  * nothing, and anyone able to send a request straight to the origin can set it.
  * It is trustworthy under exactly one condition:
  *
- *     middleware.ts (repository root) DELETES any inbound copy of this header
- *     unconditionally, as its very first action, and re-sets it ONLY after
+ *     middleware.ts (repository root) deletes any inbound copy of this header
+ *     unconditionally, as its very first action, and re-sets it only after
  *     fully verifying an RS256 Auth0 JWT — signature, issuer, audience, expiry
  *     — and confirming a verified email claim.
  *
  * If that strip is ever removed, made conditional, or moved after an early
  * return, this function starts returning attacker-chosen identities. That breaks
  * the four-eyes rule on `critical` announcements, whose whole job is to stop one
- * person self-approving an IRREVERSIBLE Discord role ping. Do not read this
+ * person self-approving an irreversible Discord role ping. Do not read this
  * header anywhere else, and do not relax middleware.ts's matcher without
  * re-checking every route that calls this.
  *
- * ── Why the Tailscale header can be trusted, and ONLY on the VM ──────────────
+ * ── Why the Tailscale header can be trusted, and only on the VM ─────────────
  * Identity comes from Tailscale's proxy headers, which are injected by
  * `tailscale serve`. That is sound for exactly one deployment shape: the app
  * binds to loopback and `tailscale serve` is the sole route in, so nothing
@@ -33,17 +33,17 @@ export interface Identity { email: string; name?: string; source: 'auth0' | 'tai
  * live because `main` deploys to a VM, and removing it would strand that
  * deployment.
  *
- * It is NOT sound anywhere else. On Netlify there is no such proxy: requests
+ * It is not sound anywhere else. On Netlify there is no such proxy: requests
  * arrive from the public internet and Netlify strips only its own `X-Nf-*`
- * headers, so `Tailscale-User-Login` there can ONLY be attacker-supplied. If
+ * headers, so `Tailscale-User-Login` there can only be attacker-supplied. If
  * this branch ran on Netlify, anyone could name themselves an existing
  * publisher, request a `critical` announcement as one address and confirm it as
- * another — collapsing four-eyes to one person and firing an IRREVERSIBLE
+ * another — collapsing four-eyes to one person and firing an irreversible
  * Discord role ping.
  *
- * So the two identity sources are MUTUALLY EXCLUSIVE PER DEPLOYMENT, decided by
+ * So the two identity sources are mutually exclusive per deployment, decided by
  * the same explicit `DEPLOY_TARGET` signal production-guard.ts uses. The gate is
- * an ALLOWLIST — the Tailscale branch runs when DEPLOY_TARGET is exactly 'vm'
+ * an allowlist — the Tailscale branch runs when DEPLOY_TARGET is exactly 'vm'
  * and at no other time. Unset, misspelled, or any future value therefore
  * disables it rather than enabling it: a wrong value must lose the identity
  * source, never gain one. Nothing legitimate is stranded by that default,
@@ -99,7 +99,7 @@ export async function isPublisher(sql: Sql, email: string): Promise<boolean> {
  * isPublisher's bootstrap rule (empty table = anyone may publish) keeps a fresh
  * local install usable. In production that same rule means one truncated table
  * is an open publish endpoint on five channels, so this assertion runs at
- * startup instead. Deliberately NOT folded into isPublisher: that runs per
+ * startup instead. Deliberately not folded into isPublisher: that runs per
  * request, and a policy branch there would put the permissive path one bug away
  * from being reachable on a deployed instance.
  */

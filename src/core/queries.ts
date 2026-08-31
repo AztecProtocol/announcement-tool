@@ -17,7 +17,7 @@ export async function listPublished(sql: Sql, limit = 50): Promise<Announcement[
 /**
  * Announcements awaiting a second publisher's confirmation.
  *
- * Uses distinct-on to read each announcement's LATEST revision before filtering
+ * Uses distinct-on to read each announcement's latest revision before filtering
  * on status — a `where status = 'publish_requested'` over all rows would match
  * a superseded revision of an announcement that has since moved on.
  */

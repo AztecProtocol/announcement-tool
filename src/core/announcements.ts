@@ -131,7 +131,7 @@ async function performPublish(tx: TransactionSql, a: Announcement, confirmer: st
  * `for update skip locked` matches the fan-out claim in src/worker/fanout.ts,
  * so two workers never send the same announcement twice.
  *
- * The status filter is the safety boundary: ONLY 'scheduled' rows are taken.
+ * The status filter is the safety boundary: only 'scheduled' rows are taken.
  * A draft, or a critical announcement still waiting for its second publisher,
  * is never touched — the worker cannot approve anything, it can only carry out
  * what two people already approved.
@@ -207,7 +207,7 @@ export async function confirmPublish(sql: Sql, id: string, actor: string): Promi
 }
 
 /**
- * Set a future send time. Four-eyes is satisfied here, BEFORE the wait: a
+ * Set a future send time. Four-eyes is satisfied here, before the wait: a
  * critical announcement stops at publish_requested and needs a second
  * publisher's confirmSchedule, exactly as an immediate publish needs
  * confirmPublish. The worker later moves an already-approved row from
@@ -264,13 +264,13 @@ export async function confirmSchedule(sql: Sql, id: string, actor: string): Prom
 /**
  * Stop a pending send and return the announcement to draft.
  *
- * ANY publisher may cancel — not only the one who scheduled it. Approval was
+ * Any publisher may cancel — not only the one who scheduled it. Approval was
  * given before the wait, so the only protection against circumstances changing
  * during the wait is that somebody present can stop it; requiring one specific
  * person to be available would defeat that.
  *
  * Clears publish_requested_by and publish_confirmed_by along with the time, so
- * re-scheduling needs a fresh request AND a fresh second confirmation.
+ * re-scheduling needs a fresh request and a fresh second confirmation.
  * Cancelling must never become a way around four-eyes.
  */
 export async function cancelSchedule(sql: Sql, id: string, actor: string): Promise<Announcement> {
@@ -319,7 +319,7 @@ export async function withdrawPublish(sql: Sql, id: string, actor: string): Prom
 
 /**
  * A second publisher declines the request, with a reason the author will see.
- * Returns to draft. The reason is the point: four-eyes is a review, and a
+ * Returns to draft. The reason matters: four-eyes is a review, and a
  * reviewer who cannot say what is wrong can only veto silently.
  */
 export async function rejectPublish(

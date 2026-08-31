@@ -3,17 +3,17 @@
  * login flow. The three route handlers under `app/admin/` are thin wrappers
  * around these functions.
  *
- * WHY THE LOGIC LIVES HERE AND NOT IN THE ROUTES. Code inside `app/` cannot be
+ * Why the logic lives here and not in the routes: code inside `app/` cannot be
  * reached by the vitest suite — importing a Next.js route handler drags in the
- * framework runtime. These routes ALSO cannot be exercised end-to-end without a
+ * framework runtime. These routes also cannot be exercised end-to-end without a
  * live Auth0 tenant. So everything decidable without a tenant — URL building,
  * PKCE derivation, the state comparison, and the token-response shape check —
  * is pulled out to this module where it is unit-testable, and the routes keep
- * only the parts that genuinely need a request, a cookie jar, or the network.
+ * only the parts that need a request, a cookie jar, or the network.
  *
  * The state comparison in particular is CSRF protection standing between an
  * attacker and a session cookie for an identity they do not control, and every
- * four-eyes approval on a `critical` announcement (an IRREVERSIBLE Discord role
+ * four-eyes approval on a `critical` announcement (an irreversible Discord role
  * ping) depends on that identity. It must be tested, so it must not live in a
  * route handler.
  *
@@ -54,8 +54,8 @@ export function createCodeVerifier(): string {
  * RFC 7636 §4.2: `code_challenge = BASE64URL-ENCODE(SHA256(ASCII(code_verifier)))`.
  *
  * Node's 'base64url' encoding is the RFC 4648 §5 URL-safe alphabet with padding
- * already stripped, which is exactly what the spec requires ("all trailing '='
- * characters omitted"). Do NOT switch this to 'base64' and post-process — that
+ * already stripped, which is what the spec requires ("all trailing '='
+ * characters omitted"). Do not switch this to 'base64' and post-process — that
  * is where implementations usually introduce a stray '=' and get an opaque
  * `invalid_grant` from Auth0.
  *
@@ -76,7 +76,7 @@ export function createState(): string {
  * stored in an HttpOnly cookie.
  *
  * Fails closed on a missing, empty, or length-mismatched value. `timingSafeEqual`
- * THROWS on differing buffer lengths, so the length check must come first — an
+ * throws on differing buffer lengths, so the length check must come first — an
  * exception escaping a CSRF check would be a denial by crash at best, and at
  * worst a path a caller wraps in a try/catch that continues.
  */
@@ -103,7 +103,7 @@ export interface AuthorizeUrlParams {
  *
  * `scope=openid email` is the minimum that yields an ID token carrying the
  * `email` and `email_verified` claims `emailFromClaims` requires. `audience` is
- * deliberately NOT sent: this flow authenticates a human for the admin UI, it
+ * deliberately not sent: this flow authenticates a human for the admin UI, it
  * does not request an access token for a separate API, and adding an audience
  * would change what Auth0 mints.
  *
@@ -126,7 +126,7 @@ export function buildAuthorizeUrl(params: AuthorizeUrlParams): string {
 
 /**
  * Builds the legacy `/v2/logout` URL, whose return parameter is camelCase
- * `returnTo` — NOT the `post_logout_redirect_uri` of the newer `/oidc/logout`
+ * `returnTo` — not the `post_logout_redirect_uri` of the newer `/oidc/logout`
  * endpoint. Mixing the two silently drops the redirect.
  *
  * The `returnTo` value must be registered in the application's Allowed Logout
@@ -145,7 +145,7 @@ export function tokenEndpoint(issuer: string): string {
 
 /**
  * Body for the code exchange. Auth0 expects
- * `application/x-www-form-urlencoded`, NOT JSON — posting JSON here returns an
+ * `application/x-www-form-urlencoded`, not JSON — posting JSON here returns an
  * unhelpful error. `client_secret` is included because this is a confidential
  * (regular web) application using `client_secret_post`; a public SPA client
  * would omit it. `redirect_uri` is required because it was sent to /authorize.
@@ -174,7 +174,7 @@ export function buildTokenRequestBody(params: {
  * string `id_token`, so a 200 with an error body, a null, or an array cannot
  * reach the verification step as `undefined` and be mistaken for a token.
  *
- * NOTE: the ID token returned here is NOT trusted on the strength of having
+ * Note: the ID token returned here is not trusted on the strength of having
  * arrived over HTTPS from Auth0. The caller passes it to `verifyAuth0Token`
  * (src/core/auth0-verify.ts) for full signature/issuer/audience/expiry checking
  * first. This function only reads a field out of JSON.
@@ -200,7 +200,7 @@ export type LoginError =
   | 'token'
   | 'identity';
 
-/** `/admin?login_error=<slug>` — the ONLY thing a failed login tells the browser. */
+/** `/admin?login_error=<slug>` — the only thing a failed login tells the browser. */
 export function loginErrorRedirect(error: LoginError): string {
   return `/admin?login_error=${error}`;
 }

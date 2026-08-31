@@ -40,7 +40,7 @@ describe('subscriptions', () => {
     expect(matchesSubscription({ ...annCritMain, severity: 'recommended' }, s)).toBe(false);
     expect(matchesSubscription({ ...annCritMain, type: 'info' }, s)).toBe(false);
     expect(matchesSubscription({ ...annCritMain, audiences: ['ecosystem'] }, s)).toBe(false);
-    // announcement targeting BOTH networks still reaches a mainnet-only subscriber
+    // announcement targeting both networks still reaches a mainnet-only subscriber
     expect(matchesSubscription({ ...annCritMain, networks: ['mainnet', 'testnet'] }, s)).toBe(true);
   });
 

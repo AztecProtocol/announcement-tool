@@ -58,7 +58,7 @@ describe('buildConnectionOptions', () => {
   it('rejects sslmode in the DATABASE_URL query string even when DATABASE_SSL_MODE is unset', () => {
     // postgres.js's own parseOptions reads `?sslmode=` straight out of the
     // connection string and turns it into its `ssl` option — including
-    // `?sslmode=require`, which is exactly the half-guarantee this module
+    // `?sslmode=require`, which is the same half-guarantee this module
     // exists to refuse. Without this check, an operator who writes the
     // connection string the way every Postgres tutorial does would bypass
     // every check above with no error.
@@ -120,8 +120,8 @@ describe('resolveCaFile', () => {
   // path-vs-inline by the header text and never parses the certificate
   // itself (that happens later, inside Node's TLS layer / postgres.js).
   // Using a fake-but-well-formed-looking body keeps these tests fast and
-  // filesystem/network-free; db-tls.integration.test.ts proves a REAL PEM
-  // genuinely negotiates TLS against a real server.
+  // filesystem/network-free; db-tls.integration.test.ts proves a real PEM
+  // negotiates TLS against a real server.
   const FAKE_PEM = '-----BEGIN CERTIFICATE-----\nMIIFAKECERTDATA\n-----END CERTIFICATE-----\n';
 
   it('uses inline PEM content directly, without touching the filesystem', () => {
@@ -199,7 +199,7 @@ describe('resolveCaFile', () => {
     // A bad path (typo, wrong mount, a value that is actually meant to be
     // pasted PEM but got truncated before the BEGIN header survived) must
     // not silently produce an empty/undefined ca and connect unverified --
-    // readFileSync throwing ENOENT is exactly the loud failure this needs.
+    // readFileSync throwing ENOENT is the loud failure this needs.
     const options: ConnectionOptions = { ssl: { ca: '/definitely/does/not/exist/ca.pem', rejectUnauthorized: true } };
     expect(() => resolveCaFile(options)).toThrow(/ENOENT|no such file/i);
   });

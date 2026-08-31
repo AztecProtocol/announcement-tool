@@ -19,7 +19,7 @@ export interface PreviewSet {
   warnings?: string[];
   discord?: { target: string; content: string; prefix?: string; roles: DiscordRole[] }[];
   // undefined when no telegram/signal channel_settings row matches this
-  // announcement's network and type, OR when the channel is disabled via
+  // announcement's network and type, or when the channel is disabled via
   // ENABLED_CHANNELS — mirrors the discord array's filtering via
   // broadcastTargetsFor so the preview never shows a channel that
   // countFanoutTargets would not actually deliver to.
@@ -120,7 +120,7 @@ export async function previewAnnouncement(
 
 /**
  * Previews an announcement that is already in the database, for the review
- * page. Unlike previewAnnouncement it does NOT re-derive identity: the stored
+ * page. Unlike previewAnnouncement it does not re-derive identity: the stored
  * id, revision and slug go through untouched, so the webhook event_id and the
  * canonical link shown here are the ones that will actually be sent.
  *
@@ -128,7 +128,7 @@ export async function previewAnnouncement(
  * sets it with `now()` inside the publishing transaction — so it renders as
  * null. The review page states that; do not substitute a plausible timestamp.
  *
- * A ZodError is deliberately NOT caught. Stored rows were validated when they
+ * A ZodError is deliberately not caught. Stored rows were validated when they
  * were saved, so a failure here is a real fault a reviewer must see, not an
  * empty preview pane.
  */

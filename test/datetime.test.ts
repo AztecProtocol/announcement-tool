@@ -32,7 +32,7 @@ describe('utcInputToIso', () => {
   });
 
   it('does not depend on the host timezone', () => {
-    // The whole point: the same string must yield the same instant everywhere.
+    // This is what the function must guarantee: the same string yields the same instant everywhere.
     const before = process.env.TZ;
     process.env.TZ = 'Asia/Tbilisi';
     const a = utcInputToIso('2026-08-28T14:00');

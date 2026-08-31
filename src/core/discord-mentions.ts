@@ -3,7 +3,7 @@ import type { DiscordRole } from './types.js';
 /**
  * Composes the mention line that goes above a Discord message.
  *
- * This is the ONE place that decides what gets mentioned. Both
+ * This is the one place that decides what gets mentioned. Both
  * src/adapters/discord.ts and src/core/preview.ts call it, so the Raw preview
  * cannot drift from what is actually posted — that preview is the accepted
  * mitigation for sending allowed_mentions with mentions enabled.
@@ -29,7 +29,7 @@ const BUILTIN_IDS = new Set(BUILTIN_ROLES.map(r => r.id));
 /**
  * The prefix is the emoji preamble, not a mention field. An operator can paste
  * a role or user mention into it — Discord's UI autocompletes them in any text
- * box — and it would otherwise be posted AND permitted despite never being
+ * box — and it would otherwise be posted and permitted despite never being
  * selected. Mentions come only from the selection, so strip any that appear
  * here. Covers <@&123> (role), <@123> and <@!123> (user) — all three resolve
  * as pings in Discord.
@@ -73,7 +73,7 @@ export const MAX_PREFIX_LENGTH = 512;
  * Checks a prefix a human just entered. Returns a message to show them, or
  * undefined when the prefix is acceptable.
  *
- * Deliberately NOT called from composeMentionLine. That function runs against
+ * Deliberately not called from composeMentionLine. That function runs against
  * rows already in the database, some written before this cap existed, and
  * refusing there would break an existing destination at send time — a worse
  * failure than the accident this prevents. Enforce at entry only.

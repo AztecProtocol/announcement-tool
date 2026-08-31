@@ -46,7 +46,7 @@ export async function countFanoutTargets(sql: Tx, a: Announcement): Promise<Deli
     if (matchesSubscription(a, s)) targets.push({ channel: s.channel, target: s.id });
   }
 
-  // Applied to broadcast AND subscription targets together, deliberately: they
+  // Applied to broadcast and subscription targets together, deliberately: they
   // arrive from two different branches above, and a filter on only one of them
   // would leave email/webhook subscribers receiving a channel the deployment
   // has switched off. See src/core/enabled-channels.ts for why this gate is

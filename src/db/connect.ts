@@ -2,12 +2,12 @@
  * The one place that turns environment configuration into a database
  * connection.
  *
- * WHY THIS EXISTS. Before this file there were four independent
+ * Why this exists: before this file there were four independent
  * `postgres(url, { max: N })` calls (web, worker, the Netlify tick function,
  * the migration CLI), each with its own copy of the local-dev fallback URL.
- * That is exactly how the four drift apart: a change to how the URL is
- * resolved, or to how TLS is configured, has to be made — and kept correct —
- * in four places instead of one. Centralising first, before TLS is added, is
+ * That is how the four drift apart: a change to how the URL is resolved, or
+ * to how TLS is configured, has to be made — and kept correct — in four
+ * places instead of one. Centralising first, before TLS is added, is
  * deliberate: it means TLS is added once, not reconciled four times.
  *
  * This database is not "just announcements". channel_settings.config holds
@@ -38,18 +38,18 @@
  * believe they have a verified connection when they do not. Refusing to
  * start is loud and immediate; a false sense of verification is neither.
  *
- * DATABASE_SSL_MODE/DATABASE_SSL_ROOT_CERT are NOT the only place TLS could
+ * DATABASE_SSL_MODE/DATABASE_SSL_ROOT_CERT are not the only place TLS could
  * be set: postgres.js's own parseOptions (node_modules/postgres/src/index.js)
  * reads `?sslmode=` and `?sslrootcert=system` directly out of the connection
  * string and turns them into its `ssl` option — including `?sslmode=require`,
- * which is exactly the half-guarantee this file exists to refuse. If we only
+ * which is the same half-guarantee this file exists to refuse. If we only
  * validated our own env vars and passed the URL through untouched, an
  * operator writing the connection string the way every Postgres tutorial and
  * managed-provider console does (`?sslmode=require` in DATABASE_URL) would
  * bypass this file's refusal completely and connect encrypted-but-unverified
  * with no error and no warning. So buildConnectionOptions checks the URL for
- * both parameters and throws if either is present: there is exactly one
- * authority for TLS configuration here, not two competing ones.
+ * both parameters and throws if either is present: there is one authority
+ * for TLS configuration here, not two competing ones.
  *
  * That check runs in two layers, not one. A `new URL()` parse handles the
  * common case, but postgres.js also accepts a multi-host connection string
@@ -57,8 +57,8 @@
  * `new URL()` rejects outright — postgres.js only manages to parse it by
  * rewriting the string to its first host before parsing. A version of this
  * check that silently skipped validation whenever `new URL()` threw would
- * therefore let exactly the multi-host + `?sslmode=require` combination
- * through unchecked: real syntax, a real bypass, not a hypothetical one. So a
+ * therefore let the multi-host + `?sslmode=require` combination through
+ * unchecked: real syntax, a real bypass, not a hypothetical one. So a
  * second, unconditional regex scan of the raw string backs up the parser —
  * see buildConnectionOptions for both.
  */
@@ -103,11 +103,11 @@ export function buildConnectionOptions(env: DbEnv): ConnectionOptions {
   // its first host before calling `new URL()` internally, but nothing here
   // does that rewrite first. So the WHATWG parse below is not a reliable way
   // to see every query parameter postgres.js will see, and the string-level
-  // regex immediately after it is not a "belt and suspenders" extra — it is
-  // the check that actually covers every URL shape postgres.js accepts. It
-  // runs unconditionally, in addition to the parser-based check, and there is
+  // regex immediately after it is not an extra check — it is the check that
+  // actually covers every URL shape postgres.js accepts. It runs
+  // unconditionally, in addition to the parser-based check, and there is
   // no catch-and-continue path here: a URL this file cannot make sense of is
-  // exactly the case the regex exists for, not a reason to skip validation.
+  // the case the regex exists for, not a reason to skip validation.
   let parsed: URL | undefined;
   try {
     parsed = new URL(url);
@@ -225,7 +225,7 @@ const PEM_FOOTER = '-----END CERTIFICATE-----';
  * resolves the CA the same way, once. A no-op when there is no ssl.ca value
  * to resolve.
  *
- * ACCEPTS EITHER A FILE PATH OR INLINE PEM CONTENT. A file-path-only
+ * Accepts either a file path or inline PEM content. A file-path-only
  * contract works for the VM deployment and local dev, both of which have a
  * real filesystem to place a CA bundle on — but it is unsatisfiable on
  * Netlify. A Netlify serverless function has no filesystem to write a
@@ -243,7 +243,7 @@ const PEM_FOOTER = '-----END CERTIFICATE-----';
  * wrong mount, missing file) still fails loudly via readFileSync throwing
  * ENOENT, not a silent unverified connection.
  *
- * ESCAPED NEWLINES: Netlify's environment variable UI (and many others)
+ * Escaped newlines: Netlify's environment variable UI (and many others)
  * accept genuine multi-line values, so a PEM pasted in as-is works with no
  * special handling. But pasting a certificate through some web UIs, or
  * through tooling that round-trips env vars as single-line JSON/shell
@@ -264,7 +264,7 @@ const PEM_FOOTER = '-----END CERTIFICATE-----';
  * newlines is left untouched, and this branch only ever fires on the
  * specific "flattened by a UI" shape it exists to fix.
  *
- * TRUNCATION: a value that starts with a genuine `-----BEGIN CERTIFICATE-----`
+ * Truncation: a value that starts with a genuine `-----BEGIN CERTIFICATE-----`
  * header but was cut short before reaching `-----END CERTIFICATE-----` — a
  * paste dropped its last line, or hit a length limit in some UI's env-var
  * field — is still detected as PEM by PEM_HEADER and handed to Node's TLS

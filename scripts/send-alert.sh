@@ -3,7 +3,7 @@
 # original inline send_alert(): the cert-reload hook needed the same
 # alert path — "a failed or missing backup raises an alert on the same
 # path as channel health" per the concept doc, and a failed cert-reload
-# deserves exactly the same treatment, not a second, different
+# deserves the same treatment, not a second, different
 # mechanism. Both backup.sh and
 # infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 source
 # this file rather than each keeping their own copy of the curl/case
@@ -16,7 +16,7 @@
 # needed on a host that already has backup.sh's .env set up (both are
 # required there via the `:?` guards in docker-compose.split.yml).
 #
-# Best-effort by design: a failure to SEND an alert must never mask or
+# Best-effort by design: a failure to send an alert must never mask or
 # override the real failure being reported. Every branch below logs and
 # returns 0 even when the send itself fails.
 
@@ -27,7 +27,7 @@
 # name) — would otherwise land in the request body unescaped and produce
 # malformed JSON. Brevo/Resend then reject the request with a 400, which
 # means the alert about a broken cert reload (or a failed backup) is
-# exactly the one that silently fails to send. Prefer jq, which handles
+# the one that silently fails to send. Prefer jq, which handles
 # every JSON-special character (control characters, unicode) correctly;
 # fall back to a plain sed pass over the two characters that break the
 # hand-built printf templates below (backslash first, so escaping it

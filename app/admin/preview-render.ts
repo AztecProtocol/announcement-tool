@@ -1,7 +1,7 @@
 /**
  * Turns a channel payload string into structured blocks the preview draws.
  *
- * This module NEVER produces the bytes that get sent — it only re-reads the
+ * This module never produces the bytes that get sent — it only re-reads the
  * payload that src/core/render.ts already produced, so the rendered view can
  * never drift from the wire format in a way that changes what is delivered.
  * Deliberately React-free so it is unit-testable on its own.

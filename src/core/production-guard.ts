@@ -3,13 +3,13 @@
  * where the admin surface could be reached by someone who is not on the
  * tailnet.
  *
- * WHY THIS EXISTS. Admin identity comes from the `Tailscale-User-Login` header
+ * Why this exists: admin identity comes from the `Tailscale-User-Login` header
  * (src/core/identity.ts). That header is trivially forgeable by anyone who can
- * reach the port. It is trustworthy for exactly one reason: the app binds to
+ * reach the port. It is trustworthy for one reason: the app binds to
  * loopback and `tailscale serve` is the only route in. Nothing else enforces
  * that — so these checks do.
  *
- * A misconfigured instance that RUNS is far worse than one that refuses to
+ * A misconfigured instance that runs is worse than one that refuses to
  * start: a refusal is noticed at once; an open admin surface is not, until an
  * announcement nobody approved is posted to five channels. Discord role
  * mentions cannot be un-sent.
@@ -23,10 +23,10 @@ import { parseEnabledChannels } from './enabled-channels.js';
 
 export interface GuardEnv {
   /**
-   * Deliberately UNREAD. Kept on the interface so the tests can prove the gate
+   * Deliberately unread. Kept on the interface so the tests can prove the gate
    * ignores it: checksApply() must return true for 'staging', 'development' and
    * undefined alike. Gating on NODE_ENV was the original bug — `next start` only
-   * DEFAULTS it (next/dist/bin/next: `process.env.NODE_ENV || defaultEnv`), so
+   * defaults it (next/dist/bin/next: `process.env.NODE_ENV || defaultEnv`), so
    * `NODE_ENV=staging next start` silently disabled every check while the app
    * served admin traffic. Do not reintroduce a branch on this field.
    */
@@ -92,17 +92,17 @@ export interface GuardEnv {
 const LOOPBACK = new Set(['127.0.0.1', '::1']);
 
 /**
- * Whether the safety checks apply. They apply EVERYWHERE except an explicit,
+ * Whether the safety checks apply. They apply everywhere except an explicit,
  * deliberate local opt-out.
  *
- * Deliberately NOT keyed on NODE_ENV === 'production'. `next start` only
- * DEFAULTS NODE_ENV to production (node_modules/next/dist/bin/next:66 is
+ * Deliberately not keyed on NODE_ENV === 'production'. `next start` only
+ * defaults NODE_ENV to production (node_modules/next/dist/bin/next:66 is
  * `process.env.NODE_ENV = process.env.NODE_ENV || defaultEnv`), so
  * `NODE_ENV=staging next start` would otherwise disable every check while the
  * app served admin traffic. A guard that one unexpected env value switches off
  * is not a guard.
  *
- * The opt-out is a named variable nobody sets by accident, and it is the ONLY
+ * The opt-out is a named variable nobody sets by accident, and it is the only
  * way to skip the checks.
  */
 export function checksApply(env: GuardEnv): boolean {
@@ -112,7 +112,7 @@ export function checksApply(env: GuardEnv): boolean {
 /**
  * Fatal configuration problems. An empty array means safe to start.
  *
- * Returns ALL problems rather than throwing on the first, so an operator fixes
+ * Returns all problems rather than throwing on the first, so an operator fixes
  * one deployment and not three in sequence.
  *
  * Skips entirely only when checksApply(env) is false, i.e. ANNOUNCE_ALLOW_INSECURE_DEV=1

@@ -48,8 +48,8 @@ describe('announce_app role (least-privilege app credential — migrations/014_a
   const appUrl = URL.replace(/announce:announce@/, 'announce_app:app-role-test-pw@');
   // If DATABASE_URL's credentials are not literally announce:announce, the
   // replace above silently no-ops and appUrl === URL — which would mean the
-  // "app role" checks below actually run as the OWNER, passing every
-  // assertion for the wrong reason (e.g. `drop table` would SUCCEED and
+  // "app role" checks below actually run as the owner, passing every
+  // assertion for the wrong reason (e.g. `drop table` would succeed and
   // destroy the table, not get refused). Guard against that explicitly.
   const rewriteTookEffect = appUrl !== URL;
 

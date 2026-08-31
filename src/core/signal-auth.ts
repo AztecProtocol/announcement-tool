@@ -13,7 +13,7 @@ export const SIGNAL_AUTH_HEADER = 'x-announce-signal-secret';
  * Builds the header the adapter attaches to every signal-cli-rest-api
  * request.
  *
- * DELIBERATE DESIGN: when `secret` is unset (or blank — Docker Compose, the
+ * Deliberate design: when `secret` is unset (or blank — Docker Compose, the
  * Netlify UI, and .env files all produce '' for "present but blank", so
  * blank is treated the same as unset, matching parseEnabledChannels and
  * DATABASE_SSL_MODE elsewhere in this codebase), this returns {} — no
@@ -22,7 +22,7 @@ export const SIGNAL_AUTH_HEADER = 'x-announce-signal-secret';
  * unreachable from outside the private network, no secret is configured,
  * and none is needed.
  *
- * DO NOT "harden" this into throwing when `secret` is missing. signal-cli-
+ * Do not "harden" this into throwing when `secret` is missing. signal-cli-
  * rest-api has no auth of its own — the Caddy proxy in front of it on the
  * split deployment is what fails closed, by rejecting any request that
  * lacks this header. A client that refuses to send a header it doesn't have

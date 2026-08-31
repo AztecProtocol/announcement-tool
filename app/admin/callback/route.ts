@@ -1,36 +1,36 @@
 /**
- * ⚠️ GET /admin/callback — THIS ROUTE MINTS ADMIN IDENTITY. READ BEFORE EDITING. ⚠️
+ * ⚠️ GET /admin/callback — this route mints admin identity. Read before editing. ⚠️
  *
  * Auth0 redirects here with an authorization code. This route turns that code
  * into a signed session cookie that middleware.ts will accept as proof
- * of who the caller is. That makes it the SECOND entrance to the same trust
+ * of who the caller is. That makes it the second entrance to the same trust
  * boundary middleware.ts guards, and everything the four-eyes rule protects —
- * a `critical` announcement is an IRREVERSIBLE Discord role ping that needs two
- * DIFFERENT publishers — rests on it not being bypassable.
+ * a `critical` announcement is an irreversible Discord role ping that needs two
+ * different publishers — rests on it not being bypassable.
  *
- * The order below is load-bearing. Do not reorder it:
+ * The order below matters. Do not reorder it:
  *
- *   1. Compare `state` to the cookie. Mismatch or missing → refuse WITHOUT
+ *   1. Compare `state` to the cookie. Mismatch or missing → refuse without
  *      exchanging. Exchanging first and checking later would still burn the
  *      code and still be CSRF-vulnerable.
  *   2. Exchange the code at Auth0's token endpoint, sending the PKCE
  *      `code_verifier` from its HttpOnly cookie.
- *   3. VERIFY the returned ID token — signature, issuer, audience, expiry —
+ *   3. Verify the returned ID token — signature, issuer, audience, expiry —
  *      against the tenant JWKS. See the warning below.
- *   4. `emailFromClaims` on the VERIFIED payload. Undefined → refuse.
+ *   4. `emailFromClaims` on the verified payload. Undefined → refuse.
  *   5. Set the session cookie.
  *   6. Clear the transient cookies and redirect to /admin.
  *
- * ⚠️ WHY STEP 3 IS NOT OPTIONAL, EVEN THOUGH THE TOKEN CAME FROM AUTH0 OVER
- * DIRECT HTTPS. It is tempting to decode the ID token and trust its claims
+ * ⚠️ Why step 3 is not optional, even though the token came from Auth0 over
+ * direct HTTPS: it is tempting to decode the ID token and trust its claims
  * because we fetched it ourselves from the tenant. Do not. The verification
- * pins the issuer AND the audience, and an unverified decode would accept a
+ * pins the issuer and the audience, and an unverified decode would accept a
  * token minted for a different application in the same tenant, or one whose
  * signature never checked out at all. It also keeps this route's rules
- * IDENTICAL to middleware.ts's — both call the same helper in
+ * identical to middleware.ts's — both call the same helper in
  * src/core/auth0-verify.ts precisely so the two cannot drift apart.
  *
- * FAILURE HANDLING. Every failure redirects to `/admin?login_error=<slug>` with
+ * Failure handling: every failure redirects to `/admin?login_error=<slug>` with
  * an opaque slug. The underlying Auth0 error is never rendered and never logged:
  * `error_description` can carry internal detail, and the code, tokens, verifier
  * and cookie values are all secrets. Nothing sensitive is logged at any level.
@@ -71,7 +71,7 @@ export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const cookies = parseCookies(request.headers.get('cookie'));
 
-  // ── STEP 1 — STATE. FIRST. BEFORE ANY EXCHANGE. ──────────────────────────
+  // ── Step 1 — state, checked before any exchange ──────────────────────────
   // Constant-time comparison; fails closed on a missing cookie or param.
   if (!stateMatches(cookies.get(STATE_COOKIE), url.searchParams.get('state'))) {
     return fail('state');
@@ -92,7 +92,7 @@ export async function GET(request: Request): Promise<Response> {
   // Missing config denies. It must never mean "skip verification".
   if (!config || !clientId || !clientSecret || !sessionSecret) return fail('config');
 
-  // ── STEP 2 — EXCHANGE THE CODE ───────────────────────────────────────────
+  // ── Step 2 — exchange the code ────────────────────────────────────────────
   // Auth0 requires application/x-www-form-urlencoded here, not JSON.
   let idToken: string | undefined;
   try {
@@ -124,19 +124,19 @@ export async function GET(request: Request): Promise<Response> {
 
   if (!idToken) return fail('exchange');
 
-  // ── STEP 3 — VERIFY THE ID TOKEN ─────────────────────────────────────────
+  // ── Step 3 — verify the ID token ──────────────────────────────────────────
   // Signature, issuer, audience and expiry, against the tenant JWKS. Shared
   // with middleware.ts so the two verifications cannot diverge.
   const payload = await verifyAuth0Token(idToken, config);
   if (!payload) return fail('token');
 
-  // ── STEP 4 — CLAIM POLICY ────────────────────────────────────────────────
+  // ── Step 4 — claim policy ──────────────────────────────────────────────────
   // emailFromClaims already enforces `email_verified === true`; do not add a
   // second, competing claim check here.
   const email = emailFromClaims(payload);
   if (!email) return fail('identity');
 
-  // ── STEP 5 — MINT THE SESSION COOKIE ─────────────────────────────────────
+  // ── Step 5 — mint the session cookie ──────────────────────────────────────
   let session: string;
   try {
     session = await signSession(email, sessionSecret);
@@ -144,12 +144,12 @@ export async function GET(request: Request): Promise<Response> {
     return fail('identity');
   }
 
-  // ── STEP 6 — SET, CLEAR, REDIRECT ────────────────────────────────────────
+  // ── Step 6 — set, clear, redirect ─────────────────────────────────────────
   return respond('/admin', [sessionCookie(session)]);
 }
 
 /**
- * SameSite=Lax is REQUIRED, not a preference: Strict would withhold the cookie
+ * SameSite=Lax is required, not a preference: Strict would withhold the cookie
  * on the cross-site navigation back from Auth0, so /admin would not see the
  * session it was just given and would bounce the user back to login forever.
  *

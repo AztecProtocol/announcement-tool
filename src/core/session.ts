@@ -4,7 +4,7 @@
  * middleware.ts already trusts a verified Auth0 RS256 `Authorization: Bearer`
  * token as proof of identity, but a browser tab never sends that header — there
  * is no way to attach it to an ordinary navigation. This module gives the login
- * flow a SECOND way to prove the same thing: a signed cookie the browser sends
+ * flow a second way to prove the same thing: a signed cookie the browser sends
  * automatically on every request.
  *
  * Because that cookie becomes an alternate path to a trusted identity, and every
@@ -60,7 +60,7 @@ export async function signSession(
 
 /**
  * Verifies the signature and expiry of a session cookie value and returns the
- * email it carries, or `undefined` on ANY failure — bad signature, wrong secret,
+ * email it carries, or `undefined` on any failure — bad signature, wrong secret,
  * expired token, malformed input, or a blank/missing email claim. Never throws:
  * a forged or corrupted cookie must produce a clean denial, not a 500.
  */

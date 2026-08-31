@@ -1,7 +1,7 @@
 /**
  * GET /admin/login — starts the Auth0 Authorization Code + PKCE browser flow.
  *
- * WHY THIS EXISTS. middleware.ts authenticates admin requests by verifying an
+ * Why this exists: middleware.ts authenticates admin requests by verifying an
  * RS256 Auth0 JWT from an `Authorization: Bearer` header. A browser tab cannot
  * send that header on an ordinary navigation, so without this flow there is no
  * way to sign in with a browser at all. This route sends the user to Auth0; the

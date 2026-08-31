@@ -60,7 +60,7 @@ describe('resolveIdentity', () => {
 
   // ── The Tailscale branch is gated on the deployment shape ──────────────────
   // On Netlify the app is reachable from the public internet and Netlify strips
-  // only its own X-Nf-* headers, so an inbound Tailscale-User-Login can ONLY be
+  // only its own X-Nf-* headers, so an inbound Tailscale-User-Login can only be
   // attacker-supplied. Honouring it would let one person request a `critical`
   // announcement under one address and confirm it under another, collapsing
   // four-eyes and firing an irreversible Discord role ping.
@@ -90,7 +90,7 @@ describe('resolveIdentity', () => {
     });
 
     it('IGNORES the Tailscale header when DEPLOY_TARGET is unset — the gate is an allowlist', () => {
-      // Chosen deliberately: an unset value must LOSE an identity source, never
+      // Chosen deliberately: an unset value must lose an identity source, never
       // gain one, so a Netlify box that forgot the runtime variable is not
       // silently exploitable. Nothing legitimate is stranded — production-guard
       // already refuses to boot on an unset DEPLOY_TARGET.

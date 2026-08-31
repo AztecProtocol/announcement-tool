@@ -5,7 +5,7 @@
  *
  * Asks a few questions, writes one row to channel_settings, prints it back.
  *
- * Re-running for an EXISTING key prefills every answer from the stored row, so
+ * Re-running for an existing key prefills every answer from the stored row, so
  * pressing Enter through the prompts keeps the current value. This matters: the
  * write below replaces the whole config object, so before prefilling existed a
  * re-run that skipped the webhook-URL prompt silently saved an empty URL and
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     // `config` is `Record<string, unknown>` because it is built up incrementally
     // above from ask()/askList() results and conditionally-set fields — every
     // value actually placed into it is a string, a string array, or an array of
-    // {name,id} objects, all genuinely JSON-safe, but that is not visible to the
+    // {name,id} objects, all JSON-safe, but that is not visible to the
     // type checker from the declaration alone. sql.json's JSONValue type wants a
     // narrower index signature than `unknown` gives it, so this cast documents
     // "already checked to be JSON-safe by construction" rather than papering

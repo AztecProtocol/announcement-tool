@@ -2,22 +2,22 @@
 #
 # Periodic receive poll for the signal-cli-rest-api sidecar.
 #
-# signal-cli warns that an account that only ever SENDS and never RECEIVES
+# signal-cli warns that an account that only ever sends and never receives
 # degrades over time and sending silently stops working — there is no error
 # at send time, `/v2/send` keeps returning 201, messages simply stop
 # arriving. Hit live on 2026-08-11 (see README "Signal registration and
 # operations"). The fix is calling `GET /v1/receive/{number}` on a schedule
 # so the account looks like a normal, active client to Signal's servers.
 #
-# This script makes ONE receive call and exits; scheduling (how often, what
+# This script makes one receive call and exits; scheduling (how often, what
 # to do on failure) lives in docker-compose.prod.yml, in the same
 # sleep-loop-plus-entrypoint shape as the `backup` service uses for
 # scripts/backup.sh — see the comment on that service before changing the
 # pattern here.
 #
-# FAIL LOUDLY. set -euo pipefail is load-bearing: a poll that silently
-# no-ops (curl fails, nobody notices, the account quietly degrades) is
-# worse than no poll at all, because it produces false confidence instead
+# Fail loudly: set -euo pipefail is required, not optional. A poll that
+# silently no-ops (curl fails, nobody notices, the account quietly degrades)
+# is worse than no poll at all, because it produces false confidence instead
 # of a real receive call. Every failure path here prints what failed and
 # exits non-zero.
 set -euo pipefail

@@ -52,7 +52,7 @@ describe('publish flow', () => {
 
     const rows = await sql`select channel, target from delivery_ledger where announcement_id = ${a.id} order by channel, target`;
     // discord mainnet-updates (upgrade+mainnet matches), telegram:main, and the one matching verified webhook sub.
-    // NOT discord:governance-updates (type mismatch), NOT the unverified or testnet-only subs.
+    // Not discord:governance-updates (type mismatch), not the unverified or testnet-only subs.
     expect(rows).toEqual([
       { channel: 'discord', target: 'discord:mainnet-updates' },
       { channel: 'telegram', target: 'telegram:main' },

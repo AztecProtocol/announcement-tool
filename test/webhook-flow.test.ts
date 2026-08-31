@@ -87,7 +87,7 @@ describe('registerWebhook', () => {
   // branch, since the leading select would find the row directly), this test uses
   // dependency injection to force execution down the actual catch(23505) path:
   // registerWebhook's `createSubscriptionImpl` override first calls the real
-  // createSubscription (so the row genuinely gets created — simulating the
+  // createSubscription (so the row actually gets created — simulating the
   // concurrent winner committing first) and then throws a Postgres-shaped 23505
   // error, so registerWebhook's own insert branch truly hits the catch block,
   // re-selects the row, and falls through to applyFilters — proving that exact

@@ -47,7 +47,7 @@ describe('discord adapter', () => {
 
     const payload = JSON.parse(body);
     expect(payload.content.startsWith(`${prefix} <@&111>`)).toBe(true);
-    // A BLANK line separates the mention prefix from the body, so the tag line is
+    // A blank line separates the mention prefix from the body, so the tag line is
     // not crowded against the role pings. startsWith alone would not catch a
     // regression to a single newline, so pin the separator explicitly.
     expect(payload.content.startsWith(`${prefix} <@&111>\n\n[MAINNET]`)).toBe(true);
@@ -117,7 +117,7 @@ describe('discord adapter', () => {
       ('discord:mainnet-updates', 'discord', ${sql.json({ networks: ['mainnet'], types: ['upgrade'], webhook_url: url, prefix, roles, username: 'Aztec Announcements' })})`;
 
     // A row written before migration 010 maps to mentionRoleIds: undefined —
-    // the property genuinely absent, not present-and-empty. That's the code
+    // the property is absent, not present-and-empty. That's the code
     // path `rowToAnnouncement` actually produces for legacy rows via `?? undefined`.
     const { mentionRoleIds: _omitted, ...legacy } = { ...ann, mentionRoleIds: ['111'] };
     await makeDiscordAdapter(sql).deliver(legacy, 'discord:mainnet-updates', 'publish');

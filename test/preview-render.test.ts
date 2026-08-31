@@ -122,9 +122,9 @@ describe('parseMentions', () => {
 });
 
 /**
- * Round-trip: feed the REAL renderer output into the REAL parser, instead of
- * hand-writing input strings. This is the regression guard for the level
- * mismatch at '#' that six per-task reviews missed, because every prior test
+ * Round-trip: feed the real renderer output into the real parser, instead of
+ * hand-writing input strings. This is the regression guard for a level
+ * mismatch at '#' that earlier tests missed, because every prior test
  * on either side only ever exercised its own hand-written fixture.
  */
 describe('renderer output -> parser round trip', () => {

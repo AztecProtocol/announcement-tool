@@ -107,10 +107,10 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
   );
   const nextActionKey = useRef(actionRows.length);
   const nextLinkKey = useRef(linkRows.length);
-  // Built-ins (@everyone / @here) default OFF even for critical: notifying an
+  // Built-ins (@everyone / @here) default off even for critical: notifying an
   // entire server must be an affirmative click, since selecting a built-in is
   // the one selection this tool cannot narrow with allowed_mentions. Named
-  // roles default ON for critical, same as before.
+  // roles default on for critical, same as before.
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>(
     prefill?.mentionRoleIds ?? (severity === 'critical' ? discordRoles.map(r => r.id) : []),
   );

@@ -21,11 +21,11 @@ export function parseFrom(from: string | undefined): { kind: FromKind; id: strin
 
 /**
  * Builds the AnnouncementInput used to prefill the compose form for the
- * `?from=edit:<id>` path — continuing the SAME announcement, so it must
+ * `?from=edit:<id>` path — continuing the same announcement, so it must
  * retain the fields `templateFromAnnouncement` (src/core/templates.ts)
  * deliberately strips for the "copy into a new draft" path: `slug` and each
  * action's `deadline`. Do not simplify the edit branch in page.tsx into a
- * call to templateFromAnnouncement — that is exactly the trap this function
+ * call to templateFromAnnouncement — that is the trap this function
  * (and its test, in test/parse-from.test.ts) exists to catch.
  */
 export function editPrefillFromAnnouncement(a: Announcement): AnnouncementInput {

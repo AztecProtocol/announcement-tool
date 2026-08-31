@@ -3,23 +3,23 @@
  *
  * Clears the session cookie and redirects to `/`.
  *
- * ── DOES THIS ALSO LOG THE USER OUT OF AUTH0? NO, BY DEFAULT. ───────────────
- * This route clears the LOCAL session only. The user's Auth0 tenant session
+ * ── Does this also log the user out of Auth0? No, by default. ───────────────
+ * This route clears the local session only. The user's Auth0 tenant session
  * survives, so clicking "log in" again signs them straight back in without a
  * password prompt. That is the usual expectation for a shared-tenant internal
  * tool: logging out of this app should not log the person out of every other
  * Auth0-backed application they have open.
  *
- * Set `AUTH0_LOGOUT_REDIRECT=1` to ALSO end the Auth0 session. That redirects
+ * Set `AUTH0_LOGOUT_REDIRECT=1` to also end the Auth0 session. That redirects
  * to the tenant's `/v2/logout` endpoint, which clears the tenant session and
  * then sends the browser to `returnTo`. Note the requirement: the `returnTo`
- * value (PUBLIC_BASE_URL plus a trailing slash) MUST be listed in the
+ * value (PUBLIC_BASE_URL plus a trailing slash) must be listed in the
  * application's Allowed Logout URLs in the Auth0 dashboard, or Auth0 refuses
  * the redirect and the user lands on an Auth0 error page instead of the site.
  * That is why it is opt-in rather than the default — it needs tenant
  * configuration this repository cannot make on its own.
  *
- * Either way the local cookie is cleared FIRST and unconditionally, so a
+ * Either way the local cookie is cleared first and unconditionally, so a
  * misconfigured or unreachable Auth0 tenant can never leave the user still
  * logged in here.
  */
@@ -54,7 +54,7 @@ export async function GET(): Promise<Response> {
 }
 
 /**
- * Must mirror the attributes the cookie was SET with — browsers match a
+ * Must mirror the attributes the cookie was set with — browsers match a
  * deletion by name, path and domain, so a mismatched Path would silently leave
  * the real cookie in place and the user still signed in.
  */

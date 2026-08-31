@@ -6,8 +6,8 @@
 # proposal:
 #
 #   - Nightly compressed pg_dump of the whole database.
-#   - Encrypted BEFORE upload (subscriptions holds subscriber emails — PII).
-#   - Uploaded to S3-compatible object storage OFF the VM.
+#   - Encrypted before upload (subscriptions holds subscriber emails — PII).
+#   - Uploaded to S3-compatible object storage off the VM.
 #   - Retention: 30 daily + 12 monthly.
 #   - Restore-verified: every dump is restored into a scratch database and
 #     row counts sanity-checked before the backup is declared successful.
@@ -17,8 +17,8 @@
 #   - The signal-cli data directory is included (the one stateful
 #     credential that can't simply be re-issued).
 #
-# FAIL LOUDLY. set -euo pipefail below is load-bearing: a script that
-# silently half-works (dump succeeds, upload silently no-ops, nobody
+# Fail loudly: set -euo pipefail below is required, not optional. A script
+# that silently half-works (dump succeeds, upload silently no-ops, nobody
 # notices) is worse than no backup at all, because it produces false
 # confidence instead of a dump. Every failure path here prints what failed
 # and exits non-zero — do not add `|| true` anywhere in this file without
@@ -51,7 +51,7 @@ BACKUP_S3_PREFIX="${BACKUP_S3_PREFIX:-announce-backups}"
 
 # Local-only escape hatch for testing without real object storage: if set,
 # the "upload" leg copies the encrypted archive to this directory instead of
-# calling S3. Production must NOT set this — its presence is logged loudly
+# calling S3. Production must not set this — its presence is logged loudly
 # so it can never be mistaken for a real upload.
 BACKUP_LOCAL_DEST="${BACKUP_LOCAL_DEST:-}"
 
@@ -65,8 +65,8 @@ SIGNAL_DATA_DIR="${SIGNAL_DATA_DIR:-/signal-data}"
 # unhealthy channel. This script has no access to the app's TypeScript
 # runtime (it is a standalone shell script so it can run from cron/compose
 # without the app booting), so it reaches the *same destination* through
-# the *same ESP provider's HTTP API* directly. Best-effort: if the alert
-# itself fails to send, that is logged but must NOT mask the original
+# the same ESP provider's HTTP API directly. Best-effort: if the alert
+# itself fails to send, that is logged but must not mask the original
 # backup failure's exit code.
 ALERT_EMAIL_TO="${ALERT_EMAIL_TO:-}"
 ESP_PROVIDER="${ESP_PROVIDER:-console}"
@@ -146,7 +146,7 @@ fi
 tar -cf "$BUNDLE_FILE" -C "$STAGE_DIR" .
 
 # ---------------------------------------------------------------------------
-# Step 3: encrypt BEFORE upload. Symmetric AES-256, passphrase from
+# Step 3: encrypt before upload. Symmetric AES-256, passphrase from
 # BACKUP_ENCRYPTION_KEY. This happens before the archive ever leaves the
 # process's own temp directory.
 # ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ fi
 log "encrypted ok: $(wc -c < "$ENC_FILE") bytes"
 
 # ---------------------------------------------------------------------------
-# Step 4: restore-verify BEFORE calling this a successful backup. Restore
+# Step 4: restore-verify before calling this a successful backup. Restore
 # into a scratch database, sanity-check row counts against the source,
 # tear the scratch database down. This is the step that separates a real
 # backup from a hopeful one. A corrupt/truncated dump must fail this step
@@ -280,7 +280,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 6: retention — 30 daily + 12 monthly. List remote objects, keep the
 # newest N per prefix, delete the rest. Failure to prune is logged but does
-# NOT fail the whole run: today's backup is safely uploaded and verified
+# not fail the whole run: today's backup is safely uploaded and verified
 # either way, and an old backup outliving its retention window is a cost
 # problem, not a data-loss one — unlike every step above it.
 # ---------------------------------------------------------------------------

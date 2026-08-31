@@ -71,7 +71,7 @@ export default async function AdminComposePage({
       const a = await getLatest(db, parsed.id);
       prefill = a ? templateFromAnnouncement(a) : undefined;
     } else {
-      // edit: continues the SAME announcement — same id, same slug, revision
+      // edit: continues the same announcement — same id, same slug, revision
       // incremented. Must not go through templateFromAnnouncement, which
       // deliberately strips the slug and dates for the "copy" flow above.
       // Only a draft may be edited; reviseDraft would refuse the save anyway,

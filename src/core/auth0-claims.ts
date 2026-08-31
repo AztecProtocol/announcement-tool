@@ -1,8 +1,8 @@
 /**
  * Claim extraction for Auth0-issued JWTs.
  *
- * This module is deliberately PURE and network-free. It takes a payload that has
- * ALREADY had its signature, issuer, audience and expiry verified (that happens in
+ * This module is deliberately pure and network-free. It takes a payload that has
+ * already had its signature, issuer, audience and expiry verified (that happens in
  * middleware.ts via `jose`), and decides whether the claims describe an identity we
  * are willing to treat as a publisher.
  *
@@ -20,7 +20,7 @@ const EMAIL_CLAIM = 'email';
  * Fails closed on every unexpected shape. In particular `email_verified` must be
  * exactly boolean `true` — a missing claim, a string "true", or `false` all deny.
  * Without that check, anyone who can register an account at an address they do not
- * own becomes a valid SECOND approver for a `critical` announcement, which defeats
+ * own becomes a valid second approver for a `critical` announcement, which defeats
  * the four-eyes rule protecting the irreversible Discord role ping.
  */
 export function emailFromClaims(payload: Record<string, unknown>): string | undefined {
@@ -41,6 +41,6 @@ export function emailFromClaims(payload: Record<string, unknown>): string | unde
  * Named with an `x-announce-internal-` prefix so it is obviously not a platform
  * header and obviously not something a client should ever send. It carries no
  * signature of its own — see resolveIdentity's doc comment and middleware.ts for
- * the (single, load-bearing) reason it can be trusted.
+ * the one reason it can be trusted.
  */
 export const AUTH0_IDENTITY_HEADER = 'x-announce-internal-auth0-email';

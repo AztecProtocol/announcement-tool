@@ -30,7 +30,7 @@ describe('runTick', () => {
   it('still runs fan-out when the scheduler throws', async () => {
     // publishDueScheduled runs inside sql.begin(...) as the tick's very first
     // transactional call; runFanoutOnce and dispatchHealthAlerts each start
-    // their own sql.begin(...) later. Wrapping .begin so only the FIRST call
+    // their own sql.begin(...) later. Wrapping .begin so only the first call
     // throws forces the scheduler section to fail from outside runTick,
     // without touching any production code — runTick only requires a `Sql`,
     // and this is a spy over the real connection pool's `.begin` method.
