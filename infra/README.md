@@ -310,8 +310,9 @@ the same commands ran over Tailscale against a private address.
 migration, using the app's own migration entrypoint from a checkout of
 this repo (`npm install` already run — see the root `README.md`), as the
 owner. Run every command in this section from the repo root (the
-directory with `package.json` in it) — this is also where step 4's
-`isrgrootx1.pem` should be downloaded, so both live in one place:
+directory with `package.json` in it) — this is also where the
+`isrgrootx1.pem` from step 4 of this file (step 5 of `DEPLOY.md`) should be
+downloaded, so both live in one place:
 
 ```sh
 export DATABASE_SSL_MODE=verify-full DATABASE_SSL_ROOT_CERT="$PWD/isrgrootx1.pem"

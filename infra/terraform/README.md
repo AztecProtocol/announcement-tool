@@ -21,11 +21,11 @@ looks like a Terraform bug (see below).
    printed by the `announce_server_ipv4` output
 3. Ansible: installs Postgres,          -> DEPLOY.md step 4
    signal-cli-rest-api and Caddy
-4. alter role announce_app with         -> DEPLOY.md step 6, and
+4. Verify the TLS chain closes          -> DEPLOY.md step 5
+   (openssl s_client, verify-full)
+5. alter role announce_app with         -> DEPLOY.md step 6, and
    login password '...'                    infra/README.md "Deploying:
                                             setting the real password"
-5. Verify the application connects      -> DEPLOY.md step 5
-   with sslmode=verify-full
 ```
 
 This list is a summary. It numbers the Terraform-facing steps only, and it
@@ -37,12 +37,12 @@ does not give the commands. The full procedure, with every command, is
 Warning: port 5432 is not safe to treat as live until all five steps are done.
 Terraform's `apply` only creates the host and opens the firewall. It does
 not install Postgres, does not create the `announce_app` role's password,
-and does not configure TLS. Between step 1 and step 4, 5432 is a public,
+and does not configure TLS. Between step 1 and step 5, 5432 is a public,
 listening port. Before Ansible runs, nothing is behind that port yet.
 After Ansible runs, the `announce_app` role exists but stays `NOLOGIN`
-until step 4 is done by hand (see [`infra/README.md`](../README.md) for why this is
+until step 5 is done by hand (see [`infra/README.md`](../README.md) for why this is
 deliberate: a committed placeholder password would be worse). Do not
-point the application's `DATABASE_URL` at this host until step 5 has
+point the application's `DATABASE_URL` at this host until step 4 has
 actually been checked, not assumed.
 
 ### Why step 2 must happen before step 3

@@ -163,10 +163,16 @@ signal-receive` or `docker compose up -d backup`).
 
 ```sh
 stat -c "%a %n" /opt/announce/.env
+grep -c '=$' /opt/announce/.env
 ```
 
-The output must be `600 /opt/announce/.env`. Any other mode means the
-secrets file is readable by other users on the host.
+The first command must print `600 /opt/announce/.env`. Any other mode means
+the secrets file is readable by other users on the host.
+
+The second command counts the values still empty. It must print `4`: the
+three `BACKUP_S3_*` values and `SIGNAL_ACCOUNT`, which this deployment leaves
+empty on purpose. A higher number means a value marked "No" in the table
+above is still blank, and step 4 will abort the whole stack.
 
 ---
 
@@ -289,10 +295,17 @@ printf 'announce_app password: %s\n' "$APP_PW"
 ```sh
 PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem" \
   psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce" \
-  -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
+  -c "select rolcanlogin from pg_roles where rolname = 'announce_app';" \
+  -c "select ssl from pg_stat_ssl where pid = pg_backend_pid();"
 ```
 
-The result must be `t`. If it is `f`, the `alter role` command did not run.
+The first result must be `t`. If it is `f`, the `alter role` command did not
+run.
+
+The second result must also be `t`. It reports whether this connection used
+TLS. If it is `f`, the commands above ran over plain text, and the owner
+password crossed the internet unprotected. Check that `PGSSLMODE` and
+`PGSSLROOTCERT` are set, then change both passwords.
 
 This puts the generated password in your shell history, in `$APP_PW`, and in
 the printed output above. Copy it into Netlify's environment variables (step
