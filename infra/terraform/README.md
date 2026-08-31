@@ -5,8 +5,9 @@ Netlify's egress on 5432), signal-cli-rest-api, and a Caddy reverse proxy
 (443 — ACME and the Signal proxy). See `vm.tf`, `variables.tf`, and
 `outputs.tf` for what and why. See `versions.tf` for the state decision.
 
-**This file covers the Terraform module only.** The deployment procedure,
-with every command, is the runbook: [`infra/README.md`](../README.md).
+**This file covers the Terraform module only.** To deploy, follow
+[`infra/DEPLOY.md`](../DEPLOY.md) — the step-by-step procedure. For the
+reasoning behind each step, see [`infra/README.md`](../README.md).
 
 ## Apply order
 

@@ -86,7 +86,14 @@ example, for another append-only audit table). See the comment in
 `permission denied`, not open. That is the correct default for a
 credential reachable from the public internet.
 
-## Deploying the split infrastructure — the runbook
+## Deploying the split infrastructure — the reference
+
+**To deploy, follow [`DEPLOY.md`](DEPLOY.md).** It is the step-by-step
+procedure: the commands, in order, with a check after each one.
+
+This section is the reference behind those steps. It explains why each step
+exists, what it protects against, and what happens when it is done wrong. Read
+it when a step fails, or before changing the procedure.
 
 This is the procedure for standing up `db.announce.aztec.network`: one
 Hetzner VM (Postgres, the Signal sidecar, and Caddy), with the app and

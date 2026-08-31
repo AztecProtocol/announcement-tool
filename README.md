@@ -8,7 +8,7 @@ Release-only announcement pipeline (author once → fan out).
 
 `DEPLOY_TARGET=vm` selects a different deployment shape, where the app itself runs on a VM behind Tailscale. The code still supports that shape, and this README documents it wherever the two differ. It is not the shape described here.
 
-This README's Admin section covers the application. The VM's deploy procedure and security posture, and what has and has not been verified, are in [`infra/README.md`](infra/README.md).
+This README's Admin section covers the application. To deploy the VM, follow [`infra/DEPLOY.md`](infra/DEPLOY.md). Its security posture, and what has and has not been verified, are in [`infra/README.md`](infra/README.md).
 
 ## Development Setup
 
