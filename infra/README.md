@@ -122,9 +122,9 @@ and `infra/Caddyfile.split` for exactly what runs and why.
   job all exist. But Signal is not usable until a number is registered by
   hand. See `main`'s README Signal registration notes for that procedure,
   which this branch does not change. Do not add `signal` to Netlify's
-  `ENABLED_CHANNELS` until that registration is done (see step 8).
+  `ENABLED_CHANNELS` until that registration is done (see step 7).
 - **DNS.** Terraform does not manage the `aztec.network` nameservers. The
-  A record is a manual step (step 4).
+  A record is a manual step (step 3).
 
 ### 1. Prerequisites
 
@@ -132,7 +132,7 @@ and `infra/Caddyfile.split` for exactly what runs and why.
   (`TF_VAR_hcloud_token`, or a git-ignored `terraform.tfvars` — see
   `terraform/terraform.tfvars.example`).
 - DNS control for `announce.aztec.network`. You will need to create an A
-  record once the VM exists (step 4).
+  record once the VM exists (step 3).
 - An SSH public key. This key's material must differ from any other
   Hetzner module's key in the same project (for example,
   `aztec-observability`'s). Hetzner rejects a duplicate fingerprint
@@ -167,7 +167,7 @@ Point an A record for `announce.aztec.network` at the
 `announce_server_ipv4` output from step 2, in whatever system controls
 the `aztec.network` nameservers.
 
-**This is a hard prerequisite for step 5, not an optional check.** Caddy
+**This is a hard prerequisite for step 4, not an optional check.** Caddy
 performs its ACME challenge for `announce.aztec.network` on first run. If
 the A record has not propagated yet, the challenge fails. That failure
 surfaces inside Ansible or Caddy, and it looks like something is broken
@@ -181,7 +181,7 @@ dig +short announce.aztec.network
 ```
 
 Compare the output to the `announce_server_ipv4` value from step 2. Do
-not proceed to step 5 until they match. If you query a resolver that has
+not proceed to step 4 until they match. If you query a resolver that has
 cached the old answer, or no answer, either wait for the TTL to expire or
 query a public resolver directly, for example
 `dig +short announce.aztec.network @1.1.1.1`.

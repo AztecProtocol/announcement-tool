@@ -21,7 +21,7 @@ bug (see below).
 5. Verify the application connects with sslmode=verify-full
 ```
 
-Port 5432 is not safe to treat as live until all five steps are done.
+Warning: port 5432 is not safe to treat as live until all five steps are done.
 Terraform's `apply` only creates the host and opens the firewall. It does
 not install Postgres, does not create the `announce_app` role's password,
 and does not configure TLS. Between step 1 and step 4, 5432 is a public,
