@@ -54,11 +54,13 @@ in`. It does not open a silent door.
 
 After running the migration against a real deployment, enable login with
 a real password. Do this as a superuser, using the `announce` owner
-credential. There is no separate summary here: see step 5 of the deployment
-runbook below for the actual command and every pitfall around it (there is
-no `postgres` user or `psql` binary on the VM host itself — Postgres runs in
-a container — so this cannot be run over SSH against the host either; the
-command has to go over the network, with TLS, as step 5 shows).
+credential. There is no separate summary here. Step 5 below, in this file, has
+the command and every pitfall around it. The same procedure is step 6 of
+[`DEPLOY.md`](DEPLOY.md), which numbers its steps differently.
+
+This command cannot run on the VM. Postgres runs in a container, so the host
+has no `postgres` user and no `psql` binary. The command goes over the network
+with TLS, as step 5 shows.
 
 Store the generated password only in the deployment's secret manager or
 env (for example, as the credential in the application's `DATABASE_URL`).
