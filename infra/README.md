@@ -54,17 +54,11 @@ in`. It does not open a silent door.
 
 After running the migration against a real deployment, enable login with
 a real password. Do this as a superuser, using the `announce` owner
-credential:
-
-```sh
-# Warning: run this on the VM, against 127.0.0.1. Do not run it across the
-# internet. `psql` defaults to sslmode=prefer, which silently falls back to
-# plaintext and never verifies the server. Run this command from off the VM
-# and it sends the new password as literal cleartext SQL. The full
-# procedure, including the off-VM alternative and two related pitfalls, is
-# step 5 of the deployment runbook below. Prefer that; this is the summary.
-ssh <vm> "sudo -u postgres psql -h 127.0.0.1 -c \"alter role announce_app with login password '\$(openssl rand -base64 32)';\""
-```
+credential. There is no separate summary here: see step 5 of the deployment
+runbook below for the actual command and every pitfall around it (there is
+no `postgres` user or `psql` binary on the VM host itself — Postgres runs in
+a container — so this cannot be run over SSH against the host either; the
+command has to go over the network, with TLS, as step 5 shows).
 
 Store the generated password only in the deployment's secret manager or
 env (for example, as the credential in the application's `DATABASE_URL`).
@@ -313,12 +307,16 @@ the same commands ran over Tailscale against a private address.
 **Apply `migrations/014_app_role.sql` first**, and every other pending
 migration, using the app's own migration entrypoint from a checkout of
 this repo (`npm install` already run — see the root `README.md`), as the
-owner:
+owner. Run every command in this section from the repo root (the
+directory with `package.json` in it) — this is also where step 4's
+`isrgrootx1.pem` should be downloaded, so both live in one place:
+
+```sh
+export DATABASE_SSL_MODE=verify-full DATABASE_SSL_ROOT_CERT="$PWD/isrgrootx1.pem"
+```
 
 ```sh
 DATABASE_URL='postgres://announce:<owner password>@db.announce.aztec.network:5432/announce' \
-  DATABASE_SSL_MODE=verify-full \
-  DATABASE_SSL_ROOT_CERT=<path to the ISRG Root X1 PEM — see step 4> \
   npm run migrate
 ```
 
@@ -330,21 +328,26 @@ the public internet, and `buildConnectionOptions`'s `case undefined`
 leaves `ssl` unset entirely if `DATABASE_SSL_MODE` is left unset — the
 same behavior local dev relies on, which would send the owner credential,
 the most powerful credential in this system, over the internet with no
-TLS at all.
+TLS at all, with no error. Exporting both once, as shown above, means
+there is one place to get this right instead of retyping it on every
+command in this section.
 
 Warning: do not put `sslmode` or `sslrootcert` in `DATABASE_URL`'s query
 string. `buildConnectionOptions` refuses to run if either is present —
-see step 7's table for why. Use the two `DATABASE_SSL_*` variables shown
-above instead.
+see step 7's table for why. Use the exported `DATABASE_SSL_*` variables
+instead.
 
 `migrations/014_app_role.sql` creates `announce_app` `NOLOGIN`, on
 purpose, with no password at all. Until the `alter role` command below
-runs, the role cannot connect, regardless of its grants:
+runs, the role cannot connect, regardless of its grants. This prints the
+password once — capture it now, you need it in step 7:
 
 ```sh
-PGSSLMODE=verify-full PGSSLROOTCERT=<path to the ISRG Root X1 PEM> \
+APP_PW="$(openssl rand -base64 32)"
+PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem" \
   psql "postgres://announce:<owner password>@db.announce.aztec.network:5432/announce" \
-  -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+  -c "alter role announce_app with login password '$APP_PW';"
+printf 'announce_app password: %s\n' "$APP_PW"
 ```
 
 Warning: psql's default `sslmode` is `prefer`. It negotiates TLS
@@ -363,9 +366,12 @@ Two more things that catch operators out on this exact command:
   userinfo section (step 7). An unencoded `/` or `+` there produces an
   opaque connection-string parse error, not a clear "bad character"
   message.
-- This command puts the generated password in your shell history. Clear
-  it (`history -d`, or your shell's equivalent) once you have stored the
-  password in Netlify's environment variables.
+- The password is now in your shell history, in `$APP_PW`, and in the
+  printed output above. Copy it into Netlify's environment variables
+  (step 7) now, then clear your history (`history -d`, or your shell's
+  equivalent). If you lose it anyway, re-run the `alter role` command
+  with a new password — nothing else in this system depends on the old
+  value.
 
 Store the generated password only in Netlify's environment variables (as
 part of `DATABASE_URL` — see step 7). Never store it in git.
@@ -385,10 +391,11 @@ the role starts `NOLOGIN`. If the app or worker logs `password
 authentication failed for user "announce_app"`, and you have not yet run
 the command above, this is why. Run the command, not a password rotation.
 
-**Verify** (from the same machine, over the same verified connection):
+**Verify** (from the same machine, directory, and session — the exported
+`DATABASE_SSL_*`/`$APP_PW` above are still in effect):
 
 ```sh
-PGSSLMODE=verify-full PGSSLROOTCERT=<path to the ISRG Root X1 PEM> \
+PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem" \
   psql "postgres://announce:<owner password>@db.announce.aztec.network:5432/announce" \
   -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
 ```
@@ -403,12 +410,12 @@ action. `announce_app` cannot do it. `migrations/014_app_role.sql` grants
 `publishers` is the four-eyes identity list. A credential that could
 insert its own row there could manufacture both halves of the approval
 itself (see "The security note" below). Run this as the `announce`
-owner, from your own machine, the same way as step 5:
+owner, from the same machine, directory, and session as step 5 — the
+`DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` you exported there are still
+in effect:
 
 ```sh
 DATABASE_URL='postgres://announce:<owner password>@db.announce.aztec.network:5432/announce' \
-  DATABASE_SSL_MODE=verify-full \
-  DATABASE_SSL_ROOT_CERT=<path to the ISRG Root X1 PEM> \
   npm run seed:publisher -- you@example.com
 ```
 

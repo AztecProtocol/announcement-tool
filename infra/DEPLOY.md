@@ -194,9 +194,13 @@ echo | openssl s_client -connect db.announce.aztec.network:443 2>/dev/null \
 The issuer must name Let's Encrypt. If it names anything else, the certificate
 did not issue. Check the DNS record from step 2 first.
 
-Now confirm the database port serves a certificate the app will accept:
+Now confirm the database port serves a certificate the app will accept.
+Run this from the root of this repo (the directory with `package.json` in
+it) — step 6 needs both the repo root and this downloaded certificate, and
+downloading it here avoids a second `cd` later:
 
 ```sh
+cd <path to your checkout of this repo>
 curl -o isrgrootx1.pem https://letsencrypt.org/certs/isrgrootx1.pem
 openssl s_client -connect db.announce.aztec.network:5432 -starttls postgres \
   -CAfile isrgrootx1.pem -verify_return_error \
@@ -214,62 +218,75 @@ Run this check from a machine other than the VM.
 
 Run these from your own machine (the one with this repo checked out and
 `npm install` already run — see "Before you start"), not on the VM. There is
-no Node runtime there. Both commands go over the internet to
-`db.announce.aztec.network:5432`, so both must use verified TLS.
+no Node runtime there. Stay in the repo root — the same directory as step 5,
+with both `package.json` and `isrgrootx1.pem` in it. Both commands below go
+over the internet to `db.announce.aztec.network:5432`, so both must use
+verified TLS.
 
-Warning: do not drop `sslmode=verify-full` or `sslrootcert` to "simplify"
+Warning: do not drop `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` (for the
+`npm run` commands) or `PGSSLMODE`/`PGSSLROOTCERT` (for `psql`) to "simplify"
 this. Without them the database owner's password — the most powerful
 credential in this system — crosses the internet unverified, or in plain
-text.
+text, and `src/db/connect.ts` fails open on a missing value rather than
+refusing to run: forgetting one of these variables produces no error, only
+a silent unverified connection.
+
+Set both once, so there is one place to get this right instead of four:
+
+```sh
+export DATABASE_SSL_MODE=verify-full DATABASE_SSL_ROOT_CERT="$PWD/isrgrootx1.pem"
+```
 
 ```sh
 DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce' \
-  DATABASE_SSL_MODE=verify-full \
-  DATABASE_SSL_ROOT_CERT=isrgrootx1.pem \
   npm run migrate
 ```
-
-(`isrgrootx1.pem` is the file you downloaded in step 5.)
 
 Warning: do not put `sslmode` or `sslrootcert` in `DATABASE_URL` itself. This
 command goes through the same connection code as the app
 (`src/db/connect.ts`), and it refuses to start if either appears there — use
-the two `DATABASE_SSL_*` variables above instead. See step 8's table for why.
+the two `DATABASE_SSL_*` variables exported above instead. See step 8's table
+for why.
 
 Then give the application's database role a password. It cannot log in until
-you do. Save the generated password: you need it in step 8.
+you do. This prints the password once — capture it now, you need it in
+step 8:
 
 ```sh
-PGSSLMODE=verify-full PGSSLROOTCERT=isrgrootx1.pem \
+APP_PW="$(openssl rand -base64 32)"
+PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem" \
   psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce" \
-  -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
+  -c "alter role announce_app with login password '$APP_PW';"
+printf 'announce_app password: %s\n' "$APP_PW"
 ```
 
 **Check:**
 
 ```sh
-PGSSLMODE=verify-full PGSSLROOTCERT=isrgrootx1.pem \
+PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem" \
   psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce" \
   -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
 ```
 
 The result must be `t`. If it is `f`, the `alter role` command did not run.
 
-This command puts the generated password in your shell history. Clear it
-(`history -d`, or your shell's equivalent) once you have stored it in
-Netlify's environment variables in step 8.
+This puts the generated password in your shell history, in `$APP_PW`, and in
+the printed output above. Copy it into Netlify's environment variables (step
+8) now, then clear your history (`history -d`, or your shell's equivalent).
+If you lose it anyway, re-run the `alter role` command with a new password —
+nothing else in this system depends on the old value.
 
 ---
 
 ## Step 7 — Add the first publisher
 
 The app refuses to start until at least one publisher exists. Run this from
-the same machine as step 6, with the same TLS flags.
+the same machine, same directory, and same session as step 6 — the
+`DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` you exported there are still in
+effect.
 
 ```sh
 DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce' \
-  DATABASE_SSL_MODE=verify-full \
-  DATABASE_SSL_ROOT_CERT=isrgrootx1.pem \
   npm run seed:publisher -- you@example.com
 ```
 
