@@ -1,15 +1,27 @@
 # Copy to terraform.tfvars and fill in real values. terraform.tfvars is
-# git-ignored — never commit it. Prefer TF_VAR_hcloud_token as an env var
-# over putting the token in this file at all, if your shell setup allows it.
+# git-ignored — never commit it. Prefer TF_VAR_hcloud_token and
+# TF_VAR_tailscale_api_key as env vars over putting either secret in this
+# file at all, if your shell setup allows it.
 
 # Hetzner Cloud API token for the project this VM is created in.
 hcloud_token = "REPLACE_ME"
 
-# SSH public key for this VM. Break-glass only now (Hetzner console access
-# if the tailnet join fails) — day-2 operator access is `tailscale ssh`, not
-# this key directly. Must be DIFFERENT key material from any other module's
-# ssh_public_key applied into the same Hetzner project (Hetzner rejects
-# duplicate fingerprints).
+# Tailscale API key (tskey-api-...) or OAuth client secret. Authenticates
+# Terraform to api.tailscale.com to mint this VM's tailnet auth key — see
+# provider "tailscale" in vm.tf. REQUIRED, no default: an unset value lets
+# Terraform fall back to an ambient TAILSCALE_API_KEY/OAuth env var if one
+# happens to be set for a DIFFERENT tailnet, which mints the key there
+# silently instead of failing. See variables.tf `tailscale_api_key`.
+tailscale_api_key = "REPLACE_ME"
+
+# SSH public key for this VM. Not the day-2 access path (that's
+# `tailscale ssh`) and not useful for the Hetzner web console either — the
+# console is a boot-time login prompt, not an SSH endpoint, and a stock
+# image has no root password. Real recovery if the tailnet join fails is
+# Hetzner rescue mode; see infra/DEPLOY.md "If something failed". Kept for
+# project consistency with the aztec-observability sibling. Must be
+# DIFFERENT key material from any other module's ssh_public_key applied
+# into the same Hetzner project (Hetzner rejects duplicate fingerprints).
 ssh_public_key = "ssh-ed25519 AAAA... REPLACE_ME"
 
 # REQUIRED, no default. The tailnet this VM joins on first boot.

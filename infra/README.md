@@ -134,6 +134,13 @@ and `infra/Caddyfile.split` for exactly what runs and why.
 - A Hetzner Cloud API token for the project this VM will live in
   (`TF_VAR_hcloud_token`, or a git-ignored `terraform.tfvars` — see
   `terraform/terraform.tfvars.example`).
+- A Tailscale API key or OAuth client secret
+  (`TF_VAR_tailscale_api_key`, same file-or-env pattern as the Hetzner
+  token above). Authenticates the `provider "tailscale"` block in
+  `terraform/vm.tf` to `api.tailscale.com`, which is what actually mints
+  this VM's tailnet auth key. Without it, `terraform apply` fails
+  authenticating, not because the ACL tag is missing — see "The tailnet
+  ACL tag" below for how to tell the two failures apart.
 - AWS credentials that can read and write the Foundation's Terraform state
   bucket, `aztec-foundation-terraform-state` in `eu-west-2`. `terraform init`
   fails without them. State lives there rather than on one machine, so
@@ -157,9 +164,12 @@ and `infra/Caddyfile.split` for exactly what runs and why.
   (`var.tailscale_acl_tag`, `tag:announce` by default). `tailnet` has no
   default: Terraform refuses to plan without it. The tag is a harder
   prerequisite than a variable value — see "The tailnet ACL tag" below.
-  It must already exist in the tailnet's ACL before you apply, or the
-  apply fails creating the tailnet key, or the VM boots with no reachable
-  path in at all.
+  It must already exist in the tailnet's ACL before you apply. The common
+  failure is not a broken VM: `hcloud_server.announce` depends on
+  `tailscale_tailnet_key.announce`, so a missing tag fails key creation and
+  `terraform apply` stops there — no server gets created at all. A VM that
+  boots and only then finds its tailnet join failing is the less likely,
+  worse case; see "The tailnet ACL tag" below for both.
 - Your own machine on the same tailnet. Day-2 access to the VM is
   `tailscale ssh`, not a public SSH port. Confirm with `tailscale status`
   before you start.

@@ -5,7 +5,7 @@ output "announce_server_ipv4" {
 
 output "announce_server_name" {
   value       = hcloud_server.announce.name
-  description = "Hetzner server name (for console/API lookups). Not a DNS name — there is no MagicDNS here."
+  description = "Hetzner server name — also this VM's tailnet MagicDNS name. cloud-init passes the same value to both `hostname:` and `tailscale up --hostname=` (see cloud-init/announce.yaml.tftpl), so this is what `tailscale ssh root@<this value>` and the rendered Ansible inventory (ansible/inventory.yml.tftpl) both resolve against. It is not a public DNS name — Terraform does not manage db.announce.aztec.network (see the `domain` output) — but it IS the name that matters for reaching the VM as an operator now that port 22 is closed."
 }
 
 output "announce_data_volume_id" {

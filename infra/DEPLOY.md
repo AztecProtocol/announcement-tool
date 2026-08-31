@@ -18,13 +18,14 @@ answers on `db.announce.aztec.network`.
 
 ## Before you start
 
-You need all five of these. Collect them first.
+You need all six of these. Collect them first.
 
 | What | Notes |
 |---|---|
 | A Hetzner Cloud API token | For the project the VM will live in. |
 | AWS credentials for `aztec-foundation-terraform-state` | `eu-west-2`. Terraform stores its state there. `terraform init` fails without them. |
-| An SSH public key | Must be different key material from any other Hetzner module in the same project. Hetzner rejects a duplicate fingerprint and the apply fails. Break-glass only — see "The tailnet ACL tag" warning below for the normal access path. |
+| A Tailscale API key (or OAuth client secret) | `var.tailscale_api_key` (`TF_VAR_tailscale_api_key`). Authenticates Terraform to `api.tailscale.com` so it can mint this VM's tailnet auth key. Without it, `terraform apply` fails creating `tailscale_tailnet_key.announce` with an authentication error — see the troubleshooting table below, and do not confuse this with the separate ACL-tag failure covered there. |
+| An SSH public key | Must be different key material from any other Hetzner module in the same project. Hetzner rejects a duplicate fingerprint and the apply fails. Break-glass only — see "The tailnet ACL tag" warning below for the normal access path, and "If something failed" for what break-glass actually means on this VM. |
 | The tailnet this VM joins, and the `tag:announce` ACL tag | `var.tailnet` and `var.tailscale_acl_tag`. Warning: `tag:announce` must already exist in that tailnet's ACL before you apply — see below. |
 | DNS control for `aztec.network` | You add one A record in step 3. |
 
@@ -34,9 +35,15 @@ apply`.** It is not created by this module. It is owned by
 singleton applied with `overwrite_existing_content = true`. Add the tag
 there, in code, and apply that module first. Do not add it by hand in the
 Tailscale admin console — the next apply of that module reverts a
-console-only edit. If the tag is missing, `terraform apply` fails creating
-`tailscale_tailnet_key.announce`, or the VM boots and `tailscale up` fails
-silently in cloud-init, leaving the VM with no reachable path in at all.
+console-only edit. **The common case is not an unreachable VM — it is no VM
+at all.** `hcloud_server.announce` depends on `tailscale_tailnet_key.announce`,
+so if the tag is missing, `terraform apply` fails creating the key and stops
+right there; the server is never created, and there is nothing to recover.
+The worse case — a VM that boots and only then finds `tailscale up` failing
+in cloud-init, leaving it genuinely unreachable — needs the tag to exist at
+key-creation time but then be removed, or some other tag/auth-key mismatch,
+before the boot. It is possible, just less likely than the plan simply
+refusing to create anything.
 
 You also need to be on the tailnet yourself, to reach the VM once it exists.
 
@@ -67,11 +74,17 @@ cp terraform.tfvars.example terraform.tfvars
 ```
 
 Fill in real values in `terraform.tfvars`, or export `TF_VAR_hcloud_token`
-instead of putting the Hetzner token in the file — the example file prefers
-this, if your shell setup allows it. `tailnet` and `tailscale_acl_tag` have
-no default: Terraform refuses to plan without `tailnet` set, and applying
-with the wrong `tailscale_acl_tag` (or before that tag exists — see "Before
-you start") fails creating the tailnet key, or leaves the VM unreachable.
+and `TF_VAR_tailscale_api_key` instead of putting either secret in the file —
+the example file prefers this, if your shell setup allows it.
+`tailscale_api_key` has no default either: without it, Terraform authenticates
+to `api.tailscale.com` with whatever ambient credential (if any) is lying
+around the shell, which can silently mint the tailnet key in the wrong
+tailnet rather than failing — see `variables.tf`. `tailnet` and
+`tailscale_acl_tag` also have no default: Terraform refuses to plan without
+`tailnet` set, and applying with the wrong `tailscale_acl_tag` (or before
+that tag exists — see "Before you start") fails creating the tailnet key,
+which in turn means `terraform apply` stops there and the server itself is
+never created.
 
 ```sh
 terraform init
@@ -414,8 +427,10 @@ than a DNS problem.
 |---|---|
 | `terraform init` fails | AWS credentials for the state bucket are missing. |
 | Terraform refuses to plan | `tailnet` is not set. It has no default. |
-| `terraform apply` fails creating `tailscale_tailnet_key.announce`, or the VM boots and never appears in `tailscale status` | `tag:announce` does not exist yet in the tailnet's ACL. It must be added in `rpc.aztec.foundation/tailscale.tf` (`AztecProtocol/foundation-iac`) and that module applied first — see "Before you start". A console-only edit does not survive that module's next apply. |
-| `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; use the Hetzner web console with the SSH key from "Before you start" as break-glass, and check `cloud-init` logs on the VM. |
+| `terraform apply` fails creating `tailscale_tailnet_key.announce` with an authentication error (401, "unauthorized", or similar) | `tailscale_api_key` is missing, wrong, or expired — not the ACL tag. Check `TF_VAR_tailscale_api_key` is actually set in the shell that ran `terraform apply`. This is the more common of the two `tailscale_tailnet_key.announce` failures; check this first before assuming the ACL tag is the problem. |
+| `terraform apply` fails creating `tailscale_tailnet_key.announce` with an unknown-tag or "requested tags are invalid" error | `tag:announce` does not exist yet in the tailnet's ACL. It must be added in `rpc.aztec.foundation/tailscale.tf` (`AztecProtocol/foundation-iac`) and that module applied first — see "Before you start". A console-only edit does not survive that module's next apply. In both this row and the credential row above, the server is never created — `hcloud_server.announce` depends on the key resource, so the apply stops before Hetzner is touched at all. |
+| The VM boots (the apply succeeded) but it never appears in `tailscale status`, or appears but stays `Offline`/unreachable | Rarer than the two rows above, because it means the key itself was minted successfully. Check `cloud-init` logs on the VM (via Hetzner rescue mode — see the next row) for the `tailscale up` line's own error. If the tailnet has device approval enabled and something changed `preauthorized` away from `true` on the key, the node joins in a PENDING state and needs approving by hand in the Tailscale admin console before it is routable — indistinguishable from a broken join until you check there. |
+| `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; the SSH key from "Before you start" does not help here — the Hetzner web console is a keyboard-and-screen session at a boot prompt, not an SSH endpoint, and a stock image has no root password set. Use Hetzner **rescue mode** instead: boot the rescue system from the Hetzner console, mount the VM's root disk, and inspect `cloud-init` / Tailscale logs or set a password from inside the mounted filesystem, then reboot normally. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |

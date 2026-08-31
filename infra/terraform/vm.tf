@@ -22,6 +22,24 @@ provider "hcloud" {
   token = var.hcloud_token
 }
 
+# Explicit, not implicit. The tailscale provider accepts every one of these
+# arguments as optional and falls back to the TAILSCALE_API_KEY/
+# TAILSCALE_OAUTH_CLIENT_ID/TAILSCALE_OAUTH_CLIENT_SECRET env vars, or to
+# whatever tailnet owns the ambient credential, if this block is omitted or
+# left blank. That default is exactly what var.tailscale_api_key's
+# description warns against: a credential that happens to be exported for a
+# different tailnet (plausible for anyone who also administers the
+# aztec-observability tailnet) would silently mint this key in the wrong
+# organization. Wiring both `api_key` and `tailnet` here from named
+# variables makes the plan fail loudly instead — an unset
+# var.tailscale_api_key stops the plan (see that variable's "no default"),
+# rather than quietly succeeding against whichever tailnet an ambient
+# credential happens to belong to.
+provider "tailscale" {
+  api_key = var.tailscale_api_key
+  tailnet = var.tailnet
+}
+
 resource "hcloud_ssh_key" "announce" {
   name       = "aztec-announce"
   public_key = var.ssh_public_key
@@ -176,9 +194,10 @@ resource "hcloud_firewall" "announce" {
 
 # Render the Ansible inventory from Terraform outputs, mirroring
 # aztec-observability's inventory.tf pattern: addressed by the server's
-# tailnet MagicDNS name (its Hetzner server name, matching the cloud-init
-# `tailscale up --hostname=` value above), not its public IPv4 — port 22 is
-# closed, so the inventory must reach the host the same way an operator does.
+# tailnet MagicDNS name (its Hetzner server name, matching the
+# `tailscale up --hostname=` value in cloud-init/announce.yaml.tftpl), not
+# its public IPv4 — port 22 is closed, so the inventory must reach the host
+# the same way an operator does.
 resource "local_file" "ansible_inventory" {
   # path.module is infra/terraform (this file's own directory — see the
   # templatefile() call below, which resolves ansible/inventory.yml.tftpl
