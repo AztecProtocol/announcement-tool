@@ -436,9 +436,8 @@ fi
 # lands, RELOAD_REJECTED reads 0 and this script would report SUCCESS on
 # a reload Postgres actually rejected — the exact failure this whole
 # check exists to catch, now reintroduced through a timing gap instead
-# of a wrong verification target. A plain `sleep N` (round 1 had one,
-# for a weaker check; round 2 dropped it without replacing it) either
-# wastes time on the common fast path or is still a guess about the slow
+# of a wrong verification target. A plain `sleep N` either wastes time
+# on the common fast path or is still a guess about the slow
 # one. Polling is both faster when Postgres reloads quickly (the
 # overwhelming common case) and safer when it's slow: it retries the
 # check for up to RELOAD_CHECK_TIMEOUT seconds, and — this is the part a
@@ -449,7 +448,7 @@ fi
 # silently folded into "confirmed clean".
 #
 # (2) A FAILED `docker compose logs` MUST NOT READ AS "0 MATCHES = CLEAN".
-# The original (round 2) form piped `docker compose logs db | grep -c
+# An earlier form piped `docker compose logs db | grep -c
 # PATTERN` directly. If `docker compose logs` itself fails (compose
 # project briefly unavailable, a Docker daemon hiccup), `grep -c` still
 # runs against empty/partial stdin and returns 0 matches — indistin-

@@ -212,8 +212,8 @@ describe('resolveCaFile', () => {
 });
 
 describe('connect', () => {
-  // The brief requires each of the four call sites keep its own tuned pool
-  // size (web 5, worker 4, tick 4) rather than being unified — that had zero
+  // Each of the four call sites keeps its own tuned pool size (web 5,
+  // worker 4, tick 4) rather than being unified — that had zero
   // test coverage. connect() builds the postgres.js client lazily/eagerly
   // depending on version, but the `max` option it was constructed with is
   // readable back off the returned Sql's options, which is enough to prove

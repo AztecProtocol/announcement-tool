@@ -45,7 +45,7 @@
     // resolved elsewhere at runtime (`redirect`, `notFound` in server
     // components). Importing a genuine client-runtime value through it breaks
     // identically: `useRouter` from `next/navigation` 500s under Turbopack dev
-    // (found by the Plan-4a end-to-end smoke, 2026-08-13). ANY new runtime
+    // (found by an end-to-end smoke test, 2026-08-13). ANY new runtime
     // import from these packages needs the deep-import treatment:
     //   headers   → next/dist/server/request/headers.js
     //   useRouter → next/dist/client/components/navigation.js

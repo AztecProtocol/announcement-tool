@@ -13,7 +13,7 @@
 #
 # MECHANISM CHOSEN: a daily cron comparing the Caddy-obtained cert's
 # fingerprint to the one Postgres is currently serving, copying + SIGHUP
-# on change. This is the brief's "least clever, easiest to reason about"
+# on change. This is the least clever, easiest-to-reason-about
 # option, chosen over:
 #   - Caddy's on_demand/exec plugins: not present in the stock
 #     `caddy:2-alpine` image used here (docker-compose.split.yml) —
