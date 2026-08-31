@@ -103,7 +103,7 @@ BACKUP_S3_SECRET_ACCESS_KEY=
 EOF
 ```
 
-Fill in every empty value. Generate each secret with:
+Generate each secret with:
 
 ```sh
 openssl rand -base64 32
@@ -114,14 +114,30 @@ Two rules for this file:
 - Quote any value that contains a space.
 - Keep `ANNOUNCE_SIGNAL_SECRET`. You set the same value in Netlify at step 8.
 
+**Which values you may leave empty on a first deployment, and what happens
+if you do:**
+
+| Variable | May be left empty? | If empty |
+|---|---|---|
+| `POSTGRES_PASSWORD` | No | The stack will not start at all. |
+| `ANNOUNCE_DOMAIN` | No | The stack will not start at all. |
+| `ANNOUNCE_SIGNAL_SECRET` | No | The stack will not start at all. |
+| `BACKUP_ENCRYPTION_KEY` | No | The stack will not start at all. Backups must never run unencrypted, so this fails closed rather than degrading. |
+| `SIGNAL_ACCOUNT` | Yes | Everything starts except `signal-receive`, which restarts in a loop until a Signal number is registered. |
+| `BACKUP_S3_BUCKET` | Yes | Everything starts except `backup`, which restarts in a loop until an S3 destination is configured. `db`, `signal` and `caddy` are unaffected — your data is safe, it is just not being copied off-host yet. |
+| `BACKUP_S3_ACCESS_KEY_ID` | Yes | Same as `BACKUP_S3_BUCKET` — leave all three S3 variables empty together, or fill in all three together. |
+| `BACKUP_S3_SECRET_ACCESS_KEY` | Yes | Same as `BACKUP_S3_BUCKET`. |
+
+Fill in every value marked "No" above before continuing — the check at the
+end of step 4 will not pass otherwise. The four marked "Yes" can stay empty
+for now and be filled in later, once a Signal number is registered or an S3
+bucket exists; there is no need to re-run Ansible for that, only to update
+this file and restart the affected container (`docker compose up -d
+signal-receive` or `docker compose up -d backup`).
+
 `SIGNAL_ACCOUNT` is a registered Signal phone number, for example
 `+15551234567`. Signal is not in use yet, so leave it empty for now: write
 `SIGNAL_ACCOUNT=` with no value, not a placeholder string.
-
-Leaving it empty is safe. Only the `signal-receive` container reads this
-variable, and only that container restarts until an account exists — `db`,
-`signal`, `caddy` and `backup` start normally regardless. That is expected
-and confirmed by testing the stack directly with `SIGNAL_ACCOUNT` empty.
 
 **Check:**
 
@@ -149,9 +165,11 @@ job.
 ssh root@<address> 'docker compose -f /opt/announce/docker-compose.yml ps'
 ```
 
-`db`, `signal`, `caddy` and `backup` must all show `Up` or `healthy`.
-`signal-receive` restarts in a loop until a Signal account is registered. That
-is expected.
+`db`, `signal` and `caddy` must all show `Up` or `healthy`. `backup` too,
+unless you left the S3 variables empty in step 3, in which case it restarts
+in a loop until they are set — expected, see the table in step 3.
+`signal-receive` restarts in a loop until a Signal account is registered.
+Also expected.
 
 ---
 

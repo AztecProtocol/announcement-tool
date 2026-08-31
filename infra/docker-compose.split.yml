@@ -379,11 +379,35 @@ services:
       # S3-compatible destination, off this VM. BACKUP_S3_ENDPOINT is only
       # needed for a non-AWS S3-compatible provider (e.g. Backblaze B2,
       # MinIO, Hetzner Object Storage); leave unset for real AWS S3.
-      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET must be set}
+      #
+      # These three (BACKUP_S3_BUCKET, and the two credential vars below)
+      # are deliberately NOT `:?`, unlike BACKUP_ENCRYPTION_KEY above and
+      # POSTGRES_PASSWORD/ANNOUNCE_DOMAIN/ANNOUNCE_SIGNAL_SECRET elsewhere
+      # in this file. Same reasoning as SIGNAL_ACCOUNT on the
+      # `signal-receive` service: Compose validates every service's `:?`
+      # interpolation before starting anything, so `:?` on any of these
+      # would abort `db`, `caddy` and `signal` too, over variables none of
+      # them read. An operator standing up this VM for the first time may
+      # not have an S3 bucket and keys ready yet — that is a real,
+      # temporary, acceptable state, the same as not having a Signal
+      # number yet. A VM that will not boot at all is not acceptable.
+      # `backup`'s own entrypoint (below) checks these explicitly and
+      # exits before ever calling scripts/backup.sh, so the failure is
+      # loud and immediate but confined to this one container.
+      #
+      # BACKUP_ENCRYPTION_KEY above stays `:?` on purpose — it is not in
+      # this group. An empty S3 bucket/credentials means "no backup runs
+      # yet," which is safe. An empty encryption key would risk "a backup
+      # runs and uploads this database's data — including subscriber
+      # emails — to off-host storage unencrypted," which is worse than no
+      # backup at all. There is no safe degraded state for that one, so it
+      # keeps failing the whole stack loudly rather than confining the
+      # failure to `backup`.
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
       BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-announce-backups}
-      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:?BACKUP_S3_ACCESS_KEY_ID must be set}
-      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:?BACKUP_S3_SECRET_ACCESS_KEY must be set}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
       BACKUP_RETENTION_DAILY: ${BACKUP_RETENTION_DAILY:-30}
       BACKUP_RETENTION_MONTHLY: ${BACKUP_RETENTION_MONTHLY:-12}
       # Same alert destination and ESP as channel-health alerts (see
@@ -409,11 +433,32 @@ services:
     # A crash-looping backup container is not the same as a silently
     # abandoned one, and the alert already fired inside backup.sh's own
     # failure path before this loop ever restarts it.
+    #
+    # The explicit check below, before the sleep-until-03:00 loop, is what
+    # actually enforces "BACKUP_S3_BUCKET / AWS_ACCESS_KEY_ID /
+    # AWS_SECRET_ACCESS_KEY must be set" for this container now that the
+    # `environment:` block above no longer does via `:?`. scripts/backup.sh
+    # itself already guards BACKUP_S3_BUCKET (line 47) and would fail on
+    # missing AWS credentials via aws-cli's own auth error — but only once
+    # it actually *runs*, which without this check could be up to 24 hours
+    # after `docker compose up`, on an S3-unconfigured deployment that
+    # looks perfectly healthy (`Up`) the whole time until it silently
+    # crash-loops at 03:00 with no operator watching. Checking at container
+    # start instead surfaces the same "S3 not configured yet" state
+    # immediately, the same way signal-receive's start-time check does.
     entrypoint:
       - sh
       - -c
       - |
         set -e
+        if [ -z "$$BACKUP_S3_BUCKET" ] || [ -z "$$AWS_ACCESS_KEY_ID" ] || [ -z "$$AWS_SECRET_ACCESS_KEY" ]; then
+          echo "BACKUP_S3_BUCKET / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY" \
+               "are not all set. Off-host backup is not configured on this" \
+               "deployment yet; this container will restart until they are" \
+               "set in /opt/announce/.env. See infra/DEPLOY.md step 3. The" \
+               "database itself is unaffected — this only blocks backups." >&2
+          exit 1
+        fi
         while true; do
           now=$$(date -u +%s)
           next=$$(date -u -d '03:00' +%s)

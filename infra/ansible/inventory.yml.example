@@ -39,10 +39,17 @@ all:
 #     yet. Only the signal-receive container reads this; db, signal,
 #     caddy and backup all start regardless, and signal-receive just
 #     restart-loops until a number is set. See infra/DEPLOY.md step 3.>
-#   BACKUP_ENCRYPTION_KEY=<openssl rand -base64 32>
-#   BACKUP_S3_BUCKET=<your bucket>
-#   BACKUP_S3_ACCESS_KEY_ID=<...>
-#   BACKUP_S3_SECRET_ACCESS_KEY=<...>
+#   BACKUP_ENCRYPTION_KEY=<openssl rand -base64 32 — REQUIRED, no empty
+#     option. Backups must never run unencrypted, so this fails the whole
+#     stack rather than degrading, unlike the three S3 variables below.>
+#   BACKUP_S3_BUCKET=<your bucket — leave empty (BACKUP_S3_BUCKET=) if no
+#     off-host backup destination exists yet. Only the backup container
+#     reads this and the two AWS_* vars below; db, signal, caddy and
+#     signal-receive all start regardless, and backup just restart-loops
+#     until all three are set. See infra/DEPLOY.md step 3.>
+#   BACKUP_S3_ACCESS_KEY_ID=<... — leave empty together with the other two
+#     S3 variables, or fill in all three together>
+#   BACKUP_S3_SECRET_ACCESS_KEY=<... — same as above>
 #   # optional, see docker-compose.split.yml for defaults:
 #   # BACKUP_S3_ENDPOINT=
 #   # BACKUP_S3_PREFIX=
