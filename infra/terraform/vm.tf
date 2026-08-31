@@ -136,7 +136,12 @@ resource "hcloud_firewall" "announce" {
 # aztec-observability's inventory.tf pattern — but addressed by the server's
 # public IPv4, not a tailnet MagicDNS name, since there is no tailnet here.
 resource "local_file" "ansible_inventory" {
-  filename        = "${path.module}/ansible/inventory.yml"
+  # path.module is infra/terraform (this file's own directory — see the
+  # templatefile() call below, which resolves ansible/inventory.yml.tftpl
+  # from that same base). The playbook runs from infra/ansible, so the
+  # rendered file must land one directory up and over from path.module,
+  # not under it.
+  filename        = "${path.module}/../ansible/inventory.yml"
   file_permission = "0644"
 
   content = templatefile("${path.module}/ansible/inventory.yml.tftpl", {

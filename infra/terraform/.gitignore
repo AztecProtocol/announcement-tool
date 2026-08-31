@@ -16,4 +16,6 @@
 !*.tfvars.example
 
 # Rendered Ansible inventory (contains the real public IP once applied).
-ansible/inventory.yml
+# Written to ../ansible/inventory.yml — see vm.tf's local_file resource.
+# It is NOT under this directory, so nothing here needs to ignore it; the
+# top-level .gitignore covers infra/ansible/inventory.yml.
