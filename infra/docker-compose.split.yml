@@ -220,7 +220,25 @@ services:
       - signal
     environment:
       SIGNAL_API_BASE: http://signal:8080
-      SIGNAL_ACCOUNT: ${SIGNAL_ACCOUNT:?SIGNAL_ACCOUNT must be set}
+      # Deliberately NOT `${SIGNAL_ACCOUNT:?...}`. Compose interpolates
+      # every service's `environment:` block up front, before starting
+      # anything, and `:?` fails on empty as well as unset — so a `:?`
+      # here does not just stop `signal-receive`, it aborts `docker
+      # compose up` for the whole file, including `db`, `caddy` and
+      # `backup`, none of which read this variable at all. Verified
+      # directly: with `SIGNAL_ACCOUNT=` (empty, not unset) and `:?`
+      # in place, `docker compose up` exits before creating a single
+      # container. Signal is deliberately unconfigured until a number is
+      # registered (see infra/DEPLOY.md step 3), so that abort would
+      # trigger on every fresh deploy, not just a misconfigured one.
+      # `:-` substitutes an empty string instead, which lets Compose's
+      # interpolation pass succeed for every service. The emptiness is
+      # then handled at runtime, scoped to this one container: the
+      # entrypoint below checks for it and fails only `signal-receive`,
+      # which is the one service that actually cannot do anything
+      # without an account. `db`, `caddy` and `backup` are unaffected
+      # either way, since none of them reference SIGNAL_ACCOUNT.
+      SIGNAL_ACCOUNT: ${SIGNAL_ACCOUNT:-}
     # Same sleep-loop-plus-entrypoint scheduling shape as the `backup`
     # service below, at a much shorter period: this only needs to run often
     # enough that signal-cli's server-side sees regular activity, not once
@@ -232,11 +250,24 @@ services:
     # reasoning as the backup service. `entrypoint:` here overrides the
     # image's own ENTRYPOINT (a single direct run of the script, used when
     # invoking the container image standalone) with this loop.
+    #
+    # The explicit `if [ -z ... ]` below is what actually enforces
+    # "SIGNAL_ACCOUNT must be set" for this container now that the
+    # `environment:` line above no longer does. It restart-loops on an
+    # empty account, same as `:?` would have, but confined to this one
+    # service instead of the whole stack.
     entrypoint:
       - sh
       - -c
       - |
         set -e
+        if [ -z "$$SIGNAL_ACCOUNT" ]; then
+          echo "SIGNAL_ACCOUNT is not set. Signal is not configured on" \
+               "this deployment yet; this container will restart until" \
+               "a Signal number is registered and SIGNAL_ACCOUNT is set" \
+               "in /opt/announce/.env. See infra/DEPLOY.md step 3." >&2
+          exit 1
+        fi
         interval="${SIGNAL_RECEIVE_INTERVAL_SECONDS:-21600}"
         while true; do
           /usr/local/bin/signal-receive.sh
@@ -283,22 +314,33 @@ services:
       # not a present-but-empty one, so it could not rescue that case by
       # itself — see infra/Caddyfile.split for that finding in full). That
       # design worked, but it was the odd one out among every other secret
-      # in this file: POSTGRES_PASSWORD, SIGNAL_ACCOUNT,
-      # BACKUP_ENCRYPTION_KEY, and ANNOUNCE_DOMAIN all fail the whole
-      # stack loudly with `:?` the moment they're unset, rather than
-      # quietly substituting a placeholder and continuing. `:?` here does
-      # the same: an unset ANNOUNCE_SIGNAL_SECRET now refuses to bring
-      # `caddy` up at all ("ANNOUNCE_SIGNAL_SECRET must be set"), which is
-      # a louder, earlier failure than either the old
-      # sentinel-substitution or a live 403 — an operator who forgot this
-      # var finds out at `docker compose up` time, not by testing the
-      # Signal proxy later. This also removes the published-sentinel
-      # property entirely: there is no longer any magic string an
-      # unset-secret deployment answers to, because an unset secret now
-      # means the container never starts. The Caddyfile's own
+      # in this file: POSTGRES_PASSWORD, BACKUP_ENCRYPTION_KEY, and
+      # ANNOUNCE_DOMAIN all fail the whole stack loudly with `:?` the
+      # moment they're unset, rather than quietly substituting a
+      # placeholder and continuing. `:?` here does the same: an unset
+      # ANNOUNCE_SIGNAL_SECRET now refuses to bring `caddy` up at all
+      # ("ANNOUNCE_SIGNAL_SECRET must be set"), which is a louder, earlier
+      # failure than either the old sentinel-substitution or a live 403 —
+      # an operator who forgot this var finds out at `docker compose up`
+      # time, not by testing the Signal proxy later. This also removes the
+      # published-sentinel property entirely: there is no longer any magic
+      # string an unset-secret deployment answers to, because an unset
+      # secret now means the container never starts. The Caddyfile's own
       # `{$ANNOUNCE_SIGNAL_SECRET:...}` default now only covers the one
       # remaining case where it is still needed: this Caddyfile run by
       # hand, outside this compose file entirely.
+      #
+      # SIGNAL_ACCOUNT is the deliberate exception to this "fail the
+      # whole stack loudly" list. It uses `:-` (see the `signal-receive`
+      # service below), not `:?`, because Compose validates every
+      # service's `:?` interpolation before starting anything — so a
+      # `:?` on SIGNAL_ACCOUNT would abort `db`, `caddy` and `backup`
+      # too, even though none of them read it, for as long as Signal
+      # stays deliberately unconfigured (no number registered yet). The
+      # loud, early failure this comment argues for above is still
+      # correct for a secret every deployment needs from day one; it is
+      # the wrong behavior for a value that is expected to be empty on
+      # a fresh deploy.
       ANNOUNCE_SIGNAL_SECRET: ${ANNOUNCE_SIGNAL_SECRET:?ANNOUNCE_SIGNAL_SECRET must be set}
     volumes:
       - ./Caddyfile.split:/etc/caddy/Caddyfile:ro

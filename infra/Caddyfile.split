@@ -65,8 +65,13 @@
 #
 # Update: docker-compose.split.yml's `caddy.environment` now
 # sets `ANNOUNCE_SIGNAL_SECRET: ${ANNOUNCE_SIGNAL_SECRET:?...}`, a hard
-# guard matching every other secret in that file (POSTGRES_PASSWORD,
-# SIGNAL_ACCOUNT, BACKUP_ENCRYPTION_KEY, ANNOUNCE_DOMAIN). An unset
+# guard matching every other secret this deployment needs from day one
+# (POSTGRES_PASSWORD, BACKUP_ENCRYPTION_KEY, ANNOUNCE_DOMAIN). SIGNAL_ACCOUNT
+# is deliberately not in that list — see the `signal-receive` service in
+# docker-compose.split.yml — because Signal is not configured on this
+# deployment until a number is registered, and compose validates every
+# service's `:?` up front, so putting SIGNAL_ACCOUNT there would abort this
+# Caddy container too, over a variable it never reads. An unset
 # ANNOUNCE_SIGNAL_SECRET now refuses to bring `caddy` up at all. Compose
 # never even reaches the point of starting this container with an empty
 # value, so the present-but-empty-string case this section originally

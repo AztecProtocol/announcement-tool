@@ -114,9 +114,14 @@ Two rules for this file:
 - Quote any value that contains a space.
 - Keep `ANNOUNCE_SIGNAL_SECRET`. You set the same value in Netlify at step 8.
 
-`SIGNAL_ACCOUNT` is a registered Signal phone number. Signal is not in use yet,
-so leave it empty for now. The `signal-receive` container restarts until an
-account exists. That is expected.
+`SIGNAL_ACCOUNT` is a registered Signal phone number, for example
+`+15551234567`. Signal is not in use yet, so leave it empty for now: write
+`SIGNAL_ACCOUNT=` with no value, not a placeholder string.
+
+Leaving it empty is safe. Only the `signal-receive` container reads this
+variable, and only that container restarts until an account exists — `db`,
+`signal`, `caddy` and `backup` start normally regardless. That is expected
+and confirmed by testing the stack directly with `SIGNAL_ACCOUNT` empty.
 
 **Check:**
 
