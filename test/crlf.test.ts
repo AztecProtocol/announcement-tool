@@ -69,7 +69,7 @@ describe('a CRLF body renders correctly once normalised', () => {
   });
 });
 
-describe('an un-normalised CRLF body still fails, proving the guard is load-bearing', () => {
+describe('an un-normalised CRLF body still fails, proving the guard is needed', () => {
   // If someone removes normalizeNewlines from inputFromForm, these are the
   // symptoms that return. Asserting them here documents why the call exists.
   it('leaves the heading literal on plain-text channels', () => {
