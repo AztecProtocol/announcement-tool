@@ -1,30 +1,29 @@
 terraform {
   required_version = ">= 1.5.0"
 
-  # State is local for now (see the commented "s3" block below for why).
-  # No backend block means terraform writes terraform.tfstate in this
-  # directory. That file is git-ignored (see .gitignore) — it can still
-  # contain sensitive values (e.g. the rendered Ansible inventory content,
-  # resource IDs), so treat it like a secret on whatever machine runs
-  # `apply`.
-
-  # --- Foundation remote state (not enabled yet) ---
-  # This repo is personal until it graduates into the Foundation org. Wiring
-  # it to the Foundation's shared state bucket before that graduation is the
-  # wrong order — it would put a personal repo's state in a bucket other
-  # Foundation modules assume is Foundation-owned. Local state is correct
-  # for now; whoever applies this decides when (and if) to switch.
+  # State lives in the Foundation's shared bucket, the same one the other
+  # Foundation Terraform modules use. The bucket, region and key layout match
+  # the aztec-observability module.
   #
-  # To switch later: uncomment this block, fill in the real key if it
-  # differs, then run `terraform init -migrate-state` — Terraform copies the
-  # existing local state into the bucket in one step, no manual state
-  # surgery required.
+  # State is not just a record. Terraform needs it to know what it already
+  # created. Without it, a second `apply` builds a second VM and can no longer
+  # manage the first. Remote state also means anyone with bucket access can
+  # read the outputs (`terraform output announce_server_ipv4`), so the person
+  # who applies and the person who sets the DNS record do not have to be the
+  # same person.
   #
-  # backend "s3" {
-  #   bucket = "aztec-foundation-terraform-state"
-  #   key    = "announce-aztec-network"
-  #   region = "eu-west-2"
-  # }
+  # Warning: state records every value Terraform handles, including the
+  # rendered Ansible inventory and resource IDs. Treat the bucket as holding
+  # secrets. Do not make it public and do not copy state files around.
+  #
+  # If a local terraform.tfstate already exists from an earlier apply, run
+  # `terraform init -migrate-state`. Terraform copies it into the bucket in
+  # one step. A first-time apply needs only `terraform init`.
+  backend "s3" {
+    bucket = "aztec-foundation-terraform-state"
+    key    = "announce-aztec-network"
+    region = "eu-west-2"
+  }
 
   required_providers {
     hcloud = {

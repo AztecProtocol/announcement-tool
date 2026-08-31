@@ -131,8 +131,16 @@ and `infra/Caddyfile.split` for exactly what runs and why.
 - A Hetzner Cloud API token for the project this VM will live in
   (`TF_VAR_hcloud_token`, or a git-ignored `terraform.tfvars` — see
   `terraform/terraform.tfvars.example`).
+- AWS credentials that can read and write the Foundation's Terraform state
+  bucket, `aztec-foundation-terraform-state` in `eu-west-2`. `terraform init`
+  fails without them. State lives there rather than on one machine, so
+  anyone with bucket access can read the outputs this runbook needs. See
+  `terraform/versions.tf`.
 - DNS control for `db.announce.aztec.network`. You will need to create an A
-  record once the VM exists (step 3).
+  record once the VM exists (step 3). The person who runs `terraform apply`
+  and the person who sets the record do not have to be the same person: the
+  apply prints the address, and anyone with state access can read it again
+  later with `terraform output announce_server_ipv4`.
 - An SSH public key. This key's material must differ from any other
   Hetzner module's key in the same project (for example,
   `aztec-observability`'s). Hetzner rejects a duplicate fingerprint
@@ -180,6 +188,11 @@ problem rather than a configuration mismatch.
 Point an A record for `db.announce.aztec.network` at the
 `announce_server_ipv4` output from step 2, in whatever system controls
 the `aztec.network` nameservers.
+
+`terraform apply` prints that address when it finishes. To read it again
+later, run `terraform output announce_server_ipv4` from `infra/terraform/`.
+State is in the shared bucket, so this works from any machine with access,
+not only the one that applied.
 
 **This is a hard prerequisite for step 4, not an optional check.** Caddy
 performs its ACME challenge for `db.announce.aztec.network` on first run. If
