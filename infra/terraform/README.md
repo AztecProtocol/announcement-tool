@@ -2,10 +2,14 @@
 
 Creates the Hetzner VM for the split deployment: Postgres (reachable from
 Netlify's egress on 5432), signal-cli-rest-api, and a Caddy reverse proxy
-(443 — ACME + the Signal proxy). See `vm.tf`, `variables.tf`, `outputs.tf`
-for what and why; `versions.tf` for the state decision.
+(443 — ACME and the Signal proxy). See `vm.tf`, `variables.tf`, and
+`outputs.tf` for what and why. See `versions.tf` for the state decision.
 
-## Required order — this is load-bearing, not a suggestion
+## Required order
+
+Warning: this order is a real technical requirement. Running steps 2 and
+3 out of order produces a certificate failure that looks like a Terraform
+bug (see below).
 
 ```
 1. terraform apply
@@ -17,36 +21,38 @@ for what and why; `versions.tf` for the state decision.
 5. Verify the application connects with sslmode=verify-full
 ```
 
-**Port 5432 is not safe to consider "live" until all five steps are done.**
-Terraform's `apply` only creates the host and opens the firewall — it does
+Port 5432 is not safe to treat as live until all five steps are done.
+Terraform's `apply` only creates the host and opens the firewall. It does
 not install Postgres, does not create the `announce_app` role's password,
 and does not configure TLS. Between step 1 and step 4, 5432 is a public,
-listening port with no application behind it yet (Ansible hasn't run) and
-then, after Ansible, a role that is `NOLOGIN` until step 4 is done by hand
-(see `../README.md` for why that's deliberate — a committed placeholder
-password would be worse). Do not point the application's `DATABASE_URL` at
-this host until step 5 has actually been checked, not assumed.
+listening port. Before Ansible runs, nothing is behind that port yet.
+After Ansible runs, the `announce_app` role exists but stays `NOLOGIN`
+until step 4 is done by hand (see `../README.md` for why this is
+deliberate: a committed placeholder password would be worse). Do not
+point the application's `DATABASE_URL` at this host until step 5 has
+actually been checked, not assumed.
 
-### Why step 2 has to happen before step 3
+### Why step 2 must happen before step 3
 
 Caddy performs the ACME challenge for `announce.aztec.network` as part of
 its first run. If Ansible (step 3) runs before the DNS A record (step 2)
-has propagated, Caddy cannot complete the challenge and its certificate
-issuance fails. That failure surfaces as an Ansible/Caddy error and looks
-like something broke in the playbook or the Terraform — it did not; the
-domain simply didn't resolve to this host yet. Set the DNS record first and
-give it time to propagate before running Ansible, not just before checking
-the site in a browser afterward.
+has propagated, Caddy cannot complete the challenge, and certificate
+issuance fails. That failure surfaces as an Ansible or Caddy error, and
+it looks like something broke in the playbook or the Terraform. It did
+not: the domain simply did not resolve to this host yet. Set the DNS
+record first, and give it time to propagate before running Ansible, not
+just before checking the site in a browser afterward.
 
 ## Tearing down
 
-`hcloud_volume.announce_data` has `prevent_destroy = true` (see the comment
-in `vm.tf`). This blocks `terraform destroy` entirely, not just for that
-resource — Terraform refuses the whole plan with "Resource has
-lifecycle.prevent_destroy set". To actually destroy (including the server),
-either remove that lifecycle block first, or run
-`terraform state rm hcloud_volume.announce_data` (this only stops Terraform
-tracking the volume — it does NOT delete it) and then destroy the rest.
+`hcloud_volume.announce_data` has `prevent_destroy = true` (see the
+comment in `vm.tf`). This blocks `terraform destroy` entirely, not only
+for that resource. Terraform refuses the whole plan with "Resource has
+lifecycle.prevent_destroy set". To actually destroy the deployment,
+including the server, either remove that lifecycle block first, or run
+`terraform state rm hcloud_volume.announce_data` and then destroy the
+rest. That command only stops Terraform from tracking the volume; it does
+not delete the volume.
 
 ## Verification performed on this module
 
