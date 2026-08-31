@@ -24,9 +24,29 @@ You need all five of these. Collect them first.
 |---|---|
 | A Hetzner Cloud API token | For the project the VM will live in. |
 | AWS credentials for `aztec-foundation-terraform-state` | `eu-west-2`. Terraform stores its state there. `terraform init` fails without them. |
-| An SSH public key | Must be different key material from any other Hetzner module in the same project. Hetzner rejects a duplicate fingerprint and the apply fails. |
-| The CIDRs allowed to reach port 22 | No default, on purpose. Terraform refuses to plan without it. Never set `0.0.0.0/0`. Must include the address of the machine you are working from — step 3's `ssh` hangs with a TCP timeout otherwise. |
+| An SSH public key | Must be different key material from any other Hetzner module in the same project. Hetzner rejects a duplicate fingerprint and the apply fails. Break-glass only — see "The tailnet ACL tag" warning below for the normal access path. |
+| The tailnet this VM joins, and the `tag:announce` ACL tag | `var.tailnet` and `var.tailscale_acl_tag`. Warning: `tag:announce` must already exist in that tailnet's ACL before you apply — see below. |
 | DNS control for `aztec.network` | You add one A record in step 3. |
+
+Warning: **the `tag:announce` ACL tag must exist before you run `terraform
+apply`.** It is not created by this module. It is owned by
+`rpc.aztec.foundation/tailscale.tf` in `AztecProtocol/foundation-iac`, a
+singleton applied with `overwrite_existing_content = true`. Add the tag
+there, in code, and apply that module first. Do not add it by hand in the
+Tailscale admin console — the next apply of that module reverts a
+console-only edit. If the tag is missing, `terraform apply` fails creating
+`tailscale_tailnet_key.announce`, or the VM boots and `tailscale up` fails
+silently in cloud-init, leaving the VM with no reachable path in at all.
+
+You also need to be on the tailnet yourself, to reach the VM once it exists.
+
+```sh
+tailscale status
+```
+
+**Check:** your own machine appears in the output, not an error. If
+`tailscale` is not installed, or you are logged into the wrong tailnet,
+install it and join the same tailnet as `var.tailnet` before continuing.
 
 Install `terraform`, `ansible`, `psql`, `dig` and `openssl` on the machine you
 are working from. Also install this repo's own Node dependencies
@@ -48,26 +68,30 @@ cp terraform.tfvars.example terraform.tfvars
 
 Fill in real values in `terraform.tfvars`, or export `TF_VAR_hcloud_token`
 instead of putting the Hetzner token in the file — the example file prefers
-this, if your shell setup allows it. `operator_ssh_cidrs` is a list: even
-one CIDR needs the brackets and quotes, for example
-`["203.0.113.4/32"]`. A bare IP fails with a type error at the prompt.
+this, if your shell setup allows it. `tailnet` and `tailscale_acl_tag` have
+no default: Terraform refuses to plan without `tailnet` set, and applying
+with the wrong `tailscale_acl_tag` (or before that tag exists — see "Before
+you start") fails creating the tailnet key, or leaves the VM unreachable.
 
 ```sh
 terraform init
 terraform apply
 ```
 
-**Check:** the apply prints the VM's address. Write it down.
+**Check:** the apply prints the VM's public address and its tailnet name.
+Write both down. Step 2 needs the address, step 3 and step 4 need the name.
 
 ```
 announce_server_ipv4 = "203.0.113.42"
+announce_server_name = "aztec-announce-fsn1"
 domain               = "db.announce.aztec.network"
 ```
 
-To read it again later, from any machine with state access:
+To read either again later, from any machine with state access:
 
 ```sh
 terraform output announce_server_ipv4
+terraform output announce_server_name
 ```
 
 ---
@@ -106,7 +130,7 @@ you did not override `domain` in `terraform.tfvars`, the value below is
 already correct.
 
 ```sh
-ssh root@<address from step 1>
+tailscale ssh root@<name from step 1>
 mkdir -p /opt/announce
 cat > /opt/announce/.env <<'EOF'
 POSTGRES_PASSWORD=
@@ -197,7 +221,7 @@ job.
 **Check:**
 
 ```sh
-ssh root@<address> 'docker compose -f /opt/announce/docker-compose.yml ps'
+tailscale ssh root@<name from step 1> 'docker compose -f /opt/announce/docker-compose.yml ps'
 ```
 
 `db`, `signal` and `caddy` must all show `Up` or `healthy`. `backup` too,
@@ -389,8 +413,9 @@ than a DNS problem.
 | Symptom | Likely cause |
 |---|---|
 | `terraform init` fails | AWS credentials for the state bucket are missing. |
-| Terraform refuses to plan | `operator_ssh_cidrs` is not set. It has no default. |
-| `ssh root@<address>` hangs, no response | `operator_ssh_cidrs` does not include the address of the machine you are working from. |
+| Terraform refuses to plan | `tailnet` is not set. It has no default. |
+| `terraform apply` fails creating `tailscale_tailnet_key.announce`, or the VM boots and never appears in `tailscale status` | `tag:announce` does not exist yet in the tailnet's ACL. It must be added in `rpc.aztec.foundation/tailscale.tf` (`AztecProtocol/foundation-iac`) and that module applied first — see "Before you start". A console-only edit does not survive that module's next apply. |
+| `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; use the Hetzner web console with the SSH key from "Before you start" as break-glass, and check `cloud-init` logs on the VM. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |

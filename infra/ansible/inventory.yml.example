@@ -5,13 +5,13 @@
 # committed. This .example file exists only so a reader of this repo can
 # see the shape without having to run `terraform apply` first.
 #
-# No tailnet on this deployment: the host is addressed by its PUBLIC
-# IPv4, not a MagicDNS name — see infra/terraform/vm.tf's firewall
-# comment (22/tcp is restricted to var.operator_ssh_cidrs, the only way
-# in without a tailnet).
+# The host is addressed by its tailnet MagicDNS name, not a public IPv4.
+# Port 22 is closed; the VM joins the tailnet at first boot and Ansible (and
+# any operator) reaches it over `tailscale ssh` — see infra/terraform/vm.tf's
+# firewall comment and infra/README.md's prerequisites.
 all:
   hosts:
-    203.0.113.10: # replace with the real Hetzner server IPv4
+    aztec-announce-fsn1: # replace with the real Hetzner server name (var.hcloud_location)
       ansible_user: root
       # Hetzner's automount path for the attached data volume — see
       # hcloud_volume.announce_data in infra/terraform/vm.tf. The
@@ -27,7 +27,7 @@ all:
 # the host, before the first `ansible-playbook -i inventory.yml site.yml`
 # run:
 #
-#   ssh root@203.0.113.10
+#   tailscale ssh root@aztec-announce-fsn1
 #   mkdir -p /opt/announce
 #   cat > /opt/announce/.env <<'EOF'
 #   POSTGRES_PASSWORD=<openssl rand -base64 32>

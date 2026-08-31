@@ -151,12 +151,30 @@ and `infra/Caddyfile.split` for exactly what runs and why.
 - An SSH public key. This key's material must differ from any other
   Hetzner module's key in the same project (for example,
   `aztec-observability`'s). Hetzner rejects a duplicate fingerprint
-  outright, and the apply fails.
-- The CIDR or CIDRs that should be allowed to reach port 22
-  (`operator_ssh_cidrs`). There is no tailnet on this deployment. This
-  firewall rule is the only thing standing between the VM and the whole
-  internet on that port. This variable has no default: Terraform refuses
-  to plan without it, on purpose. Never set it to `0.0.0.0/0`.
+  outright, and the apply fails. This is no longer the day-2 access path
+  (see below) — it is break-glass only, for the Hetzner web console.
+- The tailnet this VM joins (`var.tailnet`) and its ACL tag
+  (`var.tailscale_acl_tag`, `tag:announce` by default). `tailnet` has no
+  default: Terraform refuses to plan without it. The tag is a harder
+  prerequisite than a variable value — see "The tailnet ACL tag" below.
+  It must already exist in the tailnet's ACL before you apply, or the
+  apply fails creating the tailnet key, or the VM boots with no reachable
+  path in at all.
+- Your own machine on the same tailnet. Day-2 access to the VM is
+  `tailscale ssh`, not a public SSH port. Confirm with `tailscale status`
+  before you start.
+
+**The tailnet ACL tag.** `tag:announce` is not created by this module. It
+is owned by `rpc.aztec.foundation/tailscale.tf` in
+`AztecProtocol/foundation-iac`, a singleton applied with
+`overwrite_existing_content = true`. Add the tag there, in code, and apply
+that module first. A Tailscale admin-console edit does not survive — that
+module's next apply treats it as drift and reverts it. If the tag is
+missing when this module applies, `tailscale_tailnet_key.announce`
+creation fails, or the failure surfaces later as `tailscale up` rejecting
+the auth key in cloud-init, and either way the VM has no way in: no SSH
+port, and no working tailnet join. See `terraform/variables.tf`
+`tailscale_acl_tag` for the full failure mode.
 
 ### 2. `terraform apply`
 
@@ -250,7 +268,7 @@ certificate.
 **Verify:**
 
 ```sh
-ssh root@<announce_server_ipv4> 'docker compose -f /opt/announce/docker-compose.yml ps'
+tailscale ssh root@<announce_server_name> 'docker compose -f /opt/announce/docker-compose.yml ps'
 ```
 
 Expect `db`, `signal`, `caddy`, and `backup` all `Up`/`healthy`.
@@ -471,11 +489,14 @@ only the five variables that point at this VM specifically.
 ## The security note
 
 **Read this before operating this deployment.** Postgres (5432) and the
-Signal proxy (443, via Caddy) are reachable from the public internet.
-There is no tailnet, no VPN, and no IP allowlist in front of either. The
+Signal proxy (443, via Caddy) are reachable from the public internet. This
+is unchanged since operator access moved onto the tailnet (2026-08-31):
+there is still no VPN and no IP allowlist in front of either port. The
 Hetzner firewall (`infra/terraform/vm.tf`) opens both to `0.0.0.0/0` and
 `::/0` on purpose, because Netlify's egress pool has no stable IP range
-to allowlist against.
+to allowlist against. The tailnet protects only operator access (SSH);
+it does not sit in front of 5432 or 443, and does not reduce what those
+two ports expose.
 
 **What the database holds:** the Discord webhook URL and the Telegram
 bot token (`channel_settings`), every subscriber's email address
@@ -509,8 +530,14 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    repeated failed connection attempts against 5432. It is the layer that
    stops brute-force and credential-stuffing attacks against the port
    itself, which TLS and the role's grants do not address on their own.
-4. **The SSH CIDR restriction** (`operator_ssh_cidrs`). This is the only
-   path to port 22, since there is no tailnet `ssh` fallback here.
+4. **Operator access over the tailnet, not a public SSH port**
+   (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
+   closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which
+   needs no inbound port of its own. This protects operator access only —
+   it does nothing for 5432 or 443, which stay open to `0.0.0.0/0` and
+   `::/0` as described above. The `ssh_public_key` variable still exists,
+   but only as break-glass for the Hetzner web console if the tailnet join
+   itself fails; it is not the normal access path.
 
 None of these four layers is optional, and none compensates for a
 failure in another. Removing any one weakens the justification for the

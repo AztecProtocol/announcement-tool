@@ -175,8 +175,10 @@ resource "hcloud_firewall" "announce" {
 }
 
 # Render the Ansible inventory from Terraform outputs, mirroring
-# aztec-observability's inventory.tf pattern — but addressed by the server's
-# public IPv4, not a tailnet MagicDNS name, since there is no tailnet here.
+# aztec-observability's inventory.tf pattern: addressed by the server's
+# tailnet MagicDNS name (its Hetzner server name, matching the cloud-init
+# `tailscale up --hostname=` value above), not its public IPv4 — port 22 is
+# closed, so the inventory must reach the host the same way an operator does.
 resource "local_file" "ansible_inventory" {
   # path.module is infra/terraform (this file's own directory — see the
   # templatefile() call below, which resolves ansible/inventory.yml.tftpl
@@ -187,8 +189,8 @@ resource "local_file" "ansible_inventory" {
   file_permission = "0644"
 
   content = templatefile("${path.module}/ansible/inventory.yml.tftpl", {
-    announce_host_ip = hcloud_server.announce.ipv4_address
-    data_volume_id   = hcloud_volume.announce_data.id
+    announce_host_name = hcloud_server.announce.name
+    data_volume_id     = hcloud_volume.announce_data.id
   })
 
   # Not a data dependency, but a real one: the volume must be attached (and
