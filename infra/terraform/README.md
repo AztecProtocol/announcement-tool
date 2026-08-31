@@ -5,23 +5,33 @@ Netlify's egress on 5432), signal-cli-rest-api, and a Caddy reverse proxy
 (443 — ACME and the Signal proxy). See `vm.tf`, `variables.tf`, and
 `outputs.tf` for what and why. See `versions.tf` for the state decision.
 
+**This file covers the Terraform module only.** The deployment procedure,
+with every command, is the runbook: [`infra/README.md`](../README.md).
+
 ## Apply order
 
 Running steps 2 and 3 out of order produces a certificate failure that
 looks like a Terraform bug (see below).
 
 ```
-1. terraform apply
-2. DNS: point an A record for db.announce.aztec.network at the IPv4
+1. terraform apply                      -> runbook step 2
+2. DNS: point an A record for           -> runbook step 3
+   db.announce.aztec.network at the IPv4
    printed by the `announce_server_ipv4` output
-3. Ansible — installs Postgres, signal-cli-rest-api, Caddy
-4. alter role announce_app with login password '...'
-   (see ../README.md "Deploying: setting the real password")
-5. Verify the application connects with sslmode=verify-full
+3. Ansible: installs Postgres,          -> runbook step 4
+   signal-cli-rest-api and Caddy
+4. alter role announce_app with         -> runbook step 5, and
+   login password '...'                    "Deploying: setting
+                                            the real password"
+5. Verify the application connects      -> runbook step 7
+   with sslmode=verify-full
 ```
 
-This list numbers the Terraform-facing steps only. The full runbook in
-`../README.md` numbers them differently.
+This list is a summary. It numbers the Terraform-facing steps only, and it
+does not give the commands. The full procedure, with every command and the
+reason for each, is the runbook: [`infra/README.md`](../README.md). The
+arrows above map each line to its runbook step, because the two documents
+number them differently.
 
 Warning: port 5432 is not safe to treat as live until all five steps are done.
 Terraform's `apply` only creates the host and opens the firewall. It does
@@ -29,7 +39,7 @@ not install Postgres, does not create the `announce_app` role's password,
 and does not configure TLS. Between step 1 and step 4, 5432 is a public,
 listening port. Before Ansible runs, nothing is behind that port yet.
 After Ansible runs, the `announce_app` role exists but stays `NOLOGIN`
-until step 4 is done by hand (see `../README.md` for why this is
+until step 4 is done by hand (see [`infra/README.md`](../README.md) for why this is
 deliberate: a committed placeholder password would be worse). Do not
 point the application's `DATABASE_URL` at this host until step 5 has
 actually been checked, not assumed.
