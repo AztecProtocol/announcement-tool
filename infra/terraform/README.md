@@ -15,24 +15,24 @@ Running steps 2 and 3 out of order produces a certificate failure that
 looks like a Terraform bug (see below).
 
 ```
-1. terraform apply                      -> runbook step 2
-2. DNS: point an A record for           -> runbook step 3
+1. terraform apply                      -> DEPLOY.md step 1
+2. DNS: point an A record for           -> DEPLOY.md step 2
    db.announce.aztec.network at the IPv4
    printed by the `announce_server_ipv4` output
-3. Ansible: installs Postgres,          -> runbook step 4
+3. Ansible: installs Postgres,          -> DEPLOY.md step 4
    signal-cli-rest-api and Caddy
-4. alter role announce_app with         -> runbook step 5, and
-   login password '...'                    "Deploying: setting
-                                            the real password"
-5. Verify the application connects      -> runbook step 7
+4. alter role announce_app with         -> DEPLOY.md step 6, and
+   login password '...'                    infra/README.md "Deploying:
+                                            setting the real password"
+5. Verify the application connects      -> DEPLOY.md step 5
    with sslmode=verify-full
 ```
 
 This list is a summary. It numbers the Terraform-facing steps only, and it
-does not give the commands. The full procedure, with every command and the
-reason for each, is the runbook: [`infra/README.md`](../README.md). The
-arrows above map each line to its runbook step, because the two documents
-number them differently.
+does not give the commands. The full procedure, with every command, is
+[`infra/DEPLOY.md`](../DEPLOY.md). For the reasoning behind each step, see
+[`infra/README.md`](../README.md). The arrows above map each line to its
+`DEPLOY.md` step, because the two documents number them differently.
 
 Warning: port 5432 is not safe to treat as live until all five steps are done.
 Terraform's `apply` only creates the host and opens the firewall. It does

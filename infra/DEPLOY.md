@@ -25,7 +25,7 @@ You need all five of these. Collect them first.
 | A Hetzner Cloud API token | For the project the VM will live in. |
 | AWS credentials for `aztec-foundation-terraform-state` | `eu-west-2`. Terraform stores its state there. `terraform init` fails without them. |
 | An SSH public key | Must be different key material from any other Hetzner module in the same project. Hetzner rejects a duplicate fingerprint and the apply fails. |
-| The CIDRs allowed to reach port 22 | No default, on purpose. Terraform refuses to plan without it. Never set `0.0.0.0/0`. |
+| The CIDRs allowed to reach port 22 | No default, on purpose. Terraform refuses to plan without it. Never set `0.0.0.0/0`. Must include the address of the machine you are working from — step 3's `ssh` hangs with a TCP timeout otherwise. |
 | DNS control for `aztec.network` | You add one A record in step 3. |
 
 Install `terraform`, `ansible`, `psql`, `dig` and `openssl` on the machine you
@@ -38,14 +38,24 @@ runtime and no `npm`.
 
 ## Step 1 — Create the VM
 
+Terraform asks for the values from the table above, or reads them from a
+`terraform.tfvars` you create from `terraform.tfvars.example`:
+
 ```sh
 cd infra/terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Fill in real values in `terraform.tfvars`, or export `TF_VAR_hcloud_token`
+instead of putting the Hetzner token in the file — the example file prefers
+this, if your shell setup allows it. `operator_ssh_cidrs` is a list: even
+one CIDR needs the brackets and quotes, for example
+`["203.0.113.4/32"]`. A bare IP fails with a type error at the prompt.
+
+```sh
 terraform init
 terraform apply
 ```
-
-Terraform asks for the values from the table above, or reads them from a
-`terraform.tfvars` you create from `terraform.tfvars.example`.
 
 **Check:** the apply prints the VM's address. Write it down.
 
@@ -91,6 +101,10 @@ is not: the name simply does not point at the VM yet.
 Ansible does not create this file. It holds real secrets, so you write it by
 hand, once.
 
+Warning: `ANNOUNCE_DOMAIN` must match Terraform's `domain` value exactly. If
+you did not override `domain` in `terraform.tfvars`, the value below is
+already correct.
+
 ```sh
 ssh root@<address from step 1>
 mkdir -p /opt/announce
@@ -104,7 +118,10 @@ BACKUP_S3_BUCKET=
 BACKUP_S3_ACCESS_KEY_ID=
 BACKUP_S3_SECRET_ACCESS_KEY=
 EOF
+chmod 600 /opt/announce/.env
 ```
+
+This file holds every secret in the deployment.
 
 Generate each secret with:
 
@@ -192,12 +209,18 @@ echo | openssl s_client -connect db.announce.aztec.network:443 2>/dev/null \
 ```
 
 The issuer must name Let's Encrypt. If it names anything else, the certificate
-did not issue. Check the DNS record from step 2 first.
+did not issue. Check the DNS record from step 2 first. If the certificate's
+subject is `CN=announce-bootstrap-placeholder`, the `cert_reload` role has not
+replaced the bootstrap placeholder yet — check
+`/var/log/announce-cert-reload.log` on the VM.
 
 Now confirm the database port serves a certificate the app will accept.
 Run this from the root of this repo (the directory with `package.json` in
 it) — step 6 needs both the repo root and this downloaded certificate, and
-downloading it here avoids a second `cd` later:
+downloading it here avoids a second `cd` later.
+
+Run this check from a machine other than the VM. On the VM itself, the
+local trust store can make a broken chain look fine.
 
 ```sh
 cd <path to your checkout of this repo>
@@ -209,8 +232,6 @@ openssl s_client -connect db.announce.aztec.network:5432 -starttls postgres \
 
 **Check:** the output must contain `Verify return code: 0 (ok)`. Anything else
 means the app cannot connect. Do not continue.
-
-Run this check from a machine other than the VM.
 
 ---
 
@@ -315,7 +336,7 @@ repository.
 | `ENABLED_CHANNELS` | `webhook,discord,telegram,email` |
 | `DEPLOY_TARGET` | `netlify` |
 
-Three rules that cause silent failures if broken:
+Four rules that cause silent failures if broken:
 
 - Do not put `sslmode` or `sslrootcert` in `DATABASE_URL`. The app refuses to
   start if either is present.
@@ -323,6 +344,10 @@ Three rules that cause silent failures if broken:
   It is not the VM's own certificate, and not anything from Caddy's storage.
 - `ENABLED_CHANNELS` must not contain `signal` until a Signal number is
   registered. The app refuses to start otherwise.
+- `openssl rand -base64 32` can emit `/` and `+` in its output. Both must be
+  percent-encoded if you place this password into a `DATABASE_URL`'s
+  userinfo section. An unencoded `/` or `+` there produces an opaque
+  connection-string parse error, not a clear "bad character" message.
 
 Netlify also needs the Auth0 and session variables. The root
 [`README.md`](../README.md) Configuration table lists them.
@@ -349,10 +374,12 @@ than a DNS problem.
 |---|---|
 | `terraform init` fails | AWS credentials for the state bucket are missing. |
 | Terraform refuses to plan | `operator_ssh_cidrs` is not set. It has no default. |
+| `ssh root@<address>` hangs, no response | `operator_ssh_cidrs` does not include the address of the machine you are working from. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
+| `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
 
 ## What has not been tested
