@@ -446,10 +446,8 @@ live security regression, not a convenience.
 
 Nobody has applied this Terraform or run this Ansible against a real VM.
 Real Docker containers, real TLS handshakes, and real fault injection *were*
-used extensively during development (see
-`.superpowers/sdd/2026-08-27-06b-split-infrastructure/task-5-report.md` and
-`task-6-report.md` for exact commands and output) — that work is real and
-should not be discounted. But several things can only get their first real
+used extensively during development — that work is real and should not be
+discounted. But several things can only get their first real
 exercise on an actual apply, and you should know which before relying on
 them:
 

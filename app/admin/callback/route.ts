@@ -2,7 +2,7 @@
  * ⚠️ GET /admin/callback — THIS ROUTE MINTS ADMIN IDENTITY. READ BEFORE EDITING. ⚠️
  *
  * Auth0 redirects here with an authorization code. This route turns that code
- * into a signed session cookie that middleware.ts (Task 3) will accept as proof
+ * into a signed session cookie that middleware.ts will accept as proof
  * of who the caller is. That makes it the SECOND entrance to the same trust
  * boundary middleware.ts guards, and everything the four-eyes rule protects —
  * a `critical` announcement is an IRREVERSIBLE Discord role ping that needs two

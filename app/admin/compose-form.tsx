@@ -7,7 +7,7 @@ import { useActionState } from 'react';
 // mapping to the .d.ts (no exports), giving `(void 0) is not a function` for
 // useRouter specifically — the same failure mode already documented for
 // `next/headers`, just not previously hit for `next/navigation` because no
-// admin client component had called useRouter until Task 6.
+// admin client component had called useRouter until this one.
 import { useRouter } from 'next/dist/client/components/navigation.js';
 import { createDraftAction, saveRevisionAction, previewAction, saveTemplateAction } from './actions.js';
 import { GH_RELEASE } from '../../src/core/validate.js';

@@ -4,7 +4,7 @@ node_modules/
 *.tsbuildinfo
 next-env.d.ts
 
-# subagent-driven-development scratch (ledger, briefs, review packages)
+# Local development scratch (ledger, briefs, review packages)
 .superpowers/
 
 # Generated TLS test fixtures (infra/dev/gen-test-certs.sh) — never commit

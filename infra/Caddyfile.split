@@ -1,5 +1,5 @@
 # Caddy config for the SPLIT DEPLOYMENT's Hetzner VM
-# (announce.aztec.network, task 2026-08-27-06b-split-infrastructure/task-6).
+# (announce.aztec.network).
 #
 # ---------------------------------------------------------------------------
 # THIS IS NOT `main`'s Caddyfile — do not copy that file's structure here.
@@ -60,11 +60,10 @@
 # serving a clean refusal. That is a WORSE failure than "closed": the naive
 # `{$ANNOUNCE_SIGNAL_SECRET}` form (no default) looked correct on paper —
 # "no header matches an empty string, so every request 403s" — right up
-# until the config failed to load at all. Verified locally (Task 6's
-# report): the naive form crash-looped Caddy the moment
-# ANNOUNCE_SIGNAL_SECRET was empty.
+# until the config failed to load at all. Verified locally: the naive
+# form crash-looped Caddy the moment ANNOUNCE_SIGNAL_SECRET was empty.
 #
-# FIX ROUND 1, UPDATE: docker-compose.split.yml's `caddy.environment` now
+# UPDATE: docker-compose.split.yml's `caddy.environment` now
 # sets `ANNOUNCE_SIGNAL_SECRET: ${ANNOUNCE_SIGNAL_SECRET:?...}` — a hard
 # guard, matching every other secret in that file (POSTGRES_PASSWORD,
 # SIGNAL_ACCOUNT, BACKUP_ENCRYPTION_KEY, ANNOUNCE_DOMAIN). An unset
@@ -111,7 +110,7 @@
 # it automatically. Renewal and Postgres's cert-reload hook are handled
 # entirely outside this file — see infra/ansible/roles/cert_reload.
 # ---------------------------------------------------------------------------
-# ACME CHALLENGE TYPE — fix round 1. Nothing about this file previously
+# ACME CHALLENGE TYPE. Nothing about this file previously
 # disabled HTTP-01, so if TLS-ALPN-01 ever failed for any reason, Caddy
 # would fall back to attempting an HTTP-01 challenge on port 80 — a port
 # infra/terraform/vm.tf's firewall does NOT open (only 443, 5432, and 22

@@ -2,8 +2,8 @@
 #
 # One Hetzner VM runs Postgres (the app's database, reachable from Netlify's
 # egress pool on 5432) plus signal-cli-rest-api and a Caddy reverse proxy
-# (443 — ACME challenge + the Signal proxy) in Docker, deployed by Ansible
-# (Task 6) after Terraform creates the host. cloud-init here does nothing
+# (443 — ACME challenge + the Signal proxy) in Docker, deployed
+# by Ansible after Terraform creates the host. cloud-init here does nothing
 # but prepare the host for Ansible — no tailnet join, unlike
 # aztec-observability, because there is no tailnet on this deployment
 # (decided 2026-08-27, see variables.tf `operator_ssh_cidrs`).
@@ -54,7 +54,7 @@ resource "hcloud_server" "announce" {
 # the host — Terraform cannot do the filesystem step), survives a server
 # rebuild, and is detachable if the stack ever moves hosts.
 #
-# Boot-ordering note for Task 6 (Ansible): Docker must not start Postgres's
+# Boot-ordering note for Ansible: Docker must not start Postgres's
 # container before this volume is mounted, or the container writes its data
 # directory to the root disk and the later volume mount shadows it. Fix that
 # with a systemd drop-in (`RequiresMountsFor=<mount path>` on docker.service

@@ -42,7 +42,7 @@
       }
   notify: Restart docker
 
-# FIX ROUND 1, CRITICAL 2: Ansible flushes handlers at END OF PLAY by
+# Ansible flushes handlers at END OF PLAY by
 # default, not between roles. Both this role's "Point Docker's data-root"
 # task above and the `docker` role's RequiresMountsFor drop-in (which ran
 # BEFORE this role, per site.yml's role order) notify the SAME "Restart

@@ -6,7 +6,7 @@ fqdn: ${hostname}
 # join a tailnet — there is no tailnet on this deployment (decided
 # 2026-08-27). The only day-1 requirement is that the host is reachable over
 # SSH (restricted to var.operator_ssh_cidrs by the Terraform firewall) so
-# Ansible (Task 6) can install Postgres, signal-cli-rest-api, and Caddy.
+# Ansible can install Postgres, signal-cli-rest-api, and Caddy.
 
 package_update: true
 package_upgrade: true

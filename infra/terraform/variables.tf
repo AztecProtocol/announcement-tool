@@ -23,7 +23,7 @@ variable "server_type" {
 variable "image" {
   type        = string
   default     = "ubuntu-24.04"
-  description = "Base image. Matches the aztec-observability module's choice for consistency across the author's Hetzner modules; Ansible (Task 6) provisions everything else. NOTE: `image` is in this server's ignore_changes list (see vm.tf), so bumping this variable produces NO plan diff — Terraform will report \"no changes\" even though the value changed. An OS upgrade is a deliberate rebuild (new server, migrate the volume), never a variable bump."
+  description = "Base image. Matches the aztec-observability module's choice for consistency across the author's Hetzner modules; Ansible provisions everything else. NOTE: `image` is in this server's ignore_changes list (see vm.tf), so bumping this variable produces NO plan diff — Terraform will report \"no changes\" even though the value changed. An OS upgrade is a deliberate rebuild (new server, migrate the volume), never a variable bump."
 }
 
 variable "data_volume_size_gb" {
@@ -34,7 +34,7 @@ variable "data_volume_size_gb" {
 
 variable "ssh_public_key" {
   type        = string
-  description = "SSH public key installed on this VM for Ansible (Task 6) and break-glass access. Must be DIFFERENT key material from any other module's ssh_public_key applied into the same Hetzner project (e.g. aztec-observability's) — Hetzner rejects a duplicate fingerprint outright, so reusing a key here would fail the apply."
+  description = "SSH public key installed on this VM for Ansible and break-glass access. Must be DIFFERENT key material from any other module's ssh_public_key applied into the same Hetzner project (e.g. aztec-observability's) — Hetzner rejects a duplicate fingerprint outright, so reusing a key here would fail the apply."
 }
 
 # --- firewall ---

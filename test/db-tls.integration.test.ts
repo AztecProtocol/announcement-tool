@@ -44,7 +44,7 @@ describe.skipIf(!ready)('postgres TLS', () => {
     // instead of the human-readable message, which can change between
     // Node/OpenSSL versions while the code is stable. Confirmed live: the
     // thrown error is a plain Error with `code` as an own top-level
-    // property (no wrapping, no `cause`) — see task-2-report.md.
+    // property (no wrapping, no `cause`).
     await expect(sql`select 1`).rejects.toMatchObject({ code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' });
     await sql.end().catch(() => {});
   });

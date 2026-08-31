@@ -2,9 +2,9 @@
 #
 # THIS IS NOT `docker-compose.prod.yml`. That file (on `main`) is the
 # single-VM deployment where the app, worker, and everything else share one
-# host reachable only over a tailnet. On THIS deployment (`announce.aztec.
-# network`, Task 5/6 of 2026-08-27-06b-split-infrastructure) the app and
-# worker run on Netlify instead — this VM runs ONLY the stateful/host-bound
+# host reachable only over a tailnet. On THIS deployment
+# (`announce.aztec.network`) the app and worker run on Netlify instead —
+# this VM runs ONLY the stateful/host-bound
 # pieces Netlify cannot: Postgres, signal-cli-rest-api (+ its keep-alive
 # receive job), Caddy, and the nightly backup. There is deliberately no
 # tailnet here (see infra/terraform/vm.tf) — Postgres (5432) and Caddy (443)
@@ -52,7 +52,7 @@ services:
     # without a cert in db-tls/, and nothing can put a cert in db-tls/
     # until Postgres has started.
     #
-    # FIX ROUND 1: this used to break the cycle with an `entrypoint` that
+    # This used to break the cycle with an `entrypoint` that
     # ran `apk add --no-cache openssl` on first start. That is a NETWORK
     # DEPENDENCY IN THE CRITICAL BOOT PATH of the one service every other
     # part of this deployment depends on — if the Alpine package mirror is
@@ -102,7 +102,7 @@ services:
     # justification for this port being open at all.
     #
     # Host port is DB_HOST_PORT, defaulting to the real 5432 — overridable
-    # only so Task 6's local verification run can avoid colliding with the
+    # only so a local verification run can avoid colliding with the
     # unrelated announce-db-1 / announce-db-tls-1 containers this repo's
     # test suite already runs on this machine. A real deployment should
     # never set DB_HOST_PORT; Netlify's DATABASE_URL expects 5432.
@@ -126,7 +126,7 @@ services:
       # log_line_prefix with %h (client host address) — LOAD-BEARING for
       # infra/ansible/roles/fail2ban's jail, not cosmetic logging
       # preference. Verified directly against a real postgres:16-alpine
-      # container (fix round 1, Task 6): Postgres's DEFAULT prefix
+      # container: Postgres's DEFAULT prefix
       # ("%m [%p] ") never includes the client address on ANY line,
       # including FATAL auth-failure lines — a real failed login produces
       # `2026-08-30 12:50:03.363 UTC [41753] FATAL:  password
@@ -142,7 +142,7 @@ services:
       # database-does-not-exist cases, which (also confirmed) all share
       # this exact shape rather than three different trailing formats.
       #
-      # THE TRAILING SPACE IS LOAD-BEARING TOO (caught during fix round 1
+      # THE TRAILING SPACE IS LOAD-BEARING TOO (caught during
       # verification, not on first pass): a YAML list-item scalar does NOT
       # strip a trailing space the way it would look stripped on the page,
       # but Postgres's `-c key=value` parsing takes the value literally —
@@ -170,7 +170,7 @@ services:
       start_period: 10s
     logging:
       # Caps Docker's json-file log driver, which is UNCAPPED by
-      # default (fix round 3). This matters more for `db` than any other
+      # default. This matters more for `db` than any other
       # service here: two separate scripts scan its full log on a
       # recurring basis —
       # infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2 does
@@ -284,7 +284,7 @@ services:
       # x-announce-signal-secret header) — this is the "proxy" half of the
       # fail-closed pair described there.
       #
-      # `:?`, NOT a silent sentinel fallback — fix round 1. The first
+      # `:?`, NOT a silent sentinel fallback. The first
       # version of this line used `${ANNOUNCE_SIGNAL_SECRET:-<sentinel>}`
       # so Caddy's own `header` matcher never saw a syntactically-empty
       # argument (which crash-loops the container — Caddy's own

@@ -46,8 +46,7 @@
 # future change) a bind mount, and regardless of the volume's host-side
 # directory name.
 #
-# WHY EXACTLY-ONE-MATCH IS ENFORCED, NOT "FIRST MATCH WINS" (fix round 1,
-# Critical 1)
+# WHY EXACTLY-ONE-MATCH IS ENFORCED, NOT "FIRST MATCH WINS"
 # ----------------------------------------------------------------------
 # Caddy's /data retains certificates across issuer changes: it does not
 # delete an old issuer's cert directory just because a newer cert now
@@ -94,7 +93,7 @@ log() {
   printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" >>"$LOG_FILE"
 }
 
-# alert_human(): fix round 1 — a cron job's stderr being mailed to root
+# alert_human(): a cron job's stderr being mailed to root
 # is not a real alerting path on a host with no local MTA (the honest
 # risk the original comment named and then left unaddressed). Reuses
 # THIS deployment's existing alert path instead of inventing a second
@@ -133,7 +132,7 @@ alert_human() {
     # reads) — export every line so ALERT_EMAIL_TO/ESP_PROVIDER/etc.
     # reach send_alert() exactly as it reads them via ${VAR:-}.
     #
-    # NOTE (fix round 2): sourcing .env like this treats it as literal
+    # NOTE: sourcing .env like this treats it as literal
     # SHELL syntax, not compose's own KEY=VALUE parser. Verified directly
     # what an unquoted value containing a space actually does:
     #   EMAIL_FROM_NAME=Aztec Announcements
@@ -172,7 +171,7 @@ fail() {
 cd "$STACK_DIR" || fail "cannot cd to $STACK_DIR"
 
 # Sanity check BEFORE searching: if the caddy container isn't even
-# running, "no cert found" would be the wrong diagnosis (fix round 1 —
+# running, "no cert found" would be the wrong diagnosis —
 # distinguish "container down" from "no cert issued yet / layout
 # changed", which the original version conflated by redirecting exec's
 # own connection failure to /dev/null same as a genuine empty search).
@@ -184,8 +183,7 @@ fi
 rm -f /tmp/announce-cert-reload-caddy-check.err
 
 # --- Locate Caddy's current cert for $DOMAIN, at runtime, exactly once ----
-# FIX ROUND 2 (a real bug found by an independent reviewer, then
-# independently REPRODUCED here before trusting the report — see below):
+# A real bug, independently REPRODUCED here before trusting it (see below):
 # every command substitution in this script whose failure must be
 # HANDLED, not propagated as a script-killing error, is wrapped in an
 # explicit `set +e` / capture `$?` / `set -e` bracket — the SAME pattern
@@ -301,7 +299,7 @@ fi
 # host as an intermediary, without needing either container's storage to
 # be host-addressable.
 #
-# ATOMIC SWAP, fix round 1: the original version copied cert and key as
+# ATOMIC SWAP: the original version copied cert and key as
 # two separate `mv`s directly onto the live filenames, leaving a real
 # window where the new cert sat next to the OLD key on disk. Nothing in
 # THIS script reads files in that window, but Postgres's own
@@ -317,8 +315,8 @@ fi
 # docker-compose.split.yml's `db.volumes`), a real directory Docker
 # itself has mounted there. A container cannot replace its own mounted
 # volume's mountpoint with a symlink; `mv -Tf` onto it fails with
-# "Is a directory". Confirmed by running it locally (Task 6 fix
-# round 1's verification): the compose stack's `db` container returned
+# "Is a directory". Confirmed by running it locally: the compose
+# stack's `db` container returned
 # exactly that error.
 #
 # THE ACTUAL FIX: swap cert and key as two files WITHIN the same
@@ -385,7 +383,7 @@ if ! docker compose kill -s HUP db; then
   fail "new cert/key installed but SIGHUP to the db container failed — Postgres may still be serving the OLD cert until its next restart"
 fi
 
-# VERIFY, fix round 2 — this replaces a fix-round-1 version of this
+# VERIFY: this replaces an earlier version of this
 # section that only re-hashed the FILE at
 # /var/lib/postgresql/tls/server.crt after SIGHUP. That is the exact
 # file this script itself had just written two steps earlier: matching
@@ -426,7 +424,7 @@ fi
 # the same fact indirectly through a side channel that turned out not to
 # carry it.
 #
-# FIX ROUND 3, TWO FAIL-OPEN GAPS IN THIS CHECK CLOSED:
+# TWO FAIL-OPEN GAPS IN THIS CHECK CLOSED:
 #
 # (1) POLL INSTEAD OF ASSUMING THE LOG LINE IS ALREADY THERE.
 # `docker compose kill -s HUP` returns as soon as the SIGNAL is

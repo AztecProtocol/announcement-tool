@@ -98,7 +98,7 @@
       not generate or template secrets — see the comment above this task.
   when: not compose_up_env_file.stat.exists
 
-# FIX ROUND 1, CRITICAL 2, defense-in-depth: `volume_mount`'s task list
+# Defense-in-depth: `volume_mount`'s task list
 # ends with an explicit `meta: flush_handlers` specifically so Docker is
 # already restarted onto {{ data_mount }}/docker before this role ever
 # creates a container or volume — see the long comment there for the
@@ -125,7 +125,7 @@
       re-running this playbook.
   when: compose_up_docker_root_dir.stdout != (data_mount + '/docker')
 
-# FIX ROUND 1 — replaces an `apk add openssl` that used to run inside
+# Replaces an `apk add openssl` that used to run inside
 # `db`'s own entrypoint on first start (see docker-compose.split.yml's
 # `db` comment for the full reasoning this replaced). That put a package-
 # mirror network call in the critical boot path of the one service every

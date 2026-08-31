@@ -88,11 +88,10 @@ log() { printf '[backup %s] %s\n' "$(date -u +%H:%M:%S)" "$1" >&2; }
 # override the real exit code; it is logged and swallowed.
 #
 # send_alert() itself now lives in scripts/send-alert.sh, shared with
-# infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 (fix round 1
-# on Task 6 of the split-infrastructure plan: a cert-reload failure now
-# reaches the same inbox a backup failure does, via the identical
-# ALERT_EMAIL_TO/ESP_PROVIDER path, instead of a second bespoke
-# mechanism). Sourced after log() is defined above, since send_alert()
+# infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2: a cert-reload
+# failure now reaches the same inbox a backup failure does, via the
+# identical ALERT_EMAIL_TO/ESP_PROVIDER path, instead of a second bespoke
+# mechanism. Sourced after log() is defined above, since send_alert()
 # calls it.
 # ---------------------------------------------------------------------------
 # shellcheck source=./send-alert.sh

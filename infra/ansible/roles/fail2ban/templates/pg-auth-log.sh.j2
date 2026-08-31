@@ -11,7 +11,7 @@
 # timestamps but not "since I last checked" in a way that survives
 # cron's own minute-granularity drift as cleanly as a line count does.
 #
-# FIX ROUND 1 (Task 6), two real bugs found in the original version:
+# Two real bugs found in the original version:
 #
 # (a) EVENTS LOST ON JSON-FILE LOG ROTATION. Docker's json-file log
 # driver rotates at 10MB by default. After a rotation, `docker compose
@@ -45,12 +45,12 @@ DEST="/var/log/announce-postgres-auth.log"
 
 cd "$STACK_DIR"
 
-# FIX ROUND 2 note: `total_lines="$(docker compose logs db | wc -l)"` looks
+# NOTE: `total_lines="$(docker compose logs db | wc -l)"` looks
 # safe under `set -e` because `wc -l` itself always exits 0 — but
 # `pipefail` (set above) makes the ASSIGNMENT's exit status the
 # rightmost NON-ZERO exit code across every stage of the pipe, not just
 # the last stage's own code. Confirmed directly (same bug class found
-# and fixed in cert-reload.sh.j2's fix round 2, reproduced here before
+# and fixed in cert-reload.sh.j2's equivalent check, reproduced here before
 # assuming this file shared it): `OUT="$(false | wc -l)"` under
 # `set -euo pipefail` kills the script at that line, silently, before
 # reaching anything below it. If `docker compose logs db` ever fails
@@ -94,8 +94,8 @@ if [ "$total_lines" -lt "$last_seen" ]; then
   # ever silently dropped.
   #
   # These two `docker compose logs db` calls are NOT the same bug class
-  # as `total_lines=` above, and do not need the same bracket (checked,
-  # fix round 3): both are BARE commands (writing straight to `>>"$DEST"`
+  # as `total_lines=` above, and do not need the same bracket (checked):
+  # both are BARE commands (writing straight to `>>"$DEST"`
   # or through `tail`), not assignments. `set -e`'s "assignment absorbs
   # the substitution's exit status" gap only applies to assignments —
   # confirmed directly with `false | tail -n +1 >>out.txt` under

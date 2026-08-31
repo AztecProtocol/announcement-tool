@@ -11,7 +11,7 @@ for what and why; `versions.tf` for the state decision.
 1. terraform apply
 2. DNS: point an A record for announce.aztec.network at the IPv4
    printed by the `announce_server_ipv4` output
-3. Ansible (Task 6) — installs Postgres, signal-cli-rest-api, Caddy
+3. Ansible — installs Postgres, signal-cli-rest-api, Caddy
 4. alter role announce_app with login password '...'
    (see ../README.md "Deploying: setting the real password")
 5. Verify the application connects with sslmode=verify-full
@@ -50,6 +50,5 @@ tracking the volume — it does NOT delete it) and then destroy the rest.
 
 ## Verification performed on this module
 
-See `../../.superpowers/sdd/2026-08-27-06b-split-infrastructure/task-5-report.md`
-for exactly what was and wasn't validated (no VM has ever been applied from
-this configuration).
+No VM has been created from this configuration yet. The first `terraform
+apply` is its first real test.

@@ -57,7 +57,7 @@
       # Matches Postgres's own auth-failure log lines, as mirrored into
       # /var/log/announce-postgres-auth.log by pg-auth-log.sh.
       #
-      # REWRITTEN in fix round 1 on Task 6 after the original version was
+      # REWRITTEN after the original version was
       # proven, with a real postgres:16-alpine container, to never match
       # anything. That version assumed the client host appeared as a
       # trailing `client=<HOST>` (or similar) on the FATAL line — real
@@ -71,7 +71,7 @@
       # directly into "FATAL:" with no separator and this filter fails
       # to match, the exact same silent-jail failure mode this whole
       # change exists to fix) specifically so this filter has an IP to
-      # bind <HOST> to. Verified directly (fix round 1) against a real
+      # bind <HOST> to. Verified directly against a real
       # container running that exact command: the client address appears
       # in ONE fixed position on every FATAL line — immediately after the
       # `[pid]` field, before the `FATAL:` keyword itself — for
