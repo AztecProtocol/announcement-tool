@@ -396,9 +396,11 @@ fi
 # and Postgres SILENTLY KEEPS SERVING THE OLD CERTIFICATE — confirmed by
 # opening a real TLS connection afterward and reading back the exact
 # same old certificate on the wire. The on-disk file (the new, mismatched
-# one) still hashed correctly the whole time. The fix-round-1 check would
-# have logged "reloaded... verified" in exactly this scenario. That
-# wording is corrected below to say what is actually being checked.
+# one) still hashed correctly the whole time. An earlier version of this
+# check, which only re-hashed the on-disk file, would have logged
+# "reloaded... verified" in exactly this scenario. This check instead
+# reads Postgres's own log line for whether the reload was accepted or
+# rejected, as described below.
 #
 # A NAIVE FIX ATTEMPT, TRIED AND REJECTED: querying
 # `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()` over a fresh

@@ -496,11 +496,11 @@ them:
 - **The cert-reload hook's 8-second polling window, sized against a
   lightly-loaded sandbox.** After a SIGHUP, the script polls Postgres's own
   log for up to 8 seconds to confirm the reload was accepted (not just
-  that the file on disk changed — see `cert-reload.sh.j2`'s fix-round-3
-  comments for why a bare file-hash or `pg_stat_ssl` check was proven
-  insufficient). The 8-second ceiling is based on a ~57ms measured
-  logging-driver flush time in the development sandbox, giving roughly two
-  orders of magnitude of headroom — but that measurement was taken under
+  that the file on disk changed — see `cert-reload.sh.j2`'s comments on
+  the reload-verification check for why a bare file-hash or `pg_stat_ssl`
+  check was proven insufficient). The 8-second ceiling is based on a
+  ~57ms measured logging-driver flush time in the development sandbox,
+  giving roughly two orders of magnitude of headroom — but that measurement was taken under
   light load, not real production disk/CPU contention. If it is ever too
   short under real load, the failure mode is a false "UNCONFIRMED — check
   manually" alert, not a silent false success (see the polling logic's own

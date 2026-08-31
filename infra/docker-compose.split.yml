@@ -185,9 +185,9 @@ services:
       # minute) and cert-reload (which runs daily) to never miss a
       # rotation boundary they can't already handle — both scripts
       # already have explicit rotation-handling logic (see
-      # pg-auth-log.sh.j2's fix-round-1 comment), so this cap does not
-      # introduce a new failure mode, only bounds an existing unbounded
-      # one.
+      # pg-auth-log.sh.j2's comment on JSON-file log rotation), so this
+      # cap does not introduce a new failure mode, only bounds an
+      # existing unbounded one.
       driver: json-file
       options:
         max-size: "10m"

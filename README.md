@@ -2,12 +2,7 @@
 
 Release-only announcement pipeline (author once → fan out).
 
-**Concept doc:** [announcement-tool-concept.md](../announcement-tool-concept.md) — design rationale, feature scope, architecture.  
-**Follow-on plans:** Plan 2 adds channel adapters (Discord/Telegram/Email/Signal) + health alerting; Plan 3 adds public web (subscribe page, archive, feeds); Plan 4 adds admin UI; Plan 5 covers deployment and Tailscale integration.
-
-**Two deployment shapes exist.** `main` deploys to a VM behind Tailscale (Plan 5) and remains the working, supported deployment. A separate branch, `feat/netlify-deployment` (Plan 5b), adds a serverless Netlify shape as an alternative. **That branch is not merged, and no decision has been made to move off the VM.** This README documents both, marked clearly below wherever they differ; anything not marked applies to both. `DEPLOY_TARGET` (`vm` or `netlify`) tells the app which shape it is running under — see "Startup safety checks".
-
-**A third, split shape is being built on `feat/split-infrastructure`** (also not merged): the app and worker run on Netlify, and a separate Hetzner VM runs only Postgres, the Signal sidecar, and Caddy. The deploy procedure, security posture, and what has and has not been verified for that VM are documented in [`infra/README.md`](infra/README.md), not here — this README's Admin section covers the application, not that infrastructure.
+**Deployment shape.** The app and worker run on Netlify. A separate Hetzner VM runs only Postgres, the Signal sidecar, and Caddy. `DEPLOY_TARGET` (`vm` or `netlify`) tells a given process which shape it is running under — see "Startup safety checks". The VM's deploy procedure, security posture, and what has and has not been verified are documented in [`infra/README.md`](infra/README.md), not here — this README's Admin section covers the application, not that infrastructure.
 
 ## Development Setup
 
