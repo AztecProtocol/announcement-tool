@@ -77,7 +77,8 @@ services:
     # image's own entrypoint runs unmodified.
     # `ports:` publishes 5432 on the host's public interface. This is what
     # the split deployment needs. The production compose file for the
-    # single-VM shape has a comment here saying "Do not add a `ports:`
+    # single-VM shape (docker-compose.prod.yml, on the single-VM branch)
+    # has a comment here saying "Do not add a `ports:`
     # mapping" — that comment is correct for its topology (app/worker reach
     # `db:5432` over the private compose network, nothing outside it needs
     # to) and wrong for this one. This is the split deployment: Netlify's
