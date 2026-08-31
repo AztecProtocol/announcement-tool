@@ -2,7 +2,13 @@
 
 Release-only announcement pipeline (author once → fan out).
 
-**Deployment shape.** The app and worker run on Netlify. A separate Hetzner VM runs only Postgres, the Signal sidecar, and Caddy. `DEPLOY_TARGET` (`vm` or `netlify`) tells a given process which shape it is running under. See "Startup safety checks" below. [`infra/README.md`](infra/README.md) documents the VM's deploy procedure and security posture, and states what has and has not been verified. This README's Admin section covers the application, not that infrastructure.
+**Deployment shape.** The app and worker run on Netlify. A separate Hetzner VM runs only Postgres, the Signal sidecar, and Caddy.
+
+`DEPLOY_TARGET` tells an application process which shape it runs under. This deployment sets `DEPLOY_TARGET=netlify`, on Netlify only. Do not set it on the VM: no application process runs there, so nothing reads it. The VM's own configuration is the `.env` file beside the compose file, described in [`infra/README.md`](infra/README.md).
+
+`DEPLOY_TARGET=vm` selects a different deployment shape, where the app itself runs on a VM behind Tailscale. The code still supports that shape, and this README documents it wherever the two differ. It is not the shape described here.
+
+This README's Admin section covers the application. The VM's deploy procedure and security posture, and what has and has not been verified, are in [`infra/README.md`](infra/README.md).
 
 ## Development Setup
 
@@ -204,7 +210,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DEPLOY_TARGET` | *(unset)* | `vm` or `netlify`. Required in production; an unset or unrecognized value fails startup closed. Selects which identity source and which startup checks apply. See "Startup safety checks". |
+| `DEPLOY_TARGET` | *(unset)* | `vm` or `netlify`. Required in production; an unset or unrecognized value fails startup closed. Selects which identity source and which startup checks apply. **This deployment sets `netlify`, on Netlify only.** See "Startup safety checks". |
 | `DATABASE_URL` | `postgres://announce:announce@127.0.0.1:5499/announce` | Postgres connection string used by the worker (or, on the Netlify shape, the `tick-background` function) and by migrations. On Netlify this must point at a reachable managed Postgres instance; there is no bundled database. It must NOT include `sslmode` or `sslrootcert` in its query string. Those bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below. Startup refuses to build a connection if either is present. |
 | `DATABASE_SSL_MODE` | *(unset)* | `verify-full` requires a verified TLS connection to Postgres. Set it whenever the database is reachable over more than a private network. Example: the Hetzner-VM split deployment, where the database port is exposed to the public internet. Unset means plaintext, for a private link such as loopback, Tailscale, or the docker-compose network. `require` is refused, because it encrypts but does not verify the server, so it does not stop an active attacker. Any other value fails startup. |
 | `DATABASE_SSL_ROOT_CERT` | *(unset)* | The CA bundle used to verify the Postgres server certificate. It can be a filesystem path, or the PEM content itself pasted inline (detected by its `-----BEGIN CERTIFICATE-----` header; see `resolveCaFile` in `src/db/connect.ts`). Inline PEM exists for deployments with no filesystem to place a CA file on, such as Netlify. Required whenever `DATABASE_SSL_MODE=verify-full`. Without an explicit CA, verification would silently fall back to the system trust store, which may not contain the issuer. So startup refuses, rather than connecting with an unverified guarantee. |
@@ -302,7 +308,7 @@ The checks do not use `NODE_ENV=production` as a trigger. The reason: `next star
 
 A start that fails these checks exits non-zero after printing the problems, for the worker. The Netlify `tick-background` function logs the problems and returns without doing any work. For the web app, the check runs inside Next's `register()` startup hook. Throwing there does not abort the process: Next logs the error and the server keeps running, returning 500 on every request. So if the web app is ever seen listening but every request returns a 500, check these first. A health check must send a real request, not just confirm the port is open, or it will report a misconfigured instance as healthy.
 
-Neither of the two public server actions (email subscribe, webhook registration) is rate-limited today. `netlify.toml` carried a rule at one point that attached a limit to the `/` path, but a real deployment showed it also throttled every other request to `/`, including `/admin/login` — a second publisher trying to sign in got HTTP 429 and could not reach the login page. That rule was removed on 2026-08-23; `netlify.toml`'s comment explains why and what a working fix would need (a store that survives serverless cold starts, or a CAPTCHA on the form). Until one of those lands, `subscribeEmail` sending a confirmation email to any address given is a real, currently unmitigated risk: an unthrottled endpoint that can be pointed at a third party's inbox. See `netlify.toml`'s rate-limiting comment for the full account.
+Neither of the two public server actions (email subscribe, webhook registration) is rate-limited today. `netlify.toml` carried a rule at one point that attached a limit to the `/` path. A real deployment showed it also throttled every other request to `/`, including `/admin/login`. A second publisher trying to sign in got HTTP 429 and could not reach the login page. That rule was removed on 2026-08-23; `netlify.toml`'s comment explains why and what a working fix would need (a store that survives serverless cold starts, or a CAPTCHA on the form). Until one of those lands, this is a real and currently unmitigated risk. `subscribeEmail` sends a confirmation email to any address given, so the endpoint can be pointed at a third party's inbox. See `netlify.toml`'s rate-limiting comment for the full account.
 
 ### Which channels this deployment runs
 
