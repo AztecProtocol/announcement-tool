@@ -3,9 +3,12 @@
 # The app and worker run on Netlify, not on this VM. This VM runs only the
 # stateful, host-bound pieces Netlify cannot: Postgres, signal-cli-rest-api
 # (plus its keep-alive receive job), Caddy, and the nightly backup. There is
-# no `app`, `worker`, or `migrate` service here: migrations are run against
-# the exposed Postgres port from wherever `npm run migrate` is invoked in the
-# Netlify deploy pipeline, not from this host. There is no tailnet here (see
+# no `app`, `worker`, or `migrate` service here, and no Node runtime on this
+# VM at all: migrations and publisher-seeding are run from the operator's
+# own machine, against the exposed Postgres port, using the app's own
+# `npm run migrate` / `npm run seed:publisher` — not from this host, and not
+# reimplemented as shell against this container. See infra/DEPLOY.md steps 6
+# and 7. There is no tailnet here (see
 # infra/terraform/vm.tf), by design — Postgres (5432) and Caddy (443) are
 # exposed to the public internet, and TLS plus a least-privilege DB role
 # plus fail2ban are what protect them, not network isolation. See

@@ -301,59 +301,60 @@ Both commands in this step use the `announce` owner credential, the one
 with full rights. This is not the least-privilege `announce_app` role
 used from step 6 onward.
 
-Warning: never send the owner credential across the public internet
-unverified. Run both commands over SSH on the VM, against `127.0.0.1`.
-This is the simplest form, and it is also correct for an owner-level
-operation.
+**Run both commands from your own machine, not the VM.** There is no
+Node runtime, no `npm`, and no application code on this VM at all —
+`docker-compose.split.yml` has no `app`, `worker`, or `migrate` service,
+and `compose_up`'s repo sync deliberately excludes `node_modules`. The
+commands below go over the internet to
+`db.announce.aztec.network:5432`, so both must use verified TLS
+explicitly. This is different from the pre-split deployment shape, where
+the same commands ran over Tailscale against a private address.
 
 **Apply `migrations/014_app_role.sql` first**, and every other pending
-migration, by running the app's normal migration entrypoint on the VM
-itself, against the local Postgres, as the owner:
+migration, using the app's own migration entrypoint from a checkout of
+this repo (`npm install` already run — see the root `README.md`), as the
+owner:
 
 ```sh
-ssh root@<announce_server_ipv4>
-cd /opt/announce
-DATABASE_URL='postgres://announce:<owner password>@127.0.0.1:5432/announce' npm run migrate
+DATABASE_URL='postgres://announce:<owner password>@db.announce.aztec.network:5432/announce' \
+  DATABASE_SSL_MODE=verify-full \
+  DATABASE_SSL_ROOT_CERT=<path to the ISRG Root X1 PEM — see step 4> \
+  npm run migrate
 ```
 
-`npm run migrate` (`src/db/migrate-cli.ts`) already routes through
+`npm run migrate` (`src/db/migrate-cli.ts`) routes through
 `buildConnectionOptions`/`resolveCaFile`, the same TLS-enforcing path the
-app itself uses. This path only enforces TLS if `DATABASE_SSL_MODE` is
-actually set. Run this command locally against `127.0.0.1`, as shown
-above, and leave `DATABASE_SSL_MODE` unset. Postgres accepts plaintext on
-the loopback interface inside the VM, and that is why the command runs
-there instead of over the internet.
+app itself uses. `DATABASE_SSL_MODE=verify-full` plus an explicit
+`DATABASE_SSL_ROOT_CERT` is not optional here: this connection crosses
+the public internet, and `buildConnectionOptions`'s `case undefined`
+leaves `ssl` unset entirely if `DATABASE_SSL_MODE` is left unset — the
+same behavior local dev relies on, which would send the owner credential,
+the most powerful credential in this system, over the internet with no
+TLS at all.
 
-Warning: if you ever run this command from off the VM instead, you must
-set both `DATABASE_SSL_MODE=verify-full` and `DATABASE_SSL_ROOT_CERT`
-(the ISRG Root X1 PEM — see step 7). If you do not set both, the owner
-credential, the most powerful credential in this system, crosses the
-internet with no TLS at all. This happens silently, by design:
-`buildConnectionOptions`'s `case undefined` leaves `ssl` unset so local
-dev keeps working. It does not know or care that a given invocation is
-actually crossing the internet.
+Warning: do not put `sslmode` or `sslrootcert` in `DATABASE_URL`'s query
+string. `buildConnectionOptions` refuses to run if either is present —
+see step 7's table for why. Use the two `DATABASE_SSL_*` variables shown
+above instead.
 
 `migrations/014_app_role.sql` creates `announce_app` `NOLOGIN`, on
 purpose, with no password at all. Until the `alter role` command below
-runs, the role cannot connect, regardless of its grants. Still on the SSH
-session from above:
+runs, the role cannot connect, regardless of its grants:
 
 ```sh
-psql "postgres://announce:<owner password>@127.0.0.1:5432/announce" \
+PGSSLMODE=verify-full PGSSLROOTCERT=<path to the ISRG Root X1 PEM> \
+  psql "postgres://announce:<owner password>@db.announce.aztec.network:5432/announce" \
   -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
 ```
 
 Warning: psql's default `sslmode` is `prefer`. It negotiates TLS
 opportunistically, but falls back to plaintext silently, and never
-verifies the server either way. Running this command against
-`db.announce.aztec.network` instead of `127.0.0.1` would send the freshly
-generated password across the internet as literal plaintext, inside the
-SQL statement itself. This is worse than a plaintext connection alone,
-because the text being sent is the secret you are trying to protect.
-Running the command over SSH against the loopback interface, as shown
-above, avoids this entirely. If you must run it off-VM instead, set
-`PGSSLMODE=verify-full PGSSLROOTCERT=<path to the ISRG Root X1 PEM>`
-explicitly first.
+verifies the server either way. Running this command without the
+`PGSSLMODE=verify-full PGSSLROOTCERT=...` prefix shown above would send
+the freshly generated password across the internet as literal plaintext,
+inside the SQL statement itself. This is worse than a plaintext
+connection alone, because the text being sent is the secret you are
+trying to protect.
 
 Two more things that catch operators out on this exact command:
 
@@ -384,10 +385,11 @@ the role starts `NOLOGIN`. If the app or worker logs `password
 authentication failed for user "announce_app"`, and you have not yet run
 the command above, this is why. Run the command, not a password rotation.
 
-**Verify** (still over the same SSH session, against `127.0.0.1`):
+**Verify** (from the same machine, over the same verified connection):
 
 ```sh
-psql "postgres://announce:<owner password>@127.0.0.1:5432/announce" \
+PGSSLMODE=verify-full PGSSLROOTCERT=<path to the ISRG Root X1 PEM> \
+  psql "postgres://announce:<owner password>@db.announce.aztec.network:5432/announce" \
   -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
 ```
 
@@ -401,12 +403,12 @@ action. `announce_app` cannot do it. `migrations/014_app_role.sql` grants
 `publishers` is the four-eyes identity list. A credential that could
 insert its own row there could manufacture both halves of the approval
 itself (see "The security note" below). Run this as the `announce`
-owner, over the same SSH session on the VM, against `127.0.0.1`:
+owner, from your own machine, the same way as step 5:
 
 ```sh
-ssh root@<announce_server_ipv4>
-cd /opt/announce
-DATABASE_URL='postgres://announce:<owner password>@127.0.0.1:5432/announce' \
+DATABASE_URL='postgres://announce:<owner password>@db.announce.aztec.network:5432/announce' \
+  DATABASE_SSL_MODE=verify-full \
+  DATABASE_SSL_ROOT_CERT=<path to the ISRG Root X1 PEM> \
   npm run seed:publisher -- you@example.com
 ```
 
@@ -415,14 +417,12 @@ denied for table publishers`. That is expected and correct, not a bug in
 the migration. It is proof that the grant in `migrations/014_app_role.sql`
 is doing its job.
 
-Warning: running this command from off the VM, against
-`db.announce.aztec.network:5432`, would also send the owner credential
-across the internet with no TLS. (`scripts/seed-publisher.ts` now goes
-through `src/db/connect.ts`, so you would need to set
-`DATABASE_SSL_MODE=verify-full` and `DATABASE_SSL_ROOT_CERT` explicitly
-to avoid that.) Running the command on the VM, against the loopback
-interface, avoids this question entirely. That is why this is the
-recommended form here.
+Warning: `scripts/seed-publisher.ts` goes through `src/db/connect.ts`, the
+same TLS-enforcing path as the app itself. Leaving out
+`DATABASE_SSL_MODE=verify-full` and `DATABASE_SSL_ROOT_CERT` would send
+the owner credential across the internet with no TLS at all — see step
+5's warning. There is no VM-local fallback for this command: this VM has
+no Node runtime to run it with.
 
 The root README's "Startup safety checks" section requires at least one
 row in `publishers` before the admin app is safe to expose. While the

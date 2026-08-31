@@ -29,7 +29,10 @@ You need all five of these. Collect them first.
 | DNS control for `aztec.network` | You add one A record in step 3. |
 
 Install `terraform`, `ansible`, `psql`, `dig` and `openssl` on the machine you
-are working from.
+are working from. Also install this repo's own Node dependencies
+(`npm install`) — steps 6 and 7 run `npm run migrate` and
+`npm run seed:publisher` from here, not on the VM. The VM has no Node
+runtime and no `npm`.
 
 ---
 
@@ -209,44 +212,64 @@ Run this check from a machine other than the VM.
 
 ## Step 6 — Set up the database
 
-Run these on the VM, against `127.0.0.1`.
+Run these from your own machine (the one with this repo checked out and
+`npm install` already run — see "Before you start"), not on the VM. There is
+no Node runtime there. Both commands go over the internet to
+`db.announce.aztec.network:5432`, so both must use verified TLS.
 
-Warning: run these on the VM. Run them from anywhere else and the database
-owner's password crosses the internet in plain text.
+Warning: do not drop `sslmode=verify-full` or `sslrootcert` to "simplify"
+this. Without them the database owner's password — the most powerful
+credential in this system — crosses the internet unverified, or in plain
+text.
 
 ```sh
-ssh root@<address>
-cd /opt/announce
-DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@127.0.0.1:5432/announce' npm run migrate
+DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce' \
+  DATABASE_SSL_MODE=verify-full \
+  DATABASE_SSL_ROOT_CERT=isrgrootx1.pem \
+  npm run migrate
 ```
+
+(`isrgrootx1.pem` is the file you downloaded in step 5.)
+
+Warning: do not put `sslmode` or `sslrootcert` in `DATABASE_URL` itself. This
+command goes through the same connection code as the app
+(`src/db/connect.ts`), and it refuses to start if either appears there — use
+the two `DATABASE_SSL_*` variables above instead. See step 8's table for why.
 
 Then give the application's database role a password. It cannot log in until
 you do. Save the generated password: you need it in step 8.
 
 ```sh
-psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@127.0.0.1:5432/announce" \
+PGSSLMODE=verify-full PGSSLROOTCERT=isrgrootx1.pem \
+  psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce" \
   -c "alter role announce_app with login password '$(openssl rand -base64 32)';"
 ```
 
 **Check:**
 
 ```sh
-psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@127.0.0.1:5432/announce" \
+PGSSLMODE=verify-full PGSSLROOTCERT=isrgrootx1.pem \
+  psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce" \
   -c "select rolcanlogin from pg_roles where rolname = 'announce_app';"
 ```
 
 The result must be `t`. If it is `f`, the `alter role` command did not run.
 
+This command puts the generated password in your shell history. Clear it
+(`history -d`, or your shell's equivalent) once you have stored it in
+Netlify's environment variables in step 8.
+
 ---
 
 ## Step 7 — Add the first publisher
 
-The app refuses to start until at least one publisher exists.
+The app refuses to start until at least one publisher exists. Run this from
+the same machine as step 6, with the same TLS flags.
 
 ```sh
-ssh root@<address>
-cd /opt/announce
-DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@127.0.0.1:5432/announce' \
+DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce' \
+  DATABASE_SSL_MODE=verify-full \
+  DATABASE_SSL_ROOT_CERT=isrgrootx1.pem \
   npm run seed:publisher -- you@example.com
 ```
 
@@ -254,6 +277,9 @@ Use the email address you sign in to the admin surface with.
 
 Publishing a critical announcement needs two different publishers. Add the
 second one the same way.
+
+**Check:** the command itself prints the current publisher list after
+inserting. Confirm the email you passed appears in it.
 
 ---
 
