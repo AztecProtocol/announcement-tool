@@ -20,7 +20,9 @@ npm install
 # against an un-migrated database fails on every draft.
 npm run migrate
 
-# Run tests (single-fork Vitest against real Postgres)
+# Run tests (single-fork Vitest against real Postgres).
+# Warning: this truncates every table in the database DATABASE_URL names.
+# Never run it against a deployed database.
 npm test
 
 # Type checking
@@ -380,7 +382,7 @@ A destination configured before named roles existed — one with only a `prefix`
 
 3. **Publish:**
    - **Non-critical** severity publishes in one step — "Publish now" calls `requestPublish`, which publishes immediately and enqueues deliveries.
-   - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any other publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError`, and the review page shows it as an inline error, not a crash.
+   - **Critical** severity requires two different publishers (four-eyes): "Request publication" moves the draft to `publish_requested`. The requester sees a waiting state; any *other* publisher sees "Confirm and publish". If the same identity that requested tries to confirm, `confirmPublish` throws `FourEyesError`, and the review page shows it as an inline error, not a crash.
 
 ### Withdrawing and rejecting
 
@@ -388,7 +390,7 @@ A critical announcement waiting for confirmation can go back to draft two ways: 
 
 **Withdraw** — only the publisher who requested it can take the request back. Use this after spotting a mistake before a second person confirms. The announcement returns to `draft`. The requester field is cleared, and any earlier rejection recorded on it is cleared too, so a withdrawn-and-reopened draft carries no stale rejection banner. A fresh request still needs a second person to confirm.
 
-**Reject** — only a publisher other than the requester can reject, and a reason is required. An empty or whitespace-only reason is refused. The announcement returns to `draft` with `publishRejectedBy` and `publishRejectedReason` recorded. The review page shows the reason on the draft, so the author sees the objection when they reopen it. After a rejection, the announcement is an ordinary draft: any publisher, including the one who rejected it, may edit it and request publication again. Four-eyes is not weakened by this: whoever requests becomes the requester, and a different publisher must still confirm before it publishes.
+**Reject** — only a publisher *other than* the requester can reject, and a reason is required. An empty or whitespace-only reason is refused. The announcement returns to `draft` with `publishRejectedBy` and `publishRejectedReason` recorded. The review page shows the reason on the draft, so the author sees the objection when they reopen it. After a rejection, the announcement is an ordinary draft: any publisher, including the one who rejected it, may edit it and request publication again. Four-eyes is not weakened by this: whoever requests becomes the requester, and a different publisher must still confirm before it publishes.
 
 Both actions run inside the same database transaction as the audit log entry they write. That entry is `publish_withdrawn` or `publish_rejected`, with actor and timestamp; the rejection reason is recorded too. Neither action deletes anything. An announcement row is never removed.
 
