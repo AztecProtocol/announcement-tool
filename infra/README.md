@@ -112,17 +112,17 @@ nightly backup job. See `infra/docker-compose.split.yml`'s top comment
 and `infra/Caddyfile.split` for exactly what runs and why.
 
 **Does not provision:**
-- **The app or the worker.** Those run on Netlify
-  (`feat/netlify-deployment`). This VM has no `app`, `worker`, or
-  `migrate` service. `main`'s `docker-compose.prod.yml` is a different,
-  single-VM deployment. Do not confuse the two.
+- **The app or the worker.** Those run on Netlify. This VM has no `app`,
+  `worker`, or `migrate` service.
 - **A registered Signal account.** `signal-cli-rest-api` comes up, but
   nothing registers a phone number with it. Signal is supported by this
   stack: the sidecar, the Caddy gate, and `signal-receive`'s keep-alive
   job all exist. But Signal is not usable until a number is registered by
-  hand. See `main`'s README Signal registration notes for that procedure,
-  which this branch does not change. Do not add `signal` to Netlify's
-  `ENABLED_CHANNELS` until that registration is done (see step 7).
+  hand. That registration procedure is not documented in this repository.
+  It needs a phone number registered with `signal-cli` against the
+  running sidecar (`signal-cli-rest-api`'s own docs cover the `register`/
+  `verify` flow); do that by hand against this VM's sidecar before adding
+  `signal` to Netlify's `ENABLED_CHANNELS` (see step 7).
 - **DNS.** Terraform does not manage the `aztec.network` nameservers. The
   A record is a manual step (step 3).
 
@@ -474,8 +474,7 @@ cannot maintain it safely. Treating any one of these four as something to
 
 Nobody has applied this Terraform or run this Ansible against a real VM.
 Real Docker containers, real TLS handshakes, and real fault injection
-were used extensively during development. That work is real, and it
-should not be discounted. But several things can only get their first
+were used extensively during development. But several things can only get their first
 real exercise on an actual apply, and you should know which before
 relying on them:
 
@@ -496,7 +495,7 @@ relying on them:
   certificate are the same file. That is not the topology this
   deployment actually has. With Let's Encrypt, the server presents a leaf
   certificate, and the client must trust the issuer (ISRG Root X1): two
-  different certificates. Nothing in this branch's test suite or local
+  different certificates. Nothing in this repository's test suite or local
   proofs exercises that two-certificate chain. The `openssl s_client
   -starttls postgres` command in step 4 above is the first point where
   this chain gets checked at all, and it has not yet been run against a
@@ -541,8 +540,7 @@ relying on them:
   mountpoint, so this was proven with a substitute (a throwaway container
   mounting the named volume), not the actual Ansible task path.
 
-What was proven, with real Docker containers, and is not merely reasoned
-about: TLS handshakes against both the bootstrap placeholder and injected
+What was proven, with real Docker containers: TLS handshakes against both the bootstrap placeholder and injected
 certificates; certificate rejection with a wrong CA; the Signal proxy's
 fail-closed behavior (missing header, wrong header, unset secret — all
 return 403, and `docker compose up` itself refuses to start without
@@ -552,5 +550,4 @@ refusal, incomplete-pair detection, and rejected-SIGHUP detection (a
 deliberately mismatched key, confirmed via `openssl s_client` that
 Postgres kept serving the old certificate while the naive checks would
 have reported success); and the fail2ban filter regex against real
-captured Postgres auth-failure log lines. See the two task reports for
-full command transcripts.
+captured Postgres auth-failure log lines.

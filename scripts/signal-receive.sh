@@ -10,7 +10,7 @@
 # so the account looks like a normal, active client to Signal's servers.
 #
 # This script makes one receive call and exits; scheduling (how often, what
-# to do on failure) lives in docker-compose.prod.yml, in the same
+# to do on failure) lives in infra/docker-compose.split.yml, in the same
 # sleep-loop-plus-entrypoint shape as the `backup` service uses for
 # scripts/backup.sh — see the comment on that service before changing the
 # pattern here.

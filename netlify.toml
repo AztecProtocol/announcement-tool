@@ -83,7 +83,7 @@
 #
 # The abuse this was meant to bound: subscribeEmail sends a confirmation email
 # to any address given, so an unthrottled endpoint is an email bomber pointed at
-# a third party. That risk is real and currently UNMITIGATED on this branch.
+# a third party. That risk is real and currently UNMITIGATED.
 # Options if it matters: throttle inside the action against a shared store
 # (Netlify Blobs or the database, since in-memory state does not survive
 # serverless cold starts), or put a CAPTCHA on the subscribe form. Both are real

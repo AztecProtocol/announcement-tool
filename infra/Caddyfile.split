@@ -2,18 +2,17 @@
 # (announce.aztec.network).
 #
 # ---------------------------------------------------------------------------
-# This is not `main`'s Caddyfile. Do not copy that file's structure here.
+# This Caddy does not front the public site or the admin console.
 # ---------------------------------------------------------------------------
-# `main`'s Caddyfile fronts a VM that serves the public site (Next.js, every
-# route from one process). It needs the /admin 404 block plus a
-# Tailscale-User-Login header strip to keep the forgeable admin identity
+# A Caddy that fronts a VM serving the public site (Next.js, every route
+# from one process) would need an /admin 404 block plus a
+# Tailscale-User-Login header strip, to keep the forgeable admin identity
 # header from ever reaching the app over the public internet.
 #
 # Neither protection is needed on this VM, because this VM does not serve
-# the public site or the admin console at all — Netlify does (see
-# feat/netlify-deployment / the split-infrastructure plan). This VM runs only
-# Postgres (fronted by nothing — clients speak the Postgres wire protocol
-# directly to the published 5432 port, not through Caddy) and
+# the public site or the admin console at all — Netlify does. This VM runs
+# only Postgres (fronted by nothing — clients speak the Postgres wire
+# protocol directly to the published 5432 port, not through Caddy) and
 # signal-cli-rest-api. So this Caddy instance has exactly one job: terminate
 # TLS for announce.aztec.network and reverse-proxy to the Signal sidecar,
 # gated by a shared secret.

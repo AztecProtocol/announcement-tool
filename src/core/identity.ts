@@ -29,14 +29,14 @@ export interface Identity { email: string; name?: string; source: 'auth0' | 'tai
  * Identity comes from Tailscale's proxy headers, which are injected by
  * `tailscale serve`. That is sound for exactly one deployment shape: the app
  * binds to loopback and `tailscale serve` is the sole route in, so nothing
- * client-supplied can reach the origin. See concept doc §8. This path is still
- * live because `main` deploys to a VM, and removing it would strand that
+ * client-supplied can reach the origin. This path stays live because
+ * `DEPLOY_TARGET=vm` deploys to a VM, and removing it would strand that
  * deployment.
  *
  * It is not sound anywhere else. On Netlify there is no such proxy: requests
  * arrive from the public internet and Netlify strips only its own `X-Nf-*`
  * headers, so `Tailscale-User-Login` there can only be attacker-supplied. If
- * this branch ran on Netlify, anyone could name themselves an existing
+ * this header were trusted on Netlify, anyone could name themselves an existing
  * publisher, request a `critical` announcement as one address and confirm it as
  * another — collapsing four-eyes to one person and firing an irreversible
  * Discord role ping.

@@ -129,7 +129,7 @@ if (signature !== expected) {
 
 The worker knows about five channels: `webhook`, `discord`, `telegram`, `email`, `signal`. It registers an adapter only for the ones `ENABLED_CHANNELS` names. See "Which channels this deployment runs" under Admin. When `ENABLED_CHANNELS` is unset, that means all five channels. An operator who has not set it keeps today's behavior. Delivery targets are matched to subscriptions or settings by the `target` key on each `delivery_ledger` row. For webhook and email, `target` is a subscription id, from the `subscriptions` table. For discord, telegram, and signal, `target` is a `channel_settings.key`. These three channels have no self-serve subscribe flow. Their destinations are configured directly in Postgres. See the worked example below.
 
-**On the Netlify shape (`feat/netlify-deployment`, not merged), Signal must not be enabled.** Netlify runs functions, not persistent containers. The Signal channel needs an always-running `signal-cli-rest-api` sidecar (see the Signal section below), and there is nowhere on Netlify to run it. The startup guard enforces this. On `DEPLOY_TARGET=netlify`, it refuses to start if `ENABLED_CHANNELS` is unset (which would default to all five, including Signal) or if it names `signal`. The Signal adapter code is untouched and keeps working on the VM shape. Signal support alongside a Netlify deployment would need a separate host.
+**When `DEPLOY_TARGET=netlify`, Signal must not be enabled.** Netlify runs functions, not persistent containers. The Signal channel needs an always-running `signal-cli-rest-api` sidecar (see the Signal section below), and there is nowhere on Netlify to run it. The startup guard enforces this. On `DEPLOY_TARGET=netlify`, it refuses to start if `ENABLED_CHANNELS` is unset (which would default to all five, including Signal) or if it names `signal`. The Signal adapter code is untouched and keeps working when `DEPLOY_TARGET=vm`. Signal support alongside a Netlify deployment would need a separate host.
 
 ### Discord
 
@@ -223,7 +223,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 
 Discord, Telegram, and Signal *destinations* (webhook URLs, chat/group ids) are not environment variables. They live in `channel_settings` rows, since a deployment typically has more than one destination per channel.
 
-**Netlify shape only** (`feat/netlify-deployment`, not merged) — these variables have no effect on the VM shape, and the VM shape does not read them:
+**`DEPLOY_TARGET=netlify` only** — these variables have no effect when `DEPLOY_TARGET=vm`, and that shape does not read them:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -272,15 +272,15 @@ The admin UI (`/admin`) is where announcements are composed, previewed, and publ
 
 Every admin route resolves the caller's identity from request headers (`src/core/identity.ts`), checked in this order:
 
-1. **Netlify shape only** (`feat/netlify-deployment`, not merged) — a verified Auth0 identity. `middleware.ts` reads the `Authorization: Bearer <JWT>` header on every `/admin` request. It verifies the token's signature, issuer, audience, and expiry against the Auth0 tenant (`AUTH0_ISSUER`/`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`/`AUTH0_CLIENT_ID`), and confirms the token carries a verified email claim. Only then does it set an internal header that `resolveIdentity` reads. `middleware.ts` strips any inbound copy of that internal header first, unconditionally, before doing anything else. That strip, done first and without any branch above it, is the only reason the header is safe to trust. Without it, anyone who could reach the app directly could set the header themselves and self-approve as any identity, defeating four-eyes on critical announcements. There is no other authenticating proxy in front of the app on Netlify.
-2. **VM shape** (`main`) — identity comes from Tailscale's `Tailscale-User-Login` proxy header (plus optional `Tailscale-User-Name`). This is sound only because the app binds to `localhost` and `tailscale serve` is the sole route in. If the port were ever exposed directly, these headers could be forged by any caller.
+1. **When `DEPLOY_TARGET=netlify`** — a verified Auth0 identity. `middleware.ts` reads the `Authorization: Bearer <JWT>` header on every `/admin` request. It verifies the token's signature, issuer, audience, and expiry against the Auth0 tenant (`AUTH0_ISSUER`/`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`/`AUTH0_CLIENT_ID`), and confirms the token carries a verified email claim. Only then does it set an internal header that `resolveIdentity` reads. `middleware.ts` strips any inbound copy of that internal header first, unconditionally, before doing anything else. That strip, done first and without any branch above it, is the only reason the header is safe to trust. Without it, anyone who could reach the app directly could set the header themselves and self-approve as any identity, defeating four-eyes on critical announcements. There is no other authenticating proxy in front of the app on Netlify.
+2. **When `DEPLOY_TARGET=vm`** — identity comes from Tailscale's `Tailscale-User-Login` proxy header (plus optional `Tailscale-User-Name`). This is sound only because the app binds to `localhost` and `tailscale serve` is the sole route in. If the port were ever exposed directly, these headers could be forged by any caller.
 3. In development only, set `ADMIN_EMAIL` and it is used as a fallback identity when neither of the above resolves anything.
 
 If none of the three resolves an identity, the admin layout renders an access-denied page instead of the requested content. On the Netlify shape (`DEPLOY_TARGET=netlify`), that page shows a **Sign in with Google** link to `/admin/login`. On the VM shape, it shows the tailnet message.
 
 **Required before any Netlify cutover:** send `/admin` a request with the internal auth header hand-set to an arbitrary identity, and confirm access is denied. `middleware.ts` has no automated test coverage of this path, because it requires a live Auth0 tenant to exercise end to end. This check has not been run against a real deployment.
 
-**Known follow-up, not done in this branch:** Next 16.2.12 deprecates `middleware.ts` in favor of `proxy.ts`. Migrating is a separate task. This branch keeps `middleware.ts` as documented above.
+**Known gap, not yet implemented:** Next 16.2.12 deprecates `middleware.ts` in favor of `proxy.ts`. Migrating is a separate task. This repository keeps `middleware.ts` as documented above.
 
 ### Startup safety checks
 
@@ -293,7 +293,7 @@ Both the web app and the worker (or, on the Netlify shape, the `tick-background`
 
 The remaining check depends on `DEPLOY_TARGET`, since the two shapes trust different identity sources:
 
-- **`DEPLOY_TARGET=vm`** — `HOSTNAME` must be `127.0.0.1` or `::1`. Unset, or anything else, and the server binds every interface, exposing the forgeable Tailscale header directly. This is unchanged from before this branch existed.
+- **`DEPLOY_TARGET=vm`** — `HOSTNAME` must be `127.0.0.1` or `::1`. Unset, or anything else, and the server binds every interface, exposing the forgeable Tailscale header directly.
 - **`DEPLOY_TARGET=netlify`** — an Auth0 issuer (`AUTH0_ISSUER` or `AUTH0_DOMAIN`) and audience (`AUTH0_AUDIENCE` or `AUTH0_CLIENT_ID`) must both be present. Without them, `middleware.ts` cannot verify a bearer token, and on Netlify there is no other authenticating proxy in front of the admin routes. `SESSION_SECRET` must also be set and at least 32 characters. It signs the browser session cookie, one of the identities four-eyes trusts, and a short or missing secret makes that cookie brute-forceable. `AUTH0_CLIENT_SECRET` must also be set. Without it, `app/admin/callback/route.ts` cannot exchange the authorization code for tokens, and every sign-in attempt fails closed with no explanation on the page.
 
 The checks always run, regardless of `NODE_ENV`. To skip them, set `ANNOUNCE_ALLOW_INSECURE_DEV=1`. This is for local development only.
@@ -302,10 +302,7 @@ The checks do not use `NODE_ENV=production` as a trigger. The reason: `next star
 
 A start that fails these checks exits non-zero after printing the problems, for the worker. The Netlify `tick-background` function logs the problems and returns without doing any work. For the web app, the check runs inside Next's `register()` startup hook. Throwing there does not abort the process: Next logs the error and the server keeps running, returning 500 on every request. So if the web app is ever seen listening but every request returns a 500, check these first. A health check must send a real request, not just confirm the port is open, or it will report a misconfigured instance as healthy.
 
-The two public server actions (email subscribe, webhook registration) are rate-limited, but the mechanism differs by shape:
-
-- **VM shape** — in-memory, per process: 5 email-subscribe attempts and 10 webhook registrations per 10 minutes. This limit resets on process restart and is not shared across multiple instances. It lives in `src/core/rate-limit.ts` on `main` only. That file does not exist on this branch, which deleted it (see below).
-- **Netlify shape** (`feat/netlify-deployment`, not merged) — the in-memory limiter was removed, since a serverless function has no persistent process to hold its state. Rate limiting moved to `netlify.toml`, which attaches a rule to the `/` path: 20 requests per 60 seconds, aggregated by domain and IP. This is a narrower guarantee than the VM shape's, and `netlify.toml` documents the gap in a comment. Read it before assuming both public actions are protected separately. Netlify's rate-limit rules match on request path only, with no method or body matching. Both public server actions (`subscribeEmail`, `subscribeWebhook`) are Next.js Server Actions that POST to the same path (`/`). The framework dispatches between them server-side, using an internal header that Netlify's redirect rules cannot see. So one shared rule is the finest distinction actually available. It cannot rate-limit `subscribeEmail` and `subscribeWebhook` independently, and it also shares its budget with ordinary page loads to `/`. Neither `netlify.toml` nor this document claims otherwise.
+Neither of the two public server actions (email subscribe, webhook registration) is rate-limited today. `netlify.toml` carried a rule at one point that attached a limit to the `/` path, but a real deployment showed it also throttled every other request to `/`, including `/admin/login` — a second publisher trying to sign in got HTTP 429 and could not reach the login page. That rule was removed on 2026-08-23; `netlify.toml`'s comment explains why and what a working fix would need (a store that survives serverless cold starts, or a CAPTCHA on the form). Until one of those lands, `subscribeEmail` sending a confirmation email to any address given is a real, currently unmitigated risk: an unthrottled endpoint that can be pointed at a third party's inbox. See `netlify.toml`'s rate-limiting comment for the full account.
 
 ### Which channels this deployment runs
 
@@ -402,7 +399,7 @@ Instead of publishing immediately, a publisher can schedule an announcement for 
 
 **VM shape** — a background worker (`npm run worker`, `src/worker/main.ts`) checks for due announcements every 15 seconds, so a scheduled announcement sends within about a minute of its scheduled time. Each check publishes at most 20 due announcements. If more than 20 are due at once, the rest send on a later check.
 
-**Netlify shape** (`feat/netlify-deployment`, not merged) — there is no always-on process, so the tick is split into two functions. `netlify/functions/tick-scheduled.ts` runs on a schedule declared inline in that file, every minute, and does nothing but call `netlify/functions/tick-background.ts`, which does the actual tick work and is allowed up to 15 minutes to run. Both call the same `runTick` (`src/worker/tick.ts`) and `buildAdapters` (`src/worker/adapters.ts`) that the VM worker uses, extracted so there is exactly one implementation of the tick logic shared by both shapes.
+**When `DEPLOY_TARGET=netlify`** — there is no always-on process, so the tick is split into two functions. `netlify/functions/tick-scheduled.ts` runs on a schedule declared inline in that file, every minute, and does nothing but call `netlify/functions/tick-background.ts`, which does the actual tick work and is allowed up to 15 minutes to run. Both call the same `runTick` (`src/worker/tick.ts`) and `buildAdapters` (`src/worker/adapters.ts`) that the VM worker uses, extracted so there is exactly one implementation of the tick logic shared by both shapes.
 
 `tick-background` is a public HTTP endpoint. Netlify puts nothing in front of it. It is authenticated only by a shared `TICK_SECRET` header. It refuses with a 404, not 401 or 403, so a prober cannot tell the endpoint exists, whenever the secret is missing, empty, or wrong. It compares with a timing-safe check (`src/core/tick-auth.ts`). An unset `TICK_SECRET` refuses every request rather than allowing them, the same fail-closed pattern as the other checks in this section.
 

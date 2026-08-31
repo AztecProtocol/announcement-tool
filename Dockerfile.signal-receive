@@ -1,5 +1,5 @@
 # Standalone image for the periodic Signal receive-poll job — see
-# docker-compose.prod.yml `signal-receive` service and
+# infra/docker-compose.split.yml's `signal-receive` service and
 # scripts/signal-receive.sh for the full spec.
 #
 # A separate small image, not the app's own Dockerfile: this job only needs

@@ -261,7 +261,7 @@ const PEM_FOOTER = '-----END CERTIFICATE-----';
  * newline character, this unescapes it (`\n` -> an actual newline) before
  * use. This is unambiguous — genuine PEM content produced by any normal
  * certificate export already contains real newlines, so a value with real
- * newlines is left untouched, and this branch only ever fires on the
+ * newlines is left untouched, and this code path only ever fires on the
  * specific "flattened by a UI" shape it exists to fix.
  *
  * Truncation: a value that starts with a genuine `-----BEGIN CERTIFICATE-----`

@@ -135,7 +135,7 @@ grant usage on sequence audit_log_seq_seq to announce_app;
 -- Default privileges would make every *future* table automatically
 -- readable/writable by announce_app the moment it's created by whichever
 -- role runs migrations — silently widening this role's access with no
--- review, which is exactly the kind of drift this task exists to prevent.
+-- review, which is exactly the kind of drift this migration exists to prevent.
 -- A new table's sensitivity (is it another append-only audit table? does it
 -- hold secrets like channel_settings does?) can't be known in advance, so
 -- each future migration that adds a table must add its own explicit grant

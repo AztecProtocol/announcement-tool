@@ -1,11 +1,12 @@
 /**
  * Header the Signal adapter sends to prove it is the legitimate client of
- * the signal-cli-rest-api sidecar, once a later task puts a Caddy proxy in
- * front of it (split deployment: the Hetzner VM's sidecar is reachable from
- * the public internet, unlike the same-Docker-network VM deployment on
- * `main`). Exported as a named constant, not a string literal, so the Caddy
- * config that checks it (a different task, a different file) references
- * this name instead of re-typing it and risking drift.
+ * the signal-cli-rest-api sidecar. On the split deployment, the Hetzner
+ * VM's sidecar is reachable from the public internet (unlike a same-Docker-
+ * network deployment where the app shares a private compose network with
+ * the sidecar), so `infra/Caddyfile.split` gates access to it by checking
+ * this header. Exported as a named constant, not a string literal, so that
+ * Caddy config references this name instead of re-typing it and risking
+ * drift.
  */
 export const SIGNAL_AUTH_HEADER = 'x-announce-signal-secret';
 

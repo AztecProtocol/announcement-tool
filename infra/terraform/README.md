@@ -5,11 +5,10 @@ Netlify's egress on 5432), signal-cli-rest-api, and a Caddy reverse proxy
 (443 — ACME and the Signal proxy). See `vm.tf`, `variables.tf`, and
 `outputs.tf` for what and why. See `versions.tf` for the state decision.
 
-## Required order
+## Apply order
 
-Warning: this order is a real technical requirement. Running steps 2 and
-3 out of order produces a certificate failure that looks like a Terraform
-bug (see below).
+Running steps 2 and 3 out of order produces a certificate failure that
+looks like a Terraform bug (see below).
 
 ```
 1. terraform apply
@@ -20,6 +19,9 @@ bug (see below).
    (see ../README.md "Deploying: setting the real password")
 5. Verify the application connects with sslmode=verify-full
 ```
+
+This list numbers the Terraform-facing steps only. The full runbook in
+`../README.md` numbers them differently.
 
 Warning: port 5432 is not safe to treat as live until all five steps are done.
 Terraform's `apply` only creates the host and opens the firewall. It does

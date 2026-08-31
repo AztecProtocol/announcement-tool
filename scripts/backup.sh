@@ -2,8 +2,7 @@
 #
 # Nightly backup of the announcement tool: Postgres dump + signal-cli data
 # directory, encrypted, uploaded off-host, and restore-verified before being
-# declared good. See concept doc §10b — this is a locked spec, not a
-# proposal:
+# declared good. This is a locked spec, not a proposal:
 #
 #   - Nightly compressed pg_dump of the whole database.
 #   - Encrypted before upload (subscriptions holds subscriber emails — PII).

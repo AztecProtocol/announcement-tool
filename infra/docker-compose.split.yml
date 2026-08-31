@@ -1,26 +1,21 @@
 # Split-deployment stack for the announcement tool's Hetzner VM.
 #
-# This is not `docker-compose.prod.yml`. That file (on `main`) is the
-# single-VM deployment where the app, worker, and everything else share one
-# host reachable only over a tailnet. On this deployment
-# (`announce.aztec.network`) the app and worker run on Netlify instead.
-# This VM runs only the stateful, host-bound pieces Netlify cannot:
-# Postgres, signal-cli-rest-api (plus its keep-alive receive job), Caddy,
-# and the nightly backup. There is no tailnet here (see
+# The app and worker run on Netlify, not on this VM. This VM runs only the
+# stateful, host-bound pieces Netlify cannot: Postgres, signal-cli-rest-api
+# (plus its keep-alive receive job), Caddy, and the nightly backup. There is
+# no `app`, `worker`, or `migrate` service here: migrations are run against
+# the exposed Postgres port from wherever `npm run migrate` is invoked in the
+# Netlify deploy pipeline, not from this host. There is no tailnet here (see
 # infra/terraform/vm.tf), by design — Postgres (5432) and Caddy (443) are
 # exposed to the public internet, and TLS plus a least-privilege DB role
 # plus fail2ban are what protect them, not network isolation. See
 # infra/README.md for the `announce_app` role and infra/Caddyfile.split for
 # the Signal proxy gate.
 #
-# `db`, `signal`, `signal-receive`, `backup`, and `caddy` below are carried
-# over from `main`'s docker-compose.prod.yml with their original comments
-# preserved (they encode real incidents — signal-cli's silent send
-# degradation, the backup crash-loop-vs-silent-abandonment reasoning). Only
-# `app`, `worker`, and `migrate` were removed: Netlify runs the app and
-# worker, and migrations are run against the exposed Postgres port from
-# wherever `npm run migrate` is invoked in the Netlify deploy pipeline, not
-# from this host.
+# The comments on `db`, `signal`, `signal-receive`, `backup`, and `caddy`
+# below encode real incidents — signal-cli's silent send degradation, the
+# backup crash-loop-vs-silent-abandonment reasoning — worth keeping in mind
+# when touching those services.
 
 services:
   db:
@@ -76,13 +71,10 @@ services:
     # not the first run. No entrypoint override is needed here — the stock
     # image's own entrypoint runs unmodified.
     # `ports:` publishes 5432 on the host's public interface. This is what
-    # the split deployment needs. The production compose file for the
-    # single-VM shape (docker-compose.prod.yml, on the single-VM branch)
-    # has a comment here saying "Do not add a `ports:`
-    # mapping" — that comment is correct for its topology (app/worker reach
-    # `db:5432` over the private compose network, nothing outside it needs
-    # to) and wrong for this one. This is the split deployment: Netlify's
-    # functions have no way to join a Docker network on this host, so
+    # the split deployment needs, even though a single-host deployment where
+    # app/worker reach `db:5432` over the private compose network would have
+    # no need to publish this port at all. This is the split deployment:
+    # Netlify's functions have no way to join a Docker network on this host, so
     # Postgres must be reachable over the public internet on 5432, from a
     # shifting pool of 80+ Netlify egress IPs with no stable range to
     # allowlist (see infra/terraform/vm.tf's firewall comment). What
@@ -159,7 +151,7 @@ services:
       - -c
       - "log_line_prefix=%m [%p] %h "
     healthcheck:
-      # Preserved from main: `pg_isready` alone races a freshly-started
+      # `pg_isready` alone races a freshly-started
       # container that accepts TCP before it can actually serve. Nothing
       # in this compose file depends on this healthcheck (there is no
       # `migrate` service here to gate on it), but it stays because it is
@@ -201,11 +193,9 @@ services:
       MODE: native
     volumes:
       - signal-data:/home/.local/share/signal-cli
-    # Not published to the host directly. On `main` this comment continued
-    # "nothing outside this stack needs to reach signal-cli directly" —
-    # that is now only half true: Caddy (below) does need to reach it, but
-    # Caddy does so over the compose network as `signal:8080`, same as any
-    # other service-to-service call. Still nothing needs a host port here;
+    # Not published to the host directly. Caddy (below) does need to reach
+    # it, but Caddy does so over the compose network as `signal:8080`, same
+    # as any other service-to-service call. Nothing needs a host port here;
     # the public path is Caddy's 443, gated by the shared secret (see
     # infra/Caddyfile.split).
 
@@ -255,16 +245,15 @@ services:
 
   caddy:
     # Public-facing TLS terminator for this deployment. See
-    # infra/Caddyfile.split for what it actually serves. It is not
-    # main's Caddyfile: that one fronts the public site plus an admin-404
-    # guard, neither of which lives on this host, since Netlify serves the
-    # public site here. This Caddy only obtains and renews the Let's
-    # Encrypt cert for announce.aztec.network, and reverse-proxies to
-    # signal:8080 behind a shared-secret gate.
+    # infra/Caddyfile.split for what it actually serves: it only obtains
+    # and renews the Let's Encrypt cert for announce.aztec.network, and
+    # reverse-proxies to signal:8080 behind a shared-secret gate. It does
+    # not front the public site — Netlify serves that — and there is no
+    # admin-404 guard here.
     #
-    # Unlike main, this Caddy does not share the app's network namespace
-    # (there is no `app` container on this host at all). It joins the
-    # default compose network directly and gets its own `ports:` mapping.
+    # There is no `app` container on this host at all, so this Caddy does
+    # not share an app's network namespace. It joins the default compose
+    # network directly and gets its own `ports:` mapping.
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:

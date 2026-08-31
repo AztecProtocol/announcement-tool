@@ -1,4 +1,4 @@
-# Standalone image for the nightly backup job — see docker-compose.prod.yml
+# Standalone image for the nightly backup job — see infra/docker-compose.split.yml's
 # `backup` service and scripts/backup.sh for the full spec.
 #
 # Deliberately NOT the app's own Dockerfile: this job only needs

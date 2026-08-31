@@ -467,13 +467,14 @@ fi
 # Two numbers, each defended:
 #   RELOAD_CHECK_TIMEOUT=8 — the hard ceiling, and this loop always
 #     polls for the full ceiling before declaring a clean reload.
-#     See below for why an earlier draft's "stop early once clean for a
-#     couple seconds" optimization was tried, found to be a real bug
-#     (not just unnecessary), and removed rather than kept. This is a
+#     See below for why an early-exit optimization was tried here and
+#     removed: it was a real bug, not merely unnecessary. It attempted
+#     to "stop early once clean for a couple seconds" instead of always
+#     polling the full ceiling. This is a
 #     cron job that runs once a day (or once right after a fresh
 #     deploy), not a latency-sensitive path, so there is no real cost
 #     to spending the full ceiling on every run, healthy or not.
-#     Measured directly (this task's own verification run): a real
+#     Measured directly (on a lightly loaded host): a real
 #     SIGHUP's log line was visible via `docker logs` in ~57ms. 8s
 #     leaves roughly two orders of magnitude of headroom for a busy
 #     host or a slow Docker logging-driver flush.

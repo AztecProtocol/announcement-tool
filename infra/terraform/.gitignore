@@ -6,9 +6,9 @@
 
 # Provider plugin cache only. The lock file (.terraform.lock.hcl) is
 # deliberately NOT ignored — Terraform's own convention is to commit it, so
-# the operator's `terraform init` resolves the exact hcloud/local provider builds
+# a later `terraform init` resolves the exact hcloud/local provider builds
 # this was validated against (hcloud v1.68.0), not whatever `~> 1.49` floats
-# to by the time he applies.
+# to by the time it is applied.
 .terraform/
 
 # Real variable values (tokens, real CIDRs). The .example file IS committed.

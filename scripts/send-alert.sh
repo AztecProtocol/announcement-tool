@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Shared alert-sending helper, extracted from scripts/backup.sh's
 # original inline send_alert(): the cert-reload hook needed the same
-# alert path — "a failed or missing backup raises an alert on the same
-# path as channel health" per the concept doc, and a failed cert-reload
+# alert path — a failed or missing backup raises an alert on the same
+# path as channel health, and a failed cert-reload
 # deserves the same treatment, not a second, different
 # mechanism. Both backup.sh and
 # infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 source

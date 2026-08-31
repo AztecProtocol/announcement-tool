@@ -4,7 +4,7 @@
 # volume to be mounted before it starts.
 #
 # Why this matters (carried forward from infra/terraform/vm.tf's comment,
-# which explicitly deferred this fix to this task): on a reboot, systemd
+# which explicitly deferred this fix to this file): on a reboot, systemd
 # starts services in parallel unless something orders them. If Docker wins
 # the race against the volume mount, `db`'s bind/named volume paths
 # resolve against the root disk, Postgres initializes a fresh empty
