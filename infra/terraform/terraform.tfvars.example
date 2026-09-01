@@ -37,7 +37,7 @@ tailnet = "example.com"
 
 # Optional overrides (defaults shown in variables.tf are usually fine):
 # hcloud_location      = "fsn1"
-# server_type          = "cx22"
+# server_type          = "cx23"
 # image                = "ubuntu-24.04"
 # data_volume_size_gb  = 20
 # domain               = "db.announce.aztec.network"
