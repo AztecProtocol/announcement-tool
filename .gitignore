@@ -13,3 +13,5 @@ infra/dev/certs/
 
 # Terraform-rendered, host-specific — see infra/ansible/inventory.yml.example
 infra/ansible/inventory.yml
+
+infra/terraform/.terraform.lock.hcl
