@@ -42,6 +42,7 @@ import {
   buildTokenRequestBody, idTokenFromResponse, loginErrorRedirect, stateMatches,
   tokenEndpoint, CALLBACK_PATH, STATE_COOKIE, VERIFIER_COOKIE, type LoginError,
 } from '../../../src/core/auth0-login.js';
+import { publicBaseUrl } from '../../../src/core/public-base-url.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +50,7 @@ export const dynamic = 'force-dynamic';
 const SESSION_MAX_AGE = 12 * 60 * 60;
 
 function baseUrl(): string {
-  return (process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  return publicBaseUrl();
 }
 
 /**

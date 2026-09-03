@@ -4,6 +4,7 @@ import type { EmailSender } from './esp.js';
 import type { Announcement, DeliveryKind } from '../core/types.js';
 import { renderEmail } from '../core/render.js';
 import { getSubscription } from '../core/subscriptions.js';
+import { publicBaseUrl } from '../core/public-base-url.js';
 
 export function makeEmailAdapter(
   sql: Sql, sender: EmailSender, opts: { baseUrl?: string } = {},
@@ -15,8 +16,7 @@ export function makeEmailAdapter(
       if (!sub) throw new Error(`email subscription not found: ${target}`);
       if (!sub.verified) throw new Error(`email subscription is unverified: ${target}`);
 
-      const base = (opts.baseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation')
-        .replace(/\/+$/, '');
+      const base = publicBaseUrl(opts.baseUrl);
       const unsubscribeUrl = `${base}/u/${sub.unsubscribeToken}`;
 
       const { subject, text, html } = renderEmail(a, kind);

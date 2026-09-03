@@ -26,11 +26,12 @@
 import { auth0ConfigFromEnv } from '../../../src/core/auth0-verify.js';
 import { buildLogoutUrl, STATE_COOKIE, VERIFIER_COOKIE } from '../../../src/core/auth0-login.js';
 import { SESSION_COOKIE } from '../../../src/core/session.js';
+import { publicBaseUrl } from '../../../src/core/public-base-url.js';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<Response> {
-  const base = (process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  const base = publicBaseUrl();
 
   let location = '/';
   if (process.env.AUTH0_LOGOUT_REDIRECT === '1') {

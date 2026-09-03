@@ -5,9 +5,10 @@ import {
   type Subscription, type SubscriptionFilters,
 } from './subscriptions.js';
 import { newToken } from './ids.js';
+import { publicBaseUrl } from './public-base-url.js';
 
 function base(baseUrl?: string): string {
-  return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  return publicBaseUrl(baseUrl);
 }
 
 async function sendConfirmation(sender: EmailSender, email: string, token: string, baseUrl?: string): Promise<void> {

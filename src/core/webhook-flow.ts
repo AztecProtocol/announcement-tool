@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres';
 import { createSubscription, updateSubscriptionFilters, verifySubscription, type Subscription, type SubscriptionFilters } from './subscriptions.js';
 import { assertDeliverableUrl, signPayload } from '../adapters/webhook.js';
+import { publicBaseUrl } from './public-base-url.js';
 
 const NOT_AUTHORIZED = 'not authorized or not registered';
 
@@ -9,7 +10,7 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 function base(baseUrl?: string): string {
-  return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  return publicBaseUrl(baseUrl);
 }
 
 function emptyFilterError(f?: Partial<SubscriptionFilters>): string | undefined {
