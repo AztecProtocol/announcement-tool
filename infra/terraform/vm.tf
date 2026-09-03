@@ -89,11 +89,12 @@ resource "tailscale_tailnet_key" "announce" {
 # is protected the same way. A deliberate teardown removes this block
 # first, or untracks the resource with `terraform state rm`.
 #
-# No assignee_type/assignee_id: the provider (~> 1.68 installed here) only
-# needs those together, for assigning an already-existing primary IP to a
-# resource out-of-band. The server below claims this IP through its own
-# public_net.ipv4 argument instead, which is the provider's documented
-# pattern for a primary IP created alongside its server.
+# No assignee_type/assignee_id: the provider does not require them when the
+# server claims the IP through its own public_net.ipv4 argument, which is
+# the documented pattern for a primary IP created alongside its server.
+# assignee_type/assignee_id are for assigning an already-existing primary IP
+# to a resource out-of-band. Setting assignee_type alone produces a provider
+# warning and invites state drift, so leave both unset here.
 resource "hcloud_primary_ip" "announce" {
   name        = "aztec-announce-ipv4"
   type        = "ipv4"

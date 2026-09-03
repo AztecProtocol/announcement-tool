@@ -437,13 +437,6 @@ gone, and a new server joining with the same `--hostname` is named
 `aztec-announce-fsn1-1`. `tailscale ssh` and the generated Ansible
 inventory both address the old name and reach nothing.
 
-Then replace only the server:
-
-```sh
-cd infra/terraform
-terraform apply -replace=hcloud_server.announce
-```
-
 Do not use `terraform destroy`. The data volume has `prevent_destroy = true`,
 so destroy refuses the whole plan, and untracking the volume to get past
 that leaves it orphaned and billing. `-replace` recreates the server and
@@ -457,28 +450,52 @@ against state from before this change is different from every rebuild
 after it. The existing server still holds the old, auto-assigned address,
 and `hcloud_primary_ip.announce` does not exist in state yet.
 
-**Check:** before typing `yes`, this one plan must read `3 to add, 0 to
-change, 2 to destroy` — one more add than a later rebuild, because
-`hcloud_primary_ip.announce` itself is being created for the first time
-alongside the server and the volume attachment.
+Warning: from the moment this apply starts until the
+`db.announce.aztec.network` A record is updated to the new address and has
+propagated, the VM is unreachable at its DNS name. Caddy cannot obtain or
+renew its certificate, and Netlify cannot reach Postgres. Have the
+`AztecProtocol/foundation-iac` change for the `db.announce` A record ready
+to merge before you start this apply.
+
+```sh
+cd infra/terraform
+terraform apply -replace=hcloud_server.announce
+```
+
+**Check:** before typing `yes`, read the plan by what it protects, not by
+its digit count alone. It must NOT destroy `hcloud_primary_ip.announce` or
+`hcloud_volume.announce_data` — those two must appear unchanged or not at
+all. `hcloud_server.announce` and `hcloud_volume_attachment.announce_data`
+are expected to be replaced. On this one apply, `hcloud_primary_ip.announce`
+is additionally created, since it does not exist in state yet. The summary
+normally reads `3 to add, 0 to change, 2 to destroy`. A different count is
+a reason to read the plan; a destroy of either protected resource is the
+reason to answer `no` and find out why.
 
 The address changes on this one apply: the old auto-assigned IP is
-released and the new reserved IP is attached in its place. Afterward, run:
+released and the new reserved IP is attached in its place. After the
+apply, wait about three minutes for cloud-init, then:
 
 ```sh
 terraform output announce_server_ipv4
+tailscale ssh root@<name from step 1> 'echo ok'
 ```
 
-and update the `db.announce.aztec.network` A record in
-`AztecProtocol/foundation-iac` to this new value. Every rebuild after this
-one keeps the address, and that update step is not needed again.
+The second command must print `ok`. Then update the
+`db.announce.aztec.network` A record in `AztecProtocol/foundation-iac` to
+the address printed above. Every rebuild after this one keeps the address,
+and that update step is not needed again.
 
 ### Later rebuilds (steady state)
 
-**Check:** before typing `yes`, the plan summary must read `2 to add, 0 to
-change, 2 to destroy` (the server and `hcloud_volume_attachment.announce_data`).
-A plan that destroys `hcloud_primary_ip.announce` or `hcloud_volume.announce_data`
-is wrong; answer `no` and find out why.
+**Check:** before typing `yes`, read the plan by what it protects, not by
+its digit count alone. It must NOT destroy `hcloud_primary_ip.announce` or
+`hcloud_volume.announce_data` — those two must appear unchanged or not at
+all. `hcloud_server.announce` and `hcloud_volume_attachment.announce_data`
+are expected to be replaced. The summary normally reads `2 to add, 0 to
+change, 2 to destroy`. A different count is a reason to read the plan; a
+destroy of either protected resource is the reason to answer `no` and find
+out why.
 
 After the apply, wait about three minutes for cloud-init, then:
 
