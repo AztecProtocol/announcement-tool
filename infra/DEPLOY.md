@@ -93,6 +93,10 @@ terraform apply
 **Check:** the apply prints the VM's public address and its tailnet name.
 Write both down. Step 2 needs the address, step 3 and step 4 need the name.
 
+The address is a reserved Hetzner primary IP (`hcloud_primary_ip.announce`).
+It stays the same when the server is rebuilt, so step 2 is done once for the
+life of the deployment.
+
 ```
 announce_server_ipv4 = "203.0.113.42"
 announce_server_name = "aztec-announce-fsn1"
@@ -420,6 +424,49 @@ Without them, announcements arrive in recipients' spam folders. This has
 already happened once during testing, and it looked like a broken tool rather
 than a DNS problem.
 
+## Rebuilding the VM
+
+Use this when the server itself is broken — for example the tailnet join
+failed at first boot — and the data volume is fine or still empty.
+
+Warning: remove the old machine from the tailnet first. In the Tailscale
+admin console, under Machines, delete `aztec-announce-fsn1` (the name from
+step 1). A non-ephemeral node keeps its name after the server behind it is
+gone, and a new server joining with the same `--hostname` is named
+`aztec-announce-fsn1-1`. `tailscale ssh` and the generated Ansible
+inventory both address the old name and reach nothing.
+
+Then replace only the server:
+
+```sh
+cd infra/terraform
+terraform apply -replace=hcloud_server.announce
+```
+
+Do not use `terraform destroy`. The data volume has `prevent_destroy = true`,
+so destroy refuses the whole plan, and untracking the volume to get past
+that leaves it orphaned and billing. `-replace` recreates the server and
+its volume attachment and keeps everything else: the reserved IP, the
+volume and its data, the firewall, and the tailnet auth key.
+
+**Check:** before typing `yes`, the plan summary must read `2 to add, 0 to
+change, 2 to destroy` (the server and `hcloud_volume_attachment.announce_data`).
+A plan that destroys `hcloud_primary_ip.announce` or `hcloud_volume.announce_data`
+is wrong; answer `no` and find out why.
+
+After the apply, wait about three minutes for cloud-init, then:
+
+```sh
+terraform output announce_server_ipv4
+tailscale ssh root@<name from step 1> 'echo ok'
+```
+
+The address must be unchanged and the second command must print `ok`.
+
+If Ansible had already run on the old server, run step 4 again. Postgres's
+data directory is on the volume and is picked up as-is; the `.env` file from
+step 3 is on the root disk and must be written again.
+
 ## If something failed
 
 | Symptom | Likely cause |
@@ -436,6 +483,7 @@ than a DNS problem.
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
+| The rebuilt VM joined the tailnet as `<name>-1` | The old machine was not removed from the tailnet before the rebuild. Delete both entries in the Tailscale admin console and rebuild again, or address the `-1` name in `tailscale ssh` and in `ansible/inventory.yml` for this one deployment. |
 
 ## What has not been tested
 

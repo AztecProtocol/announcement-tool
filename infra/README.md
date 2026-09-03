@@ -199,6 +199,11 @@ terraform apply
 See `terraform/README.md` for the full required-order rationale and the
 `prevent_destroy` note on the data volume.
 
+The public IPv4 is a reserved primary IP (`hcloud_primary_ip.announce`) with
+the same protection. Rebuilding the server with
+`terraform apply -replace=hcloud_server.announce` keeps both the address and
+the volume; `infra/DEPLOY.md` has the procedure under "Rebuilding the VM".
+
 **Verify:** the apply prints `announce_server_ipv4`,
 `announce_server_name`, `announce_data_volume_id`, and `domain` as
 outputs. `terraform/ansible/inventory.yml.tftpl` is rendered to

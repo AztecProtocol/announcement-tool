@@ -1,6 +1,6 @@
 output "announce_server_ipv4" {
-  value       = hcloud_server.announce.ipv4_address
-  description = "Public IPv4 of the VM. Terraform does not manage DNS: before Caddy's ACME challenge for db.announce.aztec.network can complete, an A record for db.announce.aztec.network (var.domain) must be pointed at this address in whatever system controls the aztec.network nameservers."
+  value       = hcloud_primary_ip.announce.ip_address
+  description = "Reserved public IPv4 of the VM (hcloud_primary_ip.announce). It survives `terraform apply -replace=hcloud_server.announce`, so the A record for db.announce.aztec.network (var.domain) in AztecProtocol/foundation-iac is set once. Terraform does not manage DNS: point that record at this address before Caddy's ACME challenge can complete."
 }
 
 output "announce_server_name" {
