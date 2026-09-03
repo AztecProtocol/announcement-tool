@@ -85,8 +85,8 @@ resource "tailscale_tailnet_key" "announce" {
 #
 # prevent_destroy: same reasoning as the data volume below. Losing this
 # address is a DNS change plus a Caddy re-issue, not a data loss, but it is
-# the one piece of infrastructure the foundation-iac repository hardcodes,
-# so it is protected the same way. A deliberate teardown removes this block
+# the value the foundation-iac repository hardcodes in the A record, so it
+# is protected the same way. A deliberate teardown removes this block
 # first, or untracks the resource with `terraform state rm`.
 #
 # No assignee_type/assignee_id: the provider (~> 1.68 installed here) only

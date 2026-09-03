@@ -95,7 +95,8 @@ Write both down. Step 2 needs the address, step 3 and step 4 need the name.
 
 The address is a reserved Hetzner primary IP (`hcloud_primary_ip.announce`).
 It stays the same when the server is rebuilt, so step 2 is done once for the
-life of the deployment.
+life of the deployment, from the first apply that includes the reserved IP
+onward.
 
 ```
 announce_server_ipv4 = "203.0.113.42"
@@ -448,6 +449,31 @@ so destroy refuses the whole plan, and untracking the volume to get past
 that leaves it orphaned and billing. `-replace` recreates the server and
 its volume attachment and keeps everything else: the reserved IP, the
 volume and its data, the firewall, and the tailnet auth key.
+
+### The first apply after the IP was reserved
+
+The very first `terraform apply -replace=hcloud_server.announce` run
+against state from before this change is different from every rebuild
+after it. The existing server still holds the old, auto-assigned address,
+and `hcloud_primary_ip.announce` does not exist in state yet.
+
+**Check:** before typing `yes`, this one plan must read `3 to add, 0 to
+change, 2 to destroy` — one more add than a later rebuild, because
+`hcloud_primary_ip.announce` itself is being created for the first time
+alongside the server and the volume attachment.
+
+The address changes on this one apply: the old auto-assigned IP is
+released and the new reserved IP is attached in its place. Afterward, run:
+
+```sh
+terraform output announce_server_ipv4
+```
+
+and update the `db.announce.aztec.network` A record in
+`AztecProtocol/foundation-iac` to this new value. Every rebuild after this
+one keeps the address, and that update step is not needed again.
+
+### Later rebuilds (steady state)
 
 **Check:** before typing `yes`, the plan summary must read `2 to add, 0 to
 change, 2 to destroy` (the server and `hcloud_volume_attachment.announce_data`).
