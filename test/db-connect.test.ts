@@ -1,8 +1,9 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { X509Certificate } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
-import { buildConnectionOptions, connect, resolveCaFile, type ConnectionOptions } from '../src/db/connect.js';
+import { buildConnectionOptions, connect, resolveCaFile, normalizePem, type ConnectionOptions } from '../src/db/connect.js';
 
 describe('buildConnectionOptions', () => {
   it('defaults to the local dev database when DATABASE_URL is unset', () => {
@@ -161,16 +162,19 @@ describe('resolveCaFile', () => {
     expect((options.ssl as { ca: string }).ca).toBe(FAKE_PEM);
   });
 
-  it('leaves a PEM value with real newlines untouched even if it also happens to contain a literal \\n', () => {
+  it('does not unescape a literal \\n when real newlines are already present, only re-canonicalizes the block', () => {
     // Real newlines already present is proof the value was NOT flattened by
     // a UI -- unescaping in that case would corrupt a certificate that
     // happens to have been issued with, e.g., a comment or subject field
     // containing a literal backslash-n. Only fire the unescape path when
-    // there is no real newline at all.
+    // there is no real newline at all. The trailing literal `\n` here sits
+    // outside any BEGIN/END block, so canonicalization (which now always
+    // runs on inline PEM) drops it along with the rest of the non-PEM
+    // trailer -- it was never part of the certificate.
     const mixed = `${FAKE_PEM}\\n`;
     const options: ConnectionOptions = { ssl: { ca: mixed, rejectUnauthorized: true } };
     resolveCaFile(options);
-    expect((options.ssl as { ca: string }).ca).toBe(mixed);
+    expect((options.ssl as { ca: string }).ca).toBe(FAKE_PEM);
   });
 
   it('fails loudly, naming truncation, for a PEM value cut short before its END marker', () => {
@@ -208,6 +212,62 @@ describe('resolveCaFile', () => {
     const options: ConnectionOptions = {};
     expect(() => resolveCaFile(options)).not.toThrow();
     expect(options.ssl).toBeUndefined();
+  });
+});
+
+describe('normalizePem', () => {
+  // A real short self-signed certificate (P-256, CN=t), generated once with:
+  //   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  //     -keyout /dev/null -subj /CN=t -days 1
+  // Its canonical PEM is real 64-column output from OpenSSL, so tests that
+  // assert "output equals this string" are asserting against genuine PEM
+  // shape, not a hand-typed approximation of one.
+  const CERT_A = '-----BEGIN CERTIFICATE-----\n'
+    + 'MIIBbjCCAROgAwIBAgIUEhPzkIfJr2f1SuTlYGw53ztPjFQwCgYIKoZIzj0EAwIw\n'
+    + 'DDEKMAgGA1UEAwwBdDAeFw0yNjA5MDQxNDQ4MDZaFw0yNjA5MDUxNDQ4MDZaMAwx\n'
+    + 'CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATsqXZg6sDmIrRT\n'
+    + 'b6Ei0OjtIlLE+OQjWKrZW6xRGnvacNLuzCpdLIwKYCJBQoQi5HZnGRMke4xIxG8W\n'
+    + '/UK6ksAAo1MwUTAdBgNVHQ4EFgQUWi7y0PLijEPWVKoiZK0QQaELVvcwHwYDVR0j\n'
+    + 'BBgwFoAUWi7y0PLijEPWVKoiZK0QQaELVvcwDwYDVR0TAQH/BAUwAwEB/zAKBggq\n'
+    + 'hkjOPQQDAgNJADBGAiEAgAVHUGAP2Q9Tmou/sFU2d/B1MoRsa0DPb7wgMPZWwTQC\n'
+    + 'IQCsMSLYGeyyElb86Z93Ds6Ax5huOsVjpV2KlLBlOr2VXQ==\n'
+    + '-----END CERTIFICATE-----\n';
+
+  it('leaves an already-canonical PEM unchanged', () => {
+    expect(normalizePem(CERT_A)).toBe(CERT_A);
+  });
+
+  it('repairs a PEM whose newlines were replaced by single spaces', () => {
+    const flattened = CERT_A.trim().replace(/\n/g, ' ');
+    expect(normalizePem(flattened)).toBe(CERT_A);
+  });
+
+  it('repairs a PEM whose newlines were removed entirely, joining header/body/footer', () => {
+    const flattened = CERT_A.trim().replace(/\n/g, '');
+    expect(normalizePem(flattened)).toBe(CERT_A);
+  });
+
+  it('repairs a PEM with literal backslash-n sequences instead of real newlines', () => {
+    const flattened = CERT_A.trim().replace(/\n/g, '\\n');
+    expect(normalizePem(flattened)).toBe(CERT_A);
+  });
+
+  it('repairs two certificates concatenated with damaged whitespace into two canonical blocks in order', () => {
+    const CERT_B = CERT_A.replace('MIIBbjCC', 'MIIBbjCD');
+    const bundle = CERT_A.trim().replace(/\n/g, ' ') + ' ' + CERT_B.trim().replace(/\n/g, '');
+    expect(normalizePem(bundle)).toBe(CERT_A + CERT_B);
+  });
+
+  it('throws the truncated-paste error when a BEGIN marker has no matching END marker', () => {
+    const truncated = '-----BEGIN CERTIFICATE-----\nMIIBbjCC\n';
+    expect(() => normalizePem(truncated)).toThrow(/truncat/i);
+  });
+
+  it('produces output that Node parses as a valid X509 certificate', () => {
+    const flattened = CERT_A.trim().replace(/\n/g, ' ');
+    const normalized = normalizePem(flattened);
+    expect(() => new X509Certificate(normalized)).not.toThrow();
+    expect(new X509Certificate(normalized).subject).toBe('CN=t');
   });
 });
 
