@@ -5,13 +5,15 @@
 #
 # Why the whole repo, not just the compose file and Caddyfile: `backup` and
 # `signal-receive` in docker-compose.split.yml build their images from
-# `context: ..` (relative to infra/, i.e. the repo root) plus
-# Dockerfile.backup / Dockerfile.signal-receive / scripts/backup.sh /
-# scripts/signal-receive.sh. Copying only the two infra files here would
-# leave those `docker compose build` invocations with no build context on
-# the host at all. Syncing the full checkout keeps the build context
-# identical to what a developer has locally, so "it built here" and "it
-# builds on the VM" mean the same thing.
+# `context: ./repo` (relative to {{ stack_dir }}, the project directory
+# `docker compose` is invoked from — see the "Start / converge the stack"
+# task below) plus Dockerfile.backup / Dockerfile.signal-receive /
+# scripts/backup.sh / scripts/signal-receive.sh, all of which live in the
+# repo, not in infra/. Copying only the two infra files here would leave
+# those `docker compose build` invocations with no build context on the
+# host at all. Syncing the full checkout keeps the build context identical
+# to what a developer has locally, so "it built here" and "it builds on
+# the VM" mean the same thing.
 - name: Create the stack directory
   ansible.builtin.file:
     path: "{{ stack_dir }}"
@@ -41,14 +43,17 @@
       - "--exclude=infra/terraform/.terraform"
   notify: Restart caddy
 
-# Symlinks, not copies: docker-compose.split.yml's `backup`/`signal-receive`
-# build contexts are `..` relative to where the compose file lives, so the
-# compose file must actually live inside the synced repo tree (at
-# {{ stack_dir }}/repo/infra/), not be copied out to {{ stack_dir }}/ where
-# `..` would resolve to {{ stack_dir }}/ itself and find no Dockerfiles.
-# These two symlinks just give `docker compose` a stable, short invocation
-# path (`cd {{ stack_dir }} && docker compose up`) without callers needing
-# to know the synced tree's structure.
+# Symlinks, not copies: `docker compose` resolves a relative build context
+# (docker-compose.split.yml's `backup`/`signal-receive` use `./repo`)
+# against the project directory it is invoked from, not against the
+# directory the compose file itself lives in or points at through a
+# symlink. Invocation is always `chdir: {{ stack_dir }}` (see "Start /
+# converge the stack" below), so the project directory is {{ stack_dir }},
+# and `./repo` must exist there as a real directory — which is exactly
+# where the sync task above puts it. These two symlinks just give
+# `docker compose` a stable, short invocation path
+# (`cd {{ stack_dir }} && docker compose up`) without callers needing to
+# know the synced tree's structure.
 - name: Symlink the compose file to the expected location
   ansible.builtin.file:
     src: "{{ stack_dir }}/repo/infra/docker-compose.split.yml"

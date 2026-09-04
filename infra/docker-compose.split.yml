@@ -215,8 +215,21 @@ services:
     # this job only needs bash + curl, and the app's `node:22-alpine`
     # runtime image ships neither. Same reasoning as the `backup` service
     # below and Dockerfile.backup.
+    #
+    # context is `./repo`, not `..`: Compose resolves a relative build
+    # context against the project directory (the directory this file is
+    # invoked from), not against the directory the file itself lives in
+    # — a symlinked compose file does NOT carry its target's directory
+    # with it. The compose_up Ansible role rsyncs this repo to
+    # `{{ stack_dir }}/repo` and symlinks `{{ stack_dir }}/docker-compose.yml`
+    # to `{{ stack_dir }}/repo/infra/docker-compose.split.yml`, then runs
+    # `docker compose up` with `chdir: {{ stack_dir }}`. So the project
+    # directory is `{{ stack_dir }}` (e.g. `/opt/announce`), and the repo
+    # containing this Dockerfile sits one level down, at `./repo`. This
+    # file is only ever run from that layout — see
+    # infra/ansible/roles/compose_up/tasks/main.yml.
     build:
-      context: ..
+      context: ./repo
       dockerfile: Dockerfile.signal-receive
     restart: unless-stopped
     depends_on:
@@ -362,8 +375,14 @@ services:
     # compose's `dockerfile_inline` is a deliberate choice — see the note
     # at the top of Dockerfile.backup for why inline silently builds the
     # wrong image when the buildx plugin is absent.
+    #
+    # context is `./repo`, not `..` — see the comment on `signal-receive`'s
+    # `build:` above for why: this resolves against the project directory
+    # ({{ stack_dir }}, e.g. `/opt/announce`), not against this file's own
+    # location, and the repo this Dockerfile lives in is synced one level
+    # down from there, at `./repo`.
     build:
-      context: ..
+      context: ./repo
       dockerfile: Dockerfile.backup
     restart: unless-stopped
     depends_on:
