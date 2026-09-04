@@ -456,6 +456,9 @@ Use this once, on a deployment created before the reserved IP existed in
 this module. The server already has an address; import it instead of
 minting a new one, so DNS does not change.
 
+First, note the current address with `terraform output announce_server_ipv4` —
+the check after the apply compares against it.
+
 Find the id of the server's current IPv4. Either of these works:
 
 ```sh
@@ -473,11 +476,12 @@ terraform apply
 ```
 
 **Check:** before typing `yes`, the plan must show `hcloud_primary_ip.announce`
-updated in place (name, labels, `auto_delete` from `true` to `false`) and
-nothing created or destroyed. `hcloud_server.announce` shows either no
-change or an in-place update of `public_net`. Warning: that update powers
-the server off and on. Do it before step 4 runs, while nothing is
-deployed on the host, or plan a short outage.
+updated in place (name, labels, `auto_delete` from `true` to `false`, if it
+is not already `false`) and nothing created or destroyed.
+`hcloud_server.announce` shows either no change or an in-place update of
+`public_net`. Warning: that update powers the server off and on. Do it
+before step 4 runs, while nothing is deployed on the host, or plan a short
+outage.
 
 After the apply:
 
