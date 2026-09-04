@@ -150,6 +150,8 @@
     docker compose config --format json | python3 -c "import json,sys; print(json.load(sys.stdin)['volumes']['db-tls']['name'])"
   args:
     chdir: "{{ stack_dir }}"
+    # Ubuntu's default /bin/sh is dash, which has no `set -o pipefail`.
+    executable: /bin/bash
   changed_when: false
   register: compose_up_db_tls_volume_name
 
