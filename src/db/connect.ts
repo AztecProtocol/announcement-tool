@@ -279,22 +279,65 @@ const PEM_FOOTER = '-----END CERTIFICATE-----';
  * marker throws here, naming truncation as the likely cause, instead of
  * reaching postgres.js/Node's TLS layer at all.
  */
+const TRUNCATED_PASTE_ERROR = 'DATABASE_SSL_ROOT_CERT looks like inline PEM (it starts with '
+  + '"-----BEGIN CERTIFICATE-----") but never reaches a closing '
+  + `"${PEM_FOOTER}" marker. This is almost always a truncated paste — `
+  + "a UI's length limit or a dropped final line — not a genuine "
+  + 'certificate. Re-paste the full PEM content, from the BEGIN line '
+  + 'through the END line inclusive.';
+
+const PEM_BEGIN_MARKER = '-----BEGIN CERTIFICATE-----';
+const PEM_END_MARKER = '-----END CERTIFICATE-----';
+
+/**
+ * Normalises a possibly-mangled inline PEM value into canonical form: real
+ * newlines, a 64-column base64 body, one block per certificate, in order.
+ *
+ * This exists because `\n`-unescaping (the block above) only fixes one of
+ * the shapes a UI can damage a pasted certificate into. Netlify's own
+ * environment-variable UI, and others like it, have been observed to also
+ * collapse real newlines into single spaces, or drop them outright and
+ * join the header, body, and footer into one long line. Either shape still
+ * starts with the literal `-----BEGIN CERTIFICATE-----` text, so PEM_HEADER
+ * still detects it as PEM, but Node's TLS layer requires the base64 body to
+ * be line-wrapped and the BEGIN/END markers to each sit on their own line;
+ * handed a flattened value it fails with the same unhelpful
+ * UNABLE_TO_GET_ISSUER_CERT_LOCALLY / ASN.1 class of error the escaped-`\n`
+ * case produces. Rather than special-case every observed flattening (spaces,
+ * no separator at all, mixes of both), this re-derives the canonical form
+ * directly: find each BEGIN...END block, strip every whitespace character
+ * from the base64 body, and re-wrap it at 64 columns -- the width every
+ * normal certificate export uses. That also makes a two-root bundle (the
+ * split deployment's Netlify+VM shape may need to trust more than one CA)
+ * survive being pasted as one flattened blob, since each block is found and
+ * rewrapped independently.
+ */
+export function normalizePem(raw: string): string {
+  const unescaped = raw.includes('\\n') && !raw.includes('\n') ? raw.replace(/\\n/g, '\n') : raw;
+  const blocks: string[] = [];
+  let searchFrom = 0;
+  while (true) {
+    const beginIndex = unescaped.indexOf(PEM_BEGIN_MARKER, searchFrom);
+    if (beginIndex === -1) break;
+    const bodyStart = beginIndex + PEM_BEGIN_MARKER.length;
+    const endIndex = unescaped.indexOf(PEM_END_MARKER, bodyStart);
+    if (endIndex === -1) {
+      throw new Error(TRUNCATED_PASTE_ERROR);
+    }
+    const body = unescaped.slice(bodyStart, endIndex).replace(/\s+/g, '');
+    const wrapped = body.match(/.{1,64}/g) ?? [];
+    blocks.push(`${PEM_BEGIN_MARKER}\n${wrapped.join('\n')}\n${PEM_END_MARKER}\n`);
+    searchFrom = endIndex + PEM_END_MARKER.length;
+  }
+  return blocks.join('');
+}
+
 export function resolveCaFile(options: ConnectionOptions): void {
   if (options.ssl && typeof options.ssl === 'object' && 'ca' in options.ssl) {
     const raw = (options.ssl as { ca: string }).ca;
     let ca: string;
     if (PEM_HEADER.test(raw)) {
-      ca = raw.includes('\\n') && !raw.includes('\n') ? raw.replace(/\\n/g, '\n') : raw;
-      if (!ca.includes(PEM_FOOTER)) {
-        throw new Error(
-          'DATABASE_SSL_ROOT_CERT looks like inline PEM (it starts with '
-          + '"-----BEGIN CERTIFICATE-----") but never reaches a closing '
-          + `"${PEM_FOOTER}" marker. This is almost always a truncated paste — `
-          + "a UI's length limit or a dropped final line — not a genuine "
-          + 'certificate. Re-paste the full PEM content, from the BEGIN line '
-          + 'through the END line inclusive.',
-        );
-      }
+      ca = normalizePem(raw);
     } else {
       ca = readFileSync(raw, 'utf8');
     }
