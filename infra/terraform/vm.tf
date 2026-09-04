@@ -95,6 +95,11 @@ resource "tailscale_tailnet_key" "announce" {
 # assignee_type/assignee_id are for assigning an already-existing primary IP
 # to a resource out-of-band. Setting assignee_type alone produces a provider
 # warning and invites state drift, so leave both unset here.
+#
+# On a server created before this resource existed, import its current
+# address (`terraform import hcloud_primary_ip.announce <id>`) rather than
+# letting apply mint a new one — see infra/DEPLOY.md, "Adopting an existing
+# server's address".
 resource "hcloud_primary_ip" "announce" {
   name        = "aztec-announce-ipv4"
   type        = "ipv4"
