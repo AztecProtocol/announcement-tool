@@ -1,11 +1,12 @@
 import type { Announcement } from './types.js';
 import { canonicalUrl, tagLine, renderBodyHtml } from './render.js';
+import { publicBaseUrl } from './public-base-url.js';
 
 const xmlEscape = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function baseUrl(): string {
-  return (process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  return publicBaseUrl();
 }
 
 export function buildJsonFeed(items: Announcement[]): object {

@@ -34,11 +34,12 @@ import {
   loginErrorRedirect, CALLBACK_PATH, STATE_COOKIE, VERIFIER_COOKIE,
   TRANSIENT_COOKIE_MAX_AGE,
 } from '../../../src/core/auth0-login.js';
+import { publicBaseUrl } from '../../../src/core/public-base-url.js';
 
 export const dynamic = 'force-dynamic';
 
 function baseUrl(): string {
-  return (process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  return publicBaseUrl();
 }
 
 /**

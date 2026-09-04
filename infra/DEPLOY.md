@@ -46,6 +46,13 @@ refusing to create anything.
 
 You also need to be on the tailnet yourself, to reach the VM once it exists.
 
+Being on the tailnet is not enough. The tailnet ACL's `ssh` rule for
+`tag:announce` names who may open a session; today that is
+`autogroup:admin`, so you must be a tailnet admin. A user outside that rule
+sees `tailscale ssh` hang with no error, and the node looks healthy in
+`tailscale status`. Check with a tailnet admin before assuming the VM is
+broken.
+
 ```sh
 tailscale status
 ```
@@ -92,6 +99,11 @@ terraform apply
 
 **Check:** the apply prints the VM's public address and its tailnet name.
 Write both down. Step 2 needs the address, step 3 and step 4 need the name.
+
+The address is a reserved Hetzner primary IP (`hcloud_primary_ip.announce`).
+It stays the same when the server is rebuilt, so step 2 is done once. For a
+deployment created before this resource existed, see "Adopting an existing
+server's address" under "Rebuilding the VM".
 
 ```
 announce_server_ipv4 = "203.0.113.42"
@@ -420,6 +432,97 @@ Without them, announcements arrive in recipients' spam folders. This has
 already happened once during testing, and it looked like a broken tool rather
 than a DNS problem.
 
+## Rebuilding the VM
+
+Use this when the server itself is broken — for example the tailnet join
+failed at first boot — and the data volume is fine or still empty.
+
+Warning: remove the old machine from the tailnet first. In the Tailscale
+admin console, under Machines, delete `aztec-announce-fsn1` (the name from
+step 1). A non-ephemeral node keeps its name after the server behind it is
+gone, and a new server joining with the same `--hostname` is named
+`aztec-announce-fsn1-1`. `tailscale ssh` and the generated Ansible
+inventory both address the old name and reach nothing.
+
+Do not use `terraform destroy`. The data volume has `prevent_destroy = true`,
+so destroy refuses the whole plan, and untracking the volume to get past
+that leaves it orphaned and billing. `-replace` recreates the server and
+its volume attachment and keeps everything else: the reserved IP, the
+volume and its data, the firewall, and the tailnet auth key.
+
+### Adopting an existing server's address
+
+Use this once, on a deployment created before the reserved IP existed in
+this module. The server already has an address; import it instead of
+minting a new one, so DNS does not change.
+
+First, note the current address with `terraform output announce_server_ipv4` —
+the check after the apply compares against it.
+
+Find the id of the server's current IPv4. Either of these works:
+
+```sh
+hcloud primary-ip list                      # the row whose IP matches terraform output announce_server_ipv4
+curl -sS -H "Authorization: Bearer $TF_VAR_hcloud_token" \
+  "https://api.hetzner.cloud/v1/primary_ips?ip=<current address>" | jq '.primary_ips[0].id'
+```
+
+Then import it and apply:
+
+```sh
+cd infra/terraform
+terraform import hcloud_primary_ip.announce <id>
+terraform apply
+```
+
+**Check:** before typing `yes`, the plan must show `hcloud_primary_ip.announce`
+updated in place (name, labels, `auto_delete` from `true` to `false`, if it
+is not already `false`) and nothing created or destroyed.
+`hcloud_server.announce` shows either no change or an in-place update of
+`public_net`. Warning: that update powers the server off and on. Do it
+before step 4 runs, while nothing is deployed on the host, or plan a short
+outage.
+
+After the apply:
+
+```sh
+terraform output announce_server_ipv4
+dig +short db.announce.aztec.network
+```
+
+Both must print the same address as before. If `terraform output` shows a
+different address, the import did not take and the apply minted a new IP;
+stop and read the state before touching DNS.
+
+### Later rebuilds (steady state)
+
+```sh
+cd infra/terraform
+terraform apply -replace=hcloud_server.announce
+```
+
+**Check:** before typing `yes`, read the plan by what it protects, not by
+its digit count alone. It must NOT destroy `hcloud_primary_ip.announce` or
+`hcloud_volume.announce_data` — those two must appear unchanged or not at
+all. `hcloud_server.announce` and `hcloud_volume_attachment.announce_data`
+are expected to be replaced. The summary normally reads `2 to add, 0 to
+change, 2 to destroy`. A different count is a reason to read the plan; a
+destroy of either protected resource is the reason to answer `no` and find
+out why.
+
+After the apply, wait about three minutes for cloud-init, then:
+
+```sh
+terraform output announce_server_ipv4
+tailscale ssh root@<name from step 1> 'echo ok'
+```
+
+The address must be unchanged and the second command must print `ok`.
+
+If Ansible had already run on the old server, run step 4 again. Postgres's
+data directory is on the volume and is picked up as-is; the `.env` file from
+step 3 is on the root disk and must be written again.
+
 ## If something failed
 
 | Symptom | Likely cause |
@@ -430,12 +533,14 @@ than a DNS problem.
 | `terraform apply` fails creating `tailscale_tailnet_key.announce` with an unknown-tag or "requested tags are invalid" error | `tag:announce` does not exist yet in the tailnet's ACL. It must be added in `rpc.aztec.foundation/tailscale.tf` (`AztecProtocol/foundation-iac`) and that module applied first — see "Before you start". A console-only edit does not survive that module's next apply. In both this row and the credential row above, the server is never created — `hcloud_server.announce` depends on the key resource, so the apply stops before Hetzner is touched at all. |
 | The VM boots (the apply succeeded) but it never appears in `tailscale status`, or appears but stays `Offline`/unreachable | Rarer than the two rows above, because it means the key itself was minted successfully. Check `cloud-init` logs on the VM (via Hetzner rescue mode — see the next row) for the `tailscale up` line's own error. If the tailnet has device approval enabled and something changed `preauthorized` away from `true` on the key, the node joins in a PENDING state and needs approving by hand in the Tailscale admin console before it is routable — indistinguishable from a broken join until you check there. |
 | `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; the SSH key from "Before you start" does not help here — the Hetzner web console is a keyboard-and-screen session at a boot prompt, not an SSH endpoint, and a stock image has no root password set. Use Hetzner **rescue mode** instead: boot the rescue system from the Hetzner console, mount the VM's root disk, and inspect `cloud-init` / Tailscale logs or set a password from inside the mounted filesystem, then reboot normally. |
+| `tailscale ssh` hangs for you but works for a tailnet admin | You are not named in the ACL's `ssh` rule for `tag:announce` (`autogroup:admin` in `rpc.aztec.foundation/tailscale.tf`). Ask an admin to add you to the tailnet's admins, or extend the rule in code. Nothing on the VM is wrong. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
+| The rebuilt VM joined the tailnet as `<name>-1` | The old machine was not removed from the tailnet before the rebuild. Delete both entries in the Tailscale admin console and rebuild again, or address the `-1` name in `tailscale ssh` and in `ansible/inventory.yml` for this one deployment. |
 
 ## What has not been tested
 

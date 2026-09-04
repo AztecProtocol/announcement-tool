@@ -206,6 +206,12 @@ outputs. `terraform/ansible/inventory.yml.tftpl` is rendered to
 apply. Do not hand-write it. See `infra/ansible/inventory.yml.example` for
 its shape if you want to look before applying.
 
+The public IPv4 is a reserved primary IP (`hcloud_primary_ip.announce`),
+protected with `prevent_destroy` the same way the data volume is. Rebuilding
+the server with
+`terraform apply -replace=hcloud_server.announce` keeps both the address and
+the volume; `infra/DEPLOY.md` has the procedure under "Rebuilding the VM".
+
 ### 3. The DNS A record, and confirming it has propagated
 
 **Why this VM has its own hostname.** The VM answers on

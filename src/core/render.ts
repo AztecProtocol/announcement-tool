@@ -1,9 +1,10 @@
 import type { Announcement, DeliveryKind, Network } from './types.js';
+import { publicBaseUrl } from './public-base-url.js';
 
 const NETWORK_ORDER: Network[] = ['mainnet', 'testnet'];
 
 export function canonicalUrl(a: Pick<Announcement, 'slug'>): string {
-  const base = (process.env.PUBLIC_BASE_URL ?? 'https://announce.aztec.foundation').replace(/\/+$/, '');
+  const base = publicBaseUrl();
   return `${base}/a/${a.slug}`;
 }
 

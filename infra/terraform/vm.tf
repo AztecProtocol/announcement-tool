@@ -72,6 +72,50 @@ resource "tailscale_tailnet_key" "announce" {
   description   = "aztec-announce vm bootstrap"
 }
 
+# The VM's public IPv4, reserved separately from the server so a rebuild
+# keeps it. Without this, Hetzner assigns an address at server creation and
+# releases it at deletion, and every rebuild (`terraform apply
+# -replace=hcloud_server.announce`) changes the address behind the
+# db.announce.aztec.network A record in AztecProtocol/foundation-iac, which
+# then needs a PR and an apply before Caddy can renew and Netlify can
+# connect. Reserving it makes the DNS record a one-time step.
+#
+# auto_delete = false: the address must outlive any server it is attached
+# to. The provider documents auto_delete = true as a way to break state.
+#
+# prevent_destroy: same reasoning as the data volume below. Losing this
+# address is a DNS change plus a Caddy re-issue, not a data loss, but it is
+# the value the foundation-iac repository hardcodes in the A record, so it
+# is protected the same way. A deliberate teardown removes this block
+# first, or untracks the resource with `terraform state rm`.
+#
+# No assignee_type/assignee_id: the provider does not require them when the
+# server claims the IP through its own public_net.ipv4 argument, which is
+# the documented pattern for a primary IP created alongside its server.
+# assignee_type/assignee_id are for assigning an already-existing primary IP
+# to a resource out-of-band. Setting assignee_type alone produces a provider
+# warning and invites state drift, so leave both unset here.
+#
+# On a server created before this resource existed, import its current
+# address (`terraform import hcloud_primary_ip.announce <id>`) rather than
+# letting apply mint a new one — see infra/DEPLOY.md, "Adopting an existing
+# server's address".
+resource "hcloud_primary_ip" "announce" {
+  name        = "aztec-announce-ipv4"
+  type        = "ipv4"
+  location    = var.hcloud_location
+  auto_delete = false
+
+  labels = {
+    role    = "announce"
+    service = "announce-aztec-network"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "hcloud_server" "announce" {
   name         = "aztec-announce-${var.hcloud_location}"
   server_type  = var.server_type
@@ -79,6 +123,15 @@ resource "hcloud_server" "announce" {
   location     = var.hcloud_location
   ssh_keys     = hcloud_ssh_key.announce[*].id
   firewall_ids = [hcloud_firewall.announce.id]
+
+  # ipv4 is the reserved address above. ipv6_enabled stays true: Hetzner
+  # still allocates a server-scoped IPv6 that dies with the server; nothing
+  # depends on it (the A record and Caddy use IPv4 only).
+  public_net {
+    ipv4_enabled = true
+    ipv4         = hcloud_primary_ip.announce.id
+    ipv6_enabled = true
+  }
 
   labels = {
     role    = "announce"

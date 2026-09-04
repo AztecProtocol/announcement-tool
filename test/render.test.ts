@@ -16,7 +16,7 @@ const a = baseAnnouncement;
 
 describe('render', () => {
   it('builds the canonical url from PUBLIC_BASE_URL', () => {
-    expect(canonicalUrl(a)).toBe('https://announce.aztec.foundation/a/2026-08-upgrade-v5-1-0');
+    expect(canonicalUrl(a)).toBe('https://announce.aztec.network/a/2026-08-upgrade-v5-1-0');
   });
 
   it('tags networks, severity and type in order', () => {
@@ -39,7 +39,7 @@ describe('render', () => {
     expect(out).toContain('20 Aug 2026, 14:00 UTC'); // humanized, not raw ISO
     expect(out).toContain('sequencer, prover');
     expect(out).toContain('https://github.com/AztecProtocol/aztec-packages/releases/tag/v5.1.0');
-    expect(out.trimEnd().endsWith('https://announce.aztec.foundation/a/2026-08-upgrade-v5-1-0')).toBe(true);
+    expect(out.trimEnd().endsWith('https://announce.aztec.network/a/2026-08-upgrade-v5-1-0')).toBe(true);
   });
 
   it('markdown bolds the title and bullets the actions', () => {
