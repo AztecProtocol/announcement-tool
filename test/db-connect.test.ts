@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { X509Certificate } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
-import { buildConnectionOptions, connect, resolveCaFile, normalizePem, type ConnectionOptions } from '../src/db/connect.js';
+import { buildConnectionOptions, connect, resolveCaFile, normalizePem, describeCaBundle, type ConnectionOptions } from '../src/db/connect.js';
 
 describe('buildConnectionOptions', () => {
   it('defaults to the local dev database when DATABASE_URL is unset', () => {
@@ -117,13 +117,21 @@ describe('buildConnectionOptions', () => {
 });
 
 describe('resolveCaFile', () => {
-  // Real PEM structure is irrelevant here -- resolveCaFile only decides
-  // path-vs-inline by the header text and never parses the certificate
-  // itself (that happens later, inside Node's TLS layer / postgres.js).
-  // Using a fake-but-well-formed-looking body keeps these tests fast and
-  // filesystem/network-free; db-tls.integration.test.ts proves a real PEM
-  // negotiates TLS against a real server.
-  const FAKE_PEM = '-----BEGIN CERTIFICATE-----\nMIIFAKECERTDATA\n-----END CERTIFICATE-----\n';
+  // resolveCaFile now parses the resolved value with describeCaBundle (to
+  // log a startup summary), so unlike before, the body here has to be a
+  // real, parseable certificate -- not just well-formed-looking PEM shape.
+  // Same real short self-signed certificate (P-256, CN=t) used by the
+  // normalizePem and describeCaBundle suites below/above.
+  const FAKE_PEM = '-----BEGIN CERTIFICATE-----\n'
+    + 'MIIBbjCCAROgAwIBAgIUEhPzkIfJr2f1SuTlYGw53ztPjFQwCgYIKoZIzj0EAwIw\n'
+    + 'DDEKMAgGA1UEAwwBdDAeFw0yNjA5MDQxNDQ4MDZaFw0yNjA5MDUxNDQ4MDZaMAwx\n'
+    + 'CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATsqXZg6sDmIrRT\n'
+    + 'b6Ei0OjtIlLE+OQjWKrZW6xRGnvacNLuzCpdLIwKYCJBQoQi5HZnGRMke4xIxG8W\n'
+    + '/UK6ksAAo1MwUTAdBgNVHQ4EFgQUWi7y0PLijEPWVKoiZK0QQaELVvcwHwYDVR0j\n'
+    + 'BBgwFoAUWi7y0PLijEPWVKoiZK0QQaELVvcwDwYDVR0TAQH/BAUwAwEB/zAKBggq\n'
+    + 'hkjOPQQDAgNJADBGAiEAgAVHUGAP2Q9Tmou/sFU2d/B1MoRsa0DPb7wgMPZWwTQC\n'
+    + 'IQCsMSLYGeyyElb86Z93Ds6Ax5huOsVjpV2KlLBlOr2VXQ==\n'
+    + '-----END CERTIFICATE-----\n';
 
   it('uses inline PEM content directly, without touching the filesystem', () => {
     // A serverless Netlify function has no filesystem to place a CA bundle
@@ -213,6 +221,18 @@ describe('resolveCaFile', () => {
     expect(() => resolveCaFile(options)).not.toThrow();
     expect(options.ssl).toBeUndefined();
   });
+
+  it('throws a named parse error for an inline PEM whose body a paste corrupted, instead of passing it through', () => {
+    // This is the actual failure this change exists to fix:
+    // UNABLE_TO_GET_ISSUER_CERT_LOCALLY at startup with no indication of
+    // which of the CA bundle's certificates was unparseable, or why.
+    // resolveCaFile must surface describeCaBundle's error rather than
+    // silently handing the corrupted value on to postgres.js/Node's TLS
+    // layer.
+    const corrupted = FAKE_PEM.replace('MIIBbjCC', 'MIIBbjC/');
+    const options: ConnectionOptions = { ssl: { ca: corrupted, rejectUnauthorized: true } };
+    expect(() => resolveCaFile(options)).toThrow(/not a valid certificate/);
+  });
 });
 
 describe('normalizePem', () => {
@@ -268,6 +288,73 @@ describe('normalizePem', () => {
     const normalized = normalizePem(flattened);
     expect(() => new X509Certificate(normalized)).not.toThrow();
     expect(new X509Certificate(normalized).subject).toBe('CN=t');
+  });
+});
+
+describe('describeCaBundle', () => {
+  // Same real, short self-signed certificate used by the normalizePem
+  // suite above (P-256, CN=t) -- genuine PEM shape, not a hand-typed
+  // approximation, so a passing X509Certificate parse means something.
+  const CERT_A = '-----BEGIN CERTIFICATE-----\n'
+    + 'MIIBbjCCAROgAwIBAgIUEhPzkIfJr2f1SuTlYGw53ztPjFQwCgYIKoZIzj0EAwIw\n'
+    + 'DDEKMAgGA1UEAwwBdDAeFw0yNjA5MDQxNDQ4MDZaFw0yNjA5MDUxNDQ4MDZaMAwx\n'
+    + 'CjAIBgNVBAMMAXQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATsqXZg6sDmIrRT\n'
+    + 'b6Ei0OjtIlLE+OQjWKrZW6xRGnvacNLuzCpdLIwKYCJBQoQi5HZnGRMke4xIxG8W\n'
+    + '/UK6ksAAo1MwUTAdBgNVHQ4EFgQUWi7y0PLijEPWVKoiZK0QQaELVvcwHwYDVR0j\n'
+    + 'BBgwFoAUWi7y0PLijEPWVKoiZK0QQaELVvcwDwYDVR0TAQH/BAUwAwEB/zAKBggq\n'
+    + 'hkjOPQQDAgNJADBGAiEAgAVHUGAP2Q9Tmou/sFU2d/B1MoRsa0DPb7wgMPZWwTQC\n'
+    + 'IQCsMSLYGeyyElb86Z93Ds6Ax5huOsVjpV2KlLBlOr2VXQ==\n'
+    + '-----END CERTIFICATE-----\n';
+  // A second, independently-generated real certificate (P-256, CN=u), same
+  // provenance as CERT_A -- genuine DER, not CERT_A with characters swapped
+  // (swapping characters in valid base64 does not reliably produce a second
+  // *parseable* certificate, since it perturbs the encoded ASN.1 structure
+  // itself).
+  const CERT_B = '-----BEGIN CERTIFICATE-----\n'
+    + 'MIIBbjCCAROgAwIBAgIURuG/vUopnfqs/jLhuB0bsra9nTIwCgYIKoZIzj0EAwIw\n'
+    + 'DDEKMAgGA1UEAwwBdTAeFw0yNjA5MDQxNjI3MjFaFw0yNjA5MDUxNjI3MjFaMAwx\n'
+    + 'CjAIBgNVBAMMAXUwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARr+lYNwTc6obAk\n'
+    + 'h37NArt2sEE5hiHE3gYJJ8SyPRnfOVNP/KHcSJOOljz8+g2K0HMXjA5xASDFN4Cg\n'
+    + 'HyFibTojo1MwUTAdBgNVHQ4EFgQUdcesysfVlZPfeW8W/d89KDkvr4owHwYDVR0j\n'
+    + 'BBgwFoAUdcesysfVlZPfeW8W/d89KDkvr4owDwYDVR0TAQH/BAUwAwEB/zAKBggq\n'
+    + 'hkjOPQQDAgNJADBGAiEAy4S1fQaFQb+iN/j0UnJa+FNBnORHuMEFpOV4NU1cMgMC\n'
+    + 'IQCT0PbDv8IZlZUNTXrH4IxnAMcuO0xS05inksH/iRpNlg==\n'
+    + '-----END CERTIFICATE-----\n';
+
+  it('describes a single certificate with its subject and a full sha256 fingerprint', () => {
+    const entries = describeCaBundle(CERT_A);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].subject).toBe('CN=t');
+    expect(entries[0].issuer).toBe('CN=t');
+    expect(entries[0].fingerprint256).toMatch(/^([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}$|^[0-9A-Fa-f]{64}$/);
+  });
+
+  it('describes a two-certificate bundle as two entries, in order', () => {
+    const entries = describeCaBundle(CERT_A + CERT_B);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].subject).toBe('CN=t');
+    expect(entries[1].subject).toBe('CN=u');
+    expect(entries[0].fingerprint256).not.toBe(entries[1].fingerprint256);
+  });
+
+  it('throws naming the block index and body length for a certificate a paste corrupted', () => {
+    // Flip one base64 character in the body -- the kind of damage a paste
+    // that altered a +, / or = character, or dropped part of the body,
+    // produces. PEM_HEADER/normalizePem still treat this as one well-formed
+    // block; only an actual X509 parse catches it.
+    const corrupted = CERT_A.replace('MIIBbjCC', 'MIIBbjC/');
+    expect(() => describeCaBundle(corrupted)).toThrow(/block 1 of 1/);
+    expect(() => describeCaBundle(corrupted)).toThrow(/not a valid certificate/);
+  });
+
+  it('names the correct block index in a multi-certificate bundle', () => {
+    const corrupted = CERT_B.replace('MIIBbjCC', 'MIIBbjC/');
+    expect(() => describeCaBundle(CERT_A + corrupted)).toThrow(/block 2 of 2/);
+  });
+
+  it('throws a no-block-found error for an empty or markerless string', () => {
+    expect(() => describeCaBundle('')).toThrow(/no certificate block/i);
+    expect(() => describeCaBundle('not a certificate at all')).toThrow(/no certificate block/i);
   });
 });
 

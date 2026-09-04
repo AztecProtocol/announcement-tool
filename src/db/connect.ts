@@ -64,6 +64,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { X509Certificate } from 'node:crypto';
 import postgres, { type Sql } from 'postgres';
 
 export interface DbEnv {
@@ -332,14 +333,105 @@ export function normalizePem(raw: string): string {
   return blocks.join('');
 }
 
+/**
+ * Splits an already-normalised PEM bundle into its individual
+ * BEGIN/END CERTIFICATE blocks and parses each with Node's own X509
+ * parser, returning the fields useful for a one-line startup log:
+ * subject, issuer, expiry, and a fingerprint that lets an operator confirm
+ * "is this actually the root I think it is" without printing the
+ * certificate itself.
+ *
+ * This exists because of a specific, previously silent failure mode: Node
+ * (via postgres.js's `ca` option) does not report which certificate in a
+ * multi-root bundle it could not parse, or why -- a corrupted block simply
+ * never becomes a trusted issuer, and the connection fails later with
+ * UNABLE_TO_GET_ISSUER_CERT_LOCALLY, indistinguishable from "the CA is
+ * simply wrong". Parsing every block ourselves, eagerly, at startup, turns
+ * that into a named failure at the moment the bad value was read, pointing
+ * at the exact block.
+ *
+ * Roots are public information -- a root CA certificate's whole purpose is
+ * to be published and trusted by anyone -- so logging their subject/issuer/
+ * expiry/fingerprint leaks nothing that isn't already broadcast by every
+ * TLS handshake using that root.
+ */
+export function describeCaBundle(pem: string): Array<{
+  subject: string;
+  issuer: string;
+  validTo: string;
+  fingerprint256: string;
+}> {
+  const blocks: string[] = [];
+  let searchFrom = 0;
+  while (true) {
+    const beginIndex = pem.indexOf(PEM_BEGIN_MARKER, searchFrom);
+    if (beginIndex === -1) break;
+    const bodyStart = beginIndex + PEM_BEGIN_MARKER.length;
+    const endIndex = pem.indexOf(PEM_END_MARKER, bodyStart);
+    if (endIndex === -1) break;
+    const blockEnd = endIndex + PEM_END_MARKER.length;
+    blocks.push(pem.slice(beginIndex, blockEnd));
+    searchFrom = blockEnd;
+  }
+
+  if (blocks.length === 0) {
+    throw new Error(
+      'No certificate block ("-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----") was '
+      + 'found in the value given for the database root certificate. Re-paste the full PEM '
+      + 'content, from the BEGIN line through the END line inclusive.',
+    );
+  }
+
+  return blocks.map((block, index) => {
+    const bodyLength = block
+      .slice(PEM_BEGIN_MARKER.length, block.length - PEM_END_MARKER.length)
+      .replace(/\s+/g, '').length;
+    let cert: X509Certificate;
+    try {
+      cert = new X509Certificate(block);
+    } catch {
+      throw new Error(
+        `Database root certificate block ${index + 1} of ${blocks.length} `
+        + `(body length ${bodyLength} characters) is not a valid certificate. `
+        + 'A paste that altered a "+", "/" or "=" character, or lost part of the body, '
+        + 'produces exactly this failure.',
+      );
+    }
+    return {
+      subject: cert.subject,
+      issuer: cert.issuer,
+      validTo: cert.validTo,
+      fingerprint256: cert.fingerprint256,
+    };
+  });
+}
+
+/**
+ * Renders describeCaBundle's output as the one-line startup log this module
+ * emits after successfully resolving a CA bundle -- see resolveCaFile. Roots
+ * are public, so naming the subject and a truncated fingerprint here leaks
+ * nothing; it exists purely so a `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` failure
+ * downstream can be checked against "is this the root we expected" instead
+ * of being a total unknown.
+ */
+function logCaBundle(pem: string): void {
+  const entries = describeCaBundle(pem);
+  const summary = entries
+    .map((e) => `${e.subject} (expires ${e.validTo}, sha256 ${e.fingerprint256.replace(/:/g, '').slice(0, 16)})`)
+    .join('; ');
+  console.info(`database TLS root certificates loaded: ${entries.length} — ${summary}`);
+}
+
 export function resolveCaFile(options: ConnectionOptions): void {
   if (options.ssl && typeof options.ssl === 'object' && 'ca' in options.ssl) {
     const raw = (options.ssl as { ca: string }).ca;
     let ca: string;
     if (PEM_HEADER.test(raw)) {
       ca = normalizePem(raw);
+      logCaBundle(ca);
     } else {
       ca = readFileSync(raw, 'utf8');
+      logCaBundle(ca);
     }
     options.ssl = { ...options.ssl, ca };
   }
