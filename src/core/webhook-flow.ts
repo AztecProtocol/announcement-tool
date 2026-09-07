@@ -6,6 +6,14 @@ import { publicBaseUrl } from './public-base-url.js';
 
 const NOT_AUTHORIZED = 'not authorized or not registered';
 
+/** The only failure text an anonymous caller ever sees for the verification
+ * request. The upstream status, the exception, and the resolved address are
+ * an oracle: they turn a blind server-side request into a port scan of
+ * whatever the URL pointed at. Detail goes to the server log, keyed by the
+ * subscription id, for the operator. */
+export const ENDPOINT_NOT_VERIFIED =
+  'The endpoint did not respond with a 2xx status. Check that it is reachable from the internet and try again.';
+
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505';
 }
@@ -116,9 +124,14 @@ export async function registerWebhook(
       // type it is declared with does not carry the field.
       ...(dispatcher ? { dispatcher } : {}),
     } as RequestInit & { dispatcher?: unknown });
-    if (!res.ok) return { secretOnce, unsubscribeUrl, verified: false, error: `endpoint answered HTTP ${res.status}` };
+    if (!res.ok) {
+      console.warn(`webhook verification failed for subscription ${subId}: HTTP ${res.status}`);
+      return { secretOnce, unsubscribeUrl, verified: false, error: ENDPOINT_NOT_VERIFIED };
+    }
   } catch (err) {
-    return { secretOnce, unsubscribeUrl, verified: false, error: String(err instanceof Error ? err.message : err).slice(0, 200) };
+    const detail = String(err instanceof Error ? err.message : err).slice(0, 200);
+    console.warn(`webhook verification failed for subscription ${subId}: ${detail}`);
+    return { secretOnce, unsubscribeUrl, verified: false, error: ENDPOINT_NOT_VERIFIED };
   } finally {
     await dispatcher?.close();
   }

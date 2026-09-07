@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { createHmac } from 'node:crypto';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { registerWebhook } from '../src/core/webhook-flow.js';
+import { registerWebhook, ENDPOINT_NOT_VERIFIED } from '../src/core/webhook-flow.js';
 import { createSubscription } from '../src/core/subscriptions.js';
 
 let sql: Sql;
@@ -46,14 +46,53 @@ describe('registerWebhook', () => {
     expect(row.verified).toBe(true);
   });
 
-  it('endpoint failing the test event stays unverified with an error', async () => {
+  it('endpoint failing the test event stays unverified with the generic message', async () => {
     const { server, url } = await listen((_req, res) => { res.writeHead(500); res.end(); });
     const res = await registerWebhook(sql, { url, allowPrivateHosts: true });
     server.close();
     expect(res.verified).toBe(false);
-    expect(res.error).toContain('500');
+    expect(res.error).toBe(ENDPOINT_NOT_VERIFIED);
+    expect(res.error).not.toContain('500');
     const [row] = await sql`select verified from subscriptions where endpoint = ${url}`;
     expect(row.verified).toBe(false);
+  });
+
+  // H-2: the upstream status, exception text, and resolved address are an
+  // oracle — they'd let an anonymous caller turn this blind server-side
+  // request into a port scan of whatever the URL pointed at. Every failure
+  // mode of the verification request must collapse to one opaque constant.
+  describe('verification failure never leaks upstream detail (H-2)', () => {
+    it('a non-2xx status collapses to the generic message', async () => {
+      const { server, url } = await listen((_req, res) => { res.writeHead(503); res.end(); });
+      const res = await registerWebhook(sql, { url, allowPrivateHosts: true });
+      server.close();
+      expect(res).toMatchObject({ verified: false, error: ENDPOINT_NOT_VERIFIED });
+      expect(res.error).not.toContain('503');
+    });
+
+    it('a connection-refused exception collapses to the generic message', async () => {
+      const fetchImpl: typeof fetch = async () => {
+        throw new Error('connect ECONNREFUSED 10.0.0.5:5432');
+      };
+      const res = await registerWebhook(sql, {
+        url: 'https://never-registered-2.example.com/h', lookup: publicLookup, fetchImpl,
+      });
+      expect(res).toMatchObject({ verified: false, error: ENDPOINT_NOT_VERIFIED });
+      expect(res.error).not.toContain('ECONNREFUSED');
+      expect(res.error).not.toContain('10.0.0.5');
+    });
+
+    it('a timeout exception collapses to the generic message', async () => {
+      class TimeoutError extends Error {
+        constructor() { super('The operation was aborted due to timeout'); this.name = 'TimeoutError'; }
+      }
+      const fetchImpl: typeof fetch = async () => { throw new TimeoutError(); };
+      const res = await registerWebhook(sql, {
+        url: 'https://never-registered-3.example.com/h', lookup: publicLookup, fetchImpl,
+      });
+      expect(res).toMatchObject({ verified: false, error: ENDPOINT_NOT_VERIFIED });
+      expect(res.error).not.toContain('Timeout');
+    });
   });
 
   it('re-registering with the correct secret updates filters, keeps the secret, does not return it again', async () => {
