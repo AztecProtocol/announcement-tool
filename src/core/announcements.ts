@@ -201,7 +201,7 @@ export async function confirmPublish(sql: Sql, id: string, actor: string): Promi
     const a = rowToAnnouncement(rows[0]);
     if (a.status !== 'publish_requested') throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
     if (a.scheduledFor) throw new Error('this announcement is scheduled; use confirmSchedule');
-    if (a.severity === 'critical' && a.publishRequestedBy === actor) throw new FourEyesError();
+    if (a.severity === 'critical' && a.publishRequestedBy?.toLowerCase() === actor.toLowerCase()) throw new FourEyesError();
     return performPublish(tx, a, actor);
   });
 }
@@ -250,7 +250,7 @@ export async function confirmSchedule(sql: Sql, id: string, actor: string): Prom
     const a = rowToAnnouncement(rows[0]);
     if (a.status !== 'publish_requested') throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
     if (!a.scheduledFor) throw new Error('announcement has no scheduled time; use confirmPublish');
-    if (a.severity === 'critical' && a.publishRequestedBy === actor) throw new FourEyesError();
+    if (a.severity === 'critical' && a.publishRequestedBy?.toLowerCase() === actor.toLowerCase()) throw new FourEyesError();
 
     const [row] = await tx`update announcements
       set status = 'scheduled', publish_confirmed_by = ${actor}

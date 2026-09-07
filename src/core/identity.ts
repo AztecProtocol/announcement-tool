@@ -89,7 +89,7 @@ export async function listPublishers(sql: Sql): Promise<string[]> {
 export async function isPublisher(sql: Sql, email: string): Promise<boolean> {
   const [{ c }] = await sql`select count(*)::int as c from publishers`;
   if (c === 0) return true;
-  const rows = await sql`select 1 from publishers where email = ${email}`;
+  const rows = await sql`select 1 from publishers where lower(email) = lower(${email})`;
   return rows.length > 0;
 }
 

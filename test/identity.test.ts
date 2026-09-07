@@ -143,6 +143,14 @@ describe('publishers', () => {
     expect(await isPublisher(sql, 'stranger@example.com')).toBe(false);
     expect(await listPublishers(sql)).toEqual(['publisher@example.com']);
   });
+
+  // Publisher identity is an email address, compared case-insensitively
+  // everywhere else. A stored lowercase row must still match a differently
+  // cased lookup, or the allowlist silently locks out its own publishers.
+  it('matches regardless of the casing used to look it up', async () => {
+    await sql`insert into publishers (email) values ('alice@example.com')`;
+    expect(await isPublisher(sql, 'ALICE@example.com')).toBe(true);
+  });
 });
 
 describe('assertPublishersConfigured', () => {

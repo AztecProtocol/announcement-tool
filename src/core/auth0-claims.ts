@@ -32,7 +32,9 @@ export function emailFromClaims(payload: Record<string, unknown>): string | unde
   // Whitespace-only would otherwise become a truthy identity that matches nothing
   // useful but still satisfies "an identity resolved".
   const trimmed = email.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+  // Lowercase once, at the boundary: every downstream comparison (four-eyes,
+  // the publisher allowlist) then compares case-insensitively for free.
+  return trimmed.length > 0 ? trimmed.toLowerCase() : undefined;
 }
 
 /**
