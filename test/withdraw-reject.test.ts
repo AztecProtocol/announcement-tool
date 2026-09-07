@@ -93,6 +93,14 @@ describe('rejectPublish', () => {
     await expect(rejectPublish(sql, a.id, 'alice@test.local', 'changed my mind')).rejects.toThrow();
   });
 
+  // Same guard, different casing of the same requester. If this compared
+  // case-sensitively, the requester could dodge "withdraw it instead" simply
+  // by calling reject under a different casing of their own address.
+  it('refuses the requester under a different casing of their own address', async () => {
+    const a = await requested('Self reject different casing');
+    await expect(rejectPublish(sql, a.id, 'Alice@Test.Local', 'changed my mind')).rejects.toThrow();
+  });
+
   it('requires a reason', async () => {
     const a = await requested('No reason');
     await expect(rejectPublish(sql, a.id, 'bob@test.local', '   ')).rejects.toThrow();

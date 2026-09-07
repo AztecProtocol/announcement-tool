@@ -43,6 +43,16 @@ describe('resolveIdentity', () => {
       .toEqual({ email: 'publisher@example.com', source: 'tailscale' });
   });
 
+  // One normalisation boundary for every identity source: a Tailscale login
+  // capitalized differently from how the same person is listed in
+  // `publishers` must still resolve to the same lowercase identity, or
+  // isPublisher/four-eyes end up comparing an un-normalised value again.
+  it('lowercases a mixed-case Tailscale login', () => {
+    const h = new Headers({ 'Tailscale-User-Login': 'Publisher@Example.COM' });
+    expect(resolveIdentity(h, {}))
+      .toEqual({ email: 'publisher@example.com', source: 'tailscale' });
+  });
+
   it('prefers the Tailscale header', () => {
     const h = new Headers({ 'Tailscale-User-Login': 'publisher@example.com', 'Tailscale-User-Name': 'Publisher' });
     expect(resolveIdentity(h, { devEmail: 'dev@example.com' }))
@@ -143,6 +153,14 @@ describe('publishers', () => {
     expect(await isPublisher(sql, 'stranger@example.com')).toBe(false);
     expect(await listPublishers(sql)).toEqual(['publisher@example.com']);
   });
+
+  // Publisher identity is an email address, compared case-insensitively
+  // everywhere else. A stored lowercase row must still match a differently
+  // cased lookup, or the allowlist silently locks out its own publishers.
+  it('matches regardless of the casing used to look it up', async () => {
+    await sql`insert into publishers (email) values ('alice@example.com')`;
+    expect(await isPublisher(sql, 'ALICE@example.com')).toBe(true);
+  });
 });
 
 describe('assertPublishersConfigured', () => {
@@ -171,5 +189,39 @@ describe('assertPublishersConfigured', () => {
     await expect(assertPublishersConfigured(sql, { nodeEnv: 'development', allowInsecureDev: '1' }))
       .resolves.toBeUndefined();
     await expect(assertPublishersConfigured(sql, { allowInsecureDev: '1' })).resolves.toBeUndefined();
+  });
+});
+
+// migrations/015_publishers_lowercase.sql's collapse-then-lowercase step,
+// exercised against a temp table with the same shape as `publishers` rather
+// than the migrated table itself (which already carries the resulting check
+// constraint and a schema_migrations row marking 015 applied). `default now()`
+// is the transaction start time, so three rows inserted in one transaction —
+// exactly how a seeding script would create three casings of one address —
+// get an IDENTICAL added_at. The delete's join condition must still pick a
+// single survivor in that case, or it deletes nothing and the following
+// `update ... lower(email)` hits the table's own primary key twice.
+describe('publishers-lowercase migration collapse (identical added_at)', () => {
+  it('keeps exactly one row when three casings share the same added_at', async () => {
+    await sql.begin(async tx => {
+      await tx`create temporary table publishers_mig_test (
+        email text primary key, added_at timestamptz not null default now()
+      ) on commit drop`;
+      // One INSERT, one transaction timestamp: default now() is identical for
+      // all three rows, so this reproduces the tie the review found.
+      await tx`insert into publishers_mig_test (email) values
+        ('Alice@Example.com'), ('ALICE@EXAMPLE.COM'), ('alice@example.com')`;
+
+      await tx`delete from publishers_mig_test p
+        using publishers_mig_test q
+        where lower(p.email) = lower(q.email)
+          and p.email <> q.email
+          and (p.added_at, p.ctid) > (q.added_at, q.ctid)`;
+      await tx`update publishers_mig_test set email = lower(email) where email <> lower(email)`;
+
+      const rows = await tx`select email from publishers_mig_test`;
+      expect(rows.length).toBe(1);
+      expect(rows[0].email).toBe('alice@example.com');
+    });
   });
 });

@@ -13,7 +13,12 @@ import { createSubscription, verifySubscription } from '../src/core/subscription
 import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
 const args = process.argv.slice(2);
-const email = args.find(a => a.includes('@'));
+// Stored email endpoints are lowercase — migration 018 collapsed the existing
+// mixed-case rows and added a check constraint that refuses new ones. Lowercase
+// the argument here so this helper finds an address a real subscriber already
+// created, instead of failing the constraint on insert.
+const emailArg = args.find(a => a.includes('@'));
+const email = emailArg?.trim().toLowerCase();
 const criticalsOnly = args.includes('--criticals-only');
 
 if (!email) {

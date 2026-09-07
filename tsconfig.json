@@ -50,7 +50,8 @@
     //   headers   → next/dist/server/request/headers.js
     //   useRouter → next/dist/client/components/navigation.js
     // Current deep-import sites: app/admin/layout.tsx, app/admin/actions.ts,
-    // app/admin/compose-form.tsx, app/admin/review/[id]/publish-control.tsx.
+    // app/admin/compose-form.tsx, app/admin/review/[id]/publish-control.tsx,
+    // app/actions.ts.
     // RE-TEST ON NEXT UPGRADE: if the public specifiers ever type-check under
     // NodeNext, drop the mapping and all deep imports together.
     "paths": {

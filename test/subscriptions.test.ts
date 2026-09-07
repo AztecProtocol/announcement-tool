@@ -57,4 +57,22 @@ describe('subscriptions', () => {
     expect(found?.id).toBe(s.id);
     expect(await getSubscriptionByVerifyToken(sql, 'f'.repeat(32))).toBeUndefined();
   });
+
+  it('a verify token older than 72 hours is refused; 71 hours is accepted', async () => {
+    const s = await createSubscription(sql, { channel: 'email', endpoint: 'old@example.com' });
+    await sql`update subscriptions set verify_token_issued_at = now() - interval '73 hours' where id = ${s.id}`;
+    expect(await getSubscriptionByVerifyToken(sql, s.verifyToken)).toBeUndefined();
+
+    const s2 = await createSubscription(sql, { channel: 'email', endpoint: 'fresh@example.com' });
+    await sql`update subscriptions set verify_token_issued_at = now() - interval '71 hours' where id = ${s2.id}`;
+    expect((await getSubscriptionByVerifyToken(sql, s2.verifyToken))?.id).toBe(s2.id);
+  });
+
+  it('verifySubscription clears the token so it cannot be reused', async () => {
+    const s = await createSubscription(sql, { channel: 'email', endpoint: 'once@example.com' });
+    await verifySubscription(sql, s.id);
+    const [row] = await sql`select verify_token, verify_token_issued_at from subscriptions where id = ${s.id}`;
+    expect(row.verify_token).toBeNull();
+    expect(row.verify_token_issued_at).toBeNull();
+  });
 });
