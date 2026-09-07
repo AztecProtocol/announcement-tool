@@ -57,8 +57,7 @@
 # is unclear from the docs which one would win if they disagreed.
 
 # -----------------------------------------------------------------------------
-# Rate limiting — PARTIAL COVERAGE, read this before assuming both public
-# write paths are protected.
+# Rate limiting — HANDLED IN APPLICATION CODE, not here.
 # -----------------------------------------------------------------------------
 # RATE LIMITING IS NOT CONFIGURED HERE, DELIBERATELY.
 #
@@ -83,11 +82,12 @@
 #
 # The abuse this was meant to bound: subscribeEmail sends a confirmation email
 # to any address given, so an unthrottled endpoint is an email bomber pointed at
-# a third party. That risk is real and currently UNMITIGATED.
-# Options if it matters: throttle inside the action against a shared store
-# (Netlify Blobs or the database, since in-memory state does not survive
-# serverless cold starts), or put a CAPTCHA on the subscribe form. Both are real
-# work; neither is a config line. Do not "fix" this by re-adding a path rule.
+# a third party. That throttle now lives in the application code instead —
+# `app/actions.ts` calls `consumeRateLimit` from `src/core/rate-limit.ts` on both
+# write paths, keyed by caller IP and by email address. The counter is a database
+# row, not process memory, because serverless instances share nothing across cold
+# starts. See the "Rate limits" paragraph in README.md for the numbers.
+# Do not "fix" anything here by re-adding a path rule.
 
 
 # -----------------------------------------------------------------------------
