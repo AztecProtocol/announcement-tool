@@ -98,6 +98,30 @@ describe('telegram adapter', () => {
     server.close();
   });
 
+  it('includes telegram\'s description on a non-2xx response', async () => {
+    const { server, base } = await listen((_req, res) => {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error_code: 400, description: 'Bad Request: chat not found' }));
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:main', 'telegram', ${sql.json({ chat_id: '@nope' })})`;
+    await expect(makeTelegramAdapter(sql, { apiBase: base, botToken: 'T' }).deliver(ann, 'telegram:main', 'publish'))
+      .rejects.toThrow(/HTTP 400.*chat not found/s);
+    server.close();
+  });
+
+  it('falls back to the status alone when a non-2xx body is not JSON', async () => {
+    const { server, base } = await listen((_req, res) => {
+      res.writeHead(400, { 'content-type': 'text/html' });
+      res.end('<html>');
+    });
+    await sql`insert into channel_settings (key, channel, config) values
+      ('telegram:main', 'telegram', ${sql.json({ chat_id: '@nope' })})`;
+    await expect(makeTelegramAdapter(sql, { apiBase: base, botToken: 'T' }).deliver(ann, 'telegram:main', 'publish'))
+      .rejects.toThrow(/HTTP 400/);
+    server.close();
+  });
+
   it('never leaks bot token in HTTP error', async () => {
     const { server, base } = await listen((_req, res) => {
       res.writeHead(500);

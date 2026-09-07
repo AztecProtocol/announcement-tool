@@ -1,5 +1,6 @@
 import { subscribeEmail } from './actions.js';
 import WebhookForm from './webhook-form.js';
+import { broadcastLinks } from '../src/web/broadcast-links.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../src/core/types.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
@@ -22,6 +23,7 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
   const isTypeChecked = (v: AnnouncementType) => v !== 'info';
   const isSeverityChecked = (v: Severity) => v !== 'info';
   const isAudienceChecked = (v: Audience) => v === 'operators';
+  const links = broadcastLinks(process.env);
 
   return (
     <>
@@ -50,16 +52,20 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
 
       <WebhookForm />
 
-      <div className="card">
-        <h2>Broadcast channels</h2>
-        <p className="muted">These carry every announcement. For filtered delivery, use email or webhook above.</p>
-        <ul className="plain">
-          <li><a href="#">Discord</a></li>
-          <li><a href="#">Telegram</a></li>
-          <li><a href="#">Signal</a></li>
-        </ul>
-        <p className="muted">Official handles are published at launch.</p>
-      </div>
+      {links.length > 0 && (
+        <div className="card">
+          <h2>Broadcast channels</h2>
+          <p className="muted">These carry every announcement. For filtered delivery, use email or webhook above.</p>
+          <ul className="plain">
+            {links.map(l => (
+              <li key={l.label}>
+                <a href={l.url} rel="noopener noreferrer">{l.label}</a>
+                {l.note && <span className="muted"> — {l.note}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <p className="muted">Building an integration? See the <a href="/docs/webhooks">webhook consumer docs</a>.</p>
     </>

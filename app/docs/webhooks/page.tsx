@@ -5,11 +5,16 @@ export const metadata = {
 export default function WebhookDocsPage() {
   return (
     <>
-      <h1>Webhook consumer docs</h1>
-      <p>Register an endpoint on the <a href="/">subscribe page</a>. Deliveries are POSTed as they publish — no polling.</p>
+      <h1>Webhook consumer documentation</h1>
+      <p>Register an endpoint on the <a href="/">subscribe page</a>. The tool sends a POST request to your endpoint for each announcement. You do not poll.</p>
+
+      <h2>Your secret</h2>
+      <p>The subscribe page shows your secret one time, directly after registration. Copy it and store it in a safe place. The tool does not show it again.</p>
+      <p>Warning: a person who has the secret can send signed requests to your endpoint. Keep it private.</p>
+      <p>To replace the secret, open the unsubscribe link that the page shows with the secret, then register again. The tool has no in-place secret rotation.</p>
 
       <h2>Payload</h2>
-      <p>Every delivery is a POST with this JSON body:</p>
+      <p>Each delivery is a POST request with this JSON body:</p>
       <pre>{`{
   "event_id": "<announcement_id>.<revision>.<kind>",
   "kind": "publish",
@@ -36,7 +41,7 @@ export default function WebhookDocsPage() {
     "published_at": "2026-08-06T10:00:00Z"
   }
 }`}</pre>
-      <p><code>kind</code> is <code>publish</code>, <code>update</code>, or <code>reminder</code> for real deliveries. Registration also sends a one-off verification event with <code>kind: "test"</code> — see below.</p>
+      <p>The <code>kind</code> field is <code>publish</code>, <code>update</code> or <code>reminder</code> for a real delivery. Registration sends one test event with <code>kind: "test"</code>. See "Verification test event" below.</p>
 
       <h2>Headers</h2>
       <table>
@@ -49,10 +54,7 @@ export default function WebhookDocsPage() {
       </table>
 
       <h2>Signature verification</h2>
-      <p>
-        Compute <code>v1=hex(hmac_sha256(secret, timestamp + "." + body))</code> over the raw request body
-        (before any JSON parsing) and compare it to <code>x-announce-signature</code>.
-      </p>
+      <p>Compute <code>v1=hex(hmac_sha256(secret, timestamp + "." + body))</code>. Use the raw request body, before JSON parsing. Compare the result with the <code>x-announce-signature</code> header. Reject the request if they are different.</p>
       <pre>{`import { createHmac } from 'node:crypto';
 
 const secret = '...your webhook secret...';
@@ -69,28 +71,14 @@ if (signature !== expected) {
 }`}</pre>
 
       <h2>Retries</h2>
-      <p>
-        Up to 5 delivery attempts per event. Failed attempts back off 2, 5, 10, 20, then 30 minutes before the next
-        try. After the 5th failed attempt the delivery is marked <code>exhausted</code> and not retried further.
-      </p>
+      <p>The tool makes up to 5 delivery attempts for each event. After a failed attempt, the tool waits 2, 5, 10, 20 and then 30 minutes before the next attempt. After the fifth failed attempt, the tool marks the delivery as <code>exhausted</code> and stops.</p>
 
       <h2>Idempotency</h2>
-      <p>
-        Retries and, rarely, redelivery can send the same event more than once. Dedupe on <code>event_id</code> —
-        it is stable across attempts for a given announcement, revision, and delivery kind.
-      </p>
+      <p>A retry can send the same event more than one time. Use <code>event_id</code> to identify duplicates. The value is the same for each attempt of one announcement, revision and delivery kind.</p>
 
       <h2>Verification test event</h2>
-      <p>
-        When you register a webhook, a verification request is sent immediately with <code>kind: "test"</code> and
-        an <code>event_id</code> of the form <code>whtest_&lt;subscription_id&gt;</code>, signed the same way as a
-        real delivery. Your endpoint must respond with a 2xx status for the registration to succeed — a non-2xx
-        response or a network error is reported back on the subscribe page and the webhook is not activated.
-      </p>
-
-      <div className="notice">
-        <p>Keep the secret private — anyone with it can forge signed payloads to your endpoint. Registration also returns a one-time unsubscribe link — save it. To rotate the secret, open that unsubscribe link to remove the registration, then re-register; there is no in-place secret rotation.</p>
-      </div>
+      <p>When you register a webhook, the tool sends one test request at once. The request has <code>kind: "test"</code> and an <code>event_id</code> of the form <code>whtest_&lt;subscription_id&gt;</code>. The signature is the same as for a real delivery.</p>
+      <p>Your endpoint must answer with a 2xx status. If the answer is not 2xx, or the request fails, the subscribe page shows the error and the webhook is not active.</p>
     </>
   );
 }

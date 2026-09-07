@@ -200,8 +200,11 @@ Fill in every value marked "No" above before continuing — the check at the
 end of step 4 will not pass otherwise. The four marked "Yes" can stay empty
 for now and be filled in later, once a Signal number is registered or an S3
 bucket exists; there is no need to re-run Ansible for that, only to update
-this file and restart the affected container (`docker compose up -d
-signal-receive` or `docker compose up -d backup`).
+this file and restart the affected container
+(`cd /opt/announce && docker compose up -d signal-receive` or
+`cd /opt/announce && docker compose up -d backup`). Run every
+`docker compose` command on the VM from `/opt/announce`. From any other
+directory, compose starts a second, separate project.
 
 `SIGNAL_ACCOUNT` is a registered Signal phone number, for example
 `+15551234567`. Signal is not in use yet, so leave it empty for now: write
