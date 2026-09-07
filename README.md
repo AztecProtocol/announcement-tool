@@ -276,7 +276,7 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 
 **Run it:** `npm run web` for dev (Next dev server); `npm run web:build && npm run web:start` for a production build.
 
-**Behavior notes:** Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
+**Behavior notes:** Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. The confirmation link is valid for 72 hours and works once; after that, the subscriber submits the form again to receive a new link. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
 
 ## Admin
 

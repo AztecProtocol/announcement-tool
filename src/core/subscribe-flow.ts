@@ -83,9 +83,15 @@ async function updateExistingAndNotify(
   }
   // Unverified addresses have never proven ownership yet, so filter changes
   // (and the address itself) aren't trusted regardless — applying immediately
-  // and re-sending the confirm link keeps today's behavior.
+  // and re-sending the confirm link keeps today's behavior. Issue a fresh
+  // token (and issued-at) rather than resending the old one: a re-subscribe
+  // is also the natural moment to give the subscriber a full new 72-hour
+  // window instead of quietly inheriting whatever was left on the old one.
+  const freshToken = newToken();
   await updateSubscriptionFilters(sql, existing[0].id as string, input.filters ?? {});
-  await sendConfirmation(sender, input.email, existing[0].verify_token as string, input.baseUrl);
+  await sql`update subscriptions set verify_token = ${freshToken}, verify_token_issued_at = now()
+    where id = ${existing[0].id}`;
+  await sendConfirmation(sender, input.email, freshToken, input.baseUrl);
   return 'confirmation_sent';
 }
 

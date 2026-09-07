@@ -43,6 +43,25 @@ describe('email double-opt-in', () => {
     expect(row.verified).toBe(false);
   });
 
+  it('re-subscribing an unverified address issues a new token with a fresh issued_at', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'refresh@example.com' });
+    const firstToken = sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
+    const [before] = await sql`select verify_token, verify_token_issued_at from subscriptions where endpoint = 'refresh@example.com'`;
+
+    // Backdate the issued_at so a real time gap between "before" and the re-subscribe is provable.
+    await sql`update subscriptions set verify_token_issued_at = now() - interval '1 hour' where endpoint = 'refresh@example.com'`;
+
+    await startEmailSubscription(sql, sender, { email: 'refresh@example.com' });
+    const secondToken = sent[1].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
+    const [after] = await sql`select verify_token, verify_token_issued_at from subscriptions where endpoint = 'refresh@example.com'`;
+
+    expect(secondToken).not.toBe(firstToken);
+    expect(after.verify_token).toBe(secondToken);
+    expect(before.verify_token).not.toBe(after.verify_token);
+    expect(new Date(after.verify_token_issued_at).getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
   it('re-subscribing a verified address with no filter change sends an update notice, stays verified', async () => {
     const { sender, sent } = recorder();
     await startEmailSubscription(sql, sender, { email: 'v@example.com' });
@@ -73,6 +92,35 @@ describe('email double-opt-in', () => {
 
   it('confirming an unknown token returns undefined', async () => {
     expect(await confirmSubscription(sql, 'a'.repeat(32))).toBeUndefined();
+  });
+
+  it('a confirmation token is single-use: a second confirm attempt fails and the token is cleared', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'reuse@example.com' });
+    const token = sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
+
+    const first = await confirmSubscription(sql, token);
+    expect(first?.endpoint).toBe('reuse@example.com');
+
+    const second = await confirmSubscription(sql, token);
+    expect(second).toBeUndefined();
+
+    const [row] = await sql`select verify_token from subscriptions where endpoint = 'reuse@example.com'`;
+    expect(row.verify_token).toBeNull();
+  });
+
+  it('a confirmation token older than 72 hours is refused; 71 hours is accepted', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'expiring@example.com' });
+    const token = sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
+
+    await sql`update subscriptions set verify_token_issued_at = now() - interval '73 hours' where endpoint = 'expiring@example.com'`;
+    expect(await confirmSubscription(sql, token)).toBeUndefined();
+
+    await startEmailSubscription(sql, sender, { email: 'expiring2@example.com' });
+    const token2 = sent[1].text.match(/\/confirm\/([0-9a-f]{32})/)![1];
+    await sql`update subscriptions set verify_token_issued_at = now() - interval '71 hours' where endpoint = 'expiring2@example.com'`;
+    expect((await confirmSubscription(sql, token2))?.endpoint).toBe('expiring2@example.com');
   });
 
   // Regression test for a select-then-insert race: two near-simultaneous first-time
@@ -121,7 +169,9 @@ describe('email double-opt-in', () => {
   // first) and then throws a Postgres-shaped 23505 error, so startEmailSubscription's
   // own insert branch truly hits the catch block, re-selects the row, and falls
   // through to updateExistingAndNotify — proving that exact code path never throws
-  // and sends exactly one confirmation email to the pre-existing row's token.
+  // and sends exactly one confirmation email to the pre-existing row, with a freshly
+  // issued token (updateExistingAndNotify's unverified branch always mints a new
+  // one rather than resending whatever the race-winning insert produced).
   it('does not throw when the insert loses the unique-violation race (23505 catch path)', async () => {
     const { sender, sent } = recorder();
 
@@ -140,8 +190,9 @@ describe('email double-opt-in', () => {
     expect(res).toBe('confirmation_sent');
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe('race2@example.com');
-    expect(sent[0].text).toContain(`/confirm/${realSub!.verifyToken}`);
-    const [row] = await sql`select id, filter_severities, verified from subscriptions where endpoint = 'race2@example.com'`;
+    const [row] = await sql`select id, filter_severities, verified, verify_token from subscriptions where endpoint = 'race2@example.com'`;
+    expect(sent[0].text).toContain(`/confirm/${row.verify_token}`);
+    expect(row.verify_token).not.toBe(realSub!.verifyToken);
     expect(row.id).toBe(realSub!.id);
     expect(row.filter_severities).toEqual(['critical']);
     expect(row.verified).toBe(false);
