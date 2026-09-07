@@ -58,7 +58,10 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
           <p className="muted">These carry every announcement. For filtered delivery, use email or webhook above.</p>
           <ul className="plain">
             {links.map(l => (
-              <li key={l.label}><a href={l.url} rel="noopener noreferrer">{l.label}</a></li>
+              <li key={l.label}>
+                <a href={l.url} rel="noopener noreferrer">{l.label}</a>
+                {l.note && <span className="muted"> — {l.note}</span>}
+              </li>
             ))}
           </ul>
         </div>

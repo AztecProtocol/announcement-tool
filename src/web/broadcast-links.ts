@@ -12,7 +12,17 @@
 export interface BroadcastLink {
   label: 'Discord' | 'Telegram' | 'Signal';
   url: string;
+  /**
+   * A short plain-text line shown under the Discord link, from
+   * PUBLIC_DISCORD_NOTE. It is rendered as text, so React escapes it and no
+   * HTML or Markdown in it is interpreted. Only the Discord entry ever
+   * carries this field.
+   */
+  note?: string;
 }
+
+// One line under the link; longer text belongs on a docs page.
+const NOTE_MAX = 200;
 
 const CHANNELS: Array<{ label: BroadcastLink['label']; variable: string }> = [
   { label: 'Discord', variable: 'PUBLIC_DISCORD_URL' },
@@ -32,7 +42,14 @@ export function broadcastLinks(env: Record<string, string | undefined>): Broadca
       continue;
     }
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
-    links.push({ label, url });
+    const link: BroadcastLink = { label, url };
+    if (label === 'Discord') {
+      const note = env.PUBLIC_DISCORD_NOTE?.trim();
+      if (note && note.length <= NOTE_MAX) {
+        link.note = note;
+      }
+    }
+    links.push(link);
   }
   return links;
 }

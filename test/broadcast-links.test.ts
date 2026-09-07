@@ -26,4 +26,23 @@ describe('broadcastLinks', () => {
       { label: 'Telegram', url: 'https://t.me/+abc' },
     ]);
   });
+
+  it('attaches PUBLIC_DISCORD_NOTE to the Discord entry only, trimmed', () => {
+    expect(broadcastLinks({
+      PUBLIC_DISCORD_URL: 'https://discord.gg/aztec',
+      PUBLIC_TELEGRAM_URL: 'https://t.me/+abc',
+      PUBLIC_DISCORD_NOTE: '  Channels: #mainnet-updates, #testnet-updates  ',
+    })).toEqual([
+      { label: 'Discord', url: 'https://discord.gg/aztec', note: 'Channels: #mainnet-updates, #testnet-updates' },
+      { label: 'Telegram', url: 'https://t.me/+abc' },
+    ]);
+  });
+
+  it('ignores the note when the Discord link is absent or the note is blank or too long', () => {
+    expect(broadcastLinks({ PUBLIC_DISCORD_NOTE: 'Channels: #x' })).toEqual([]);
+    expect(broadcastLinks({ PUBLIC_DISCORD_URL: 'https://discord.gg/aztec', PUBLIC_DISCORD_NOTE: '   ' }))
+      .toEqual([{ label: 'Discord', url: 'https://discord.gg/aztec' }]);
+    expect(broadcastLinks({ PUBLIC_DISCORD_URL: 'https://discord.gg/aztec', PUBLIC_DISCORD_NOTE: 'x'.repeat(201) }))
+      .toEqual([{ label: 'Discord', url: 'https://discord.gg/aztec' }]);
+  });
 });

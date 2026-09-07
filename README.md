@@ -220,6 +220,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `PUBLIC_DISCORD_URL` | *(unset)* | Invite link shown under "Broadcast channels" on the subscribe page. Unset hides the Discord entry. Must be an `https://` URL. |
 | `PUBLIC_TELEGRAM_URL` | *(unset)* | Same, for the Telegram channel. |
 | `PUBLIC_SIGNAL_URL` | *(unset)* | Same, for the Signal group. The card disappears when none of the three is set. |
+| `PUBLIC_DISCORD_NOTE` | *(unset)* | Plain text shown after the Discord link, at most 200 characters, for example `Channels: #mainnet-updates, #testnet-updates, #governance-updates`. Ignored unless `PUBLIC_DISCORD_URL` is set. |
 | `TELEGRAM_BOT_TOKEN` | *(unset)* | Bot token from BotFather; required for any Telegram delivery. |
 | `SIGNAL_API_BASE` | `http://127.0.0.1:8080` | Base URL of the `signal-cli-rest-api` sidecar. |
 | `SIGNAL_ACCOUNT` | *(unset)* | Registered Signal sender number; required for any Signal delivery. |
