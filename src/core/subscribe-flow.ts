@@ -97,15 +97,25 @@ async function updateExistingAndNotify(
 
 export async function startEmailSubscription(
   sql: Sql, sender: EmailSender,
-  input: {
+  // Injectable `createSubscriptionImpl` stands in for the real
+  // createSubscription — used by tests to simulate the concurrent-insert race
+  // (create the row, then throw 23505) without fighting ESM module mocking.
+  rawInput: {
     email: string; filters?: Partial<SubscriptionFilters>; baseUrl?: string;
-    // Injectable in place of the real createSubscription — used by tests to
-    // simulate the concurrent-insert race (create the row, then throw 23505)
-    // without fighting ESM module mocking.
     createSubscriptionImpl?: typeof createSubscription;
   },
   attempt = 0,
 ): Promise<'confirmation_sent' | 'updated' | 'change_pending'> {
+  // Normalise the address here, not only in the callers. Migration 018 makes
+  // every stored email endpoint lowercase and enforces that with a check
+  // constraint, and the lookups below compare `endpoint` exactly — so a caller
+  // that passes mixed case (the public action lowercases, but
+  // scripts/add-email-subscriber.ts and any future caller are separate code
+  // paths) would otherwise miss the existing row, create a second one, and
+  // give that subscriber double delivery. Defence in depth: doing it at the
+  // single point every subscribe path funnels through means no caller can
+  // reintroduce mixed case.
+  const input = { ...rawInput, email: rawInput.email.trim().toLowerCase() };
   const doCreate = input.createSubscriptionImpl ?? createSubscription;
   const existing = await sql`select id, verified, verify_token from subscriptions
     where channel = 'email' and endpoint = ${input.email}`;

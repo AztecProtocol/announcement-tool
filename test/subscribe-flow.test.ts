@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import type { Sql } from 'postgres';
+import type { Sql, TransactionSql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { startEmailSubscription, confirmSubscription, confirmFilterChange } from '../src/core/subscribe-flow.js';
 import { getSubscription, createSubscription } from '../src/core/subscriptions.js';
@@ -221,5 +221,127 @@ describe('email double-opt-in', () => {
 
   it('confirmFilterChange rejects an unknown token', async () => {
     expect(await confirmFilterChange(sql, 'a'.repeat(32))).toBe(false);
+  });
+});
+
+// migrations/018_subscriptions_email_lowercase.sql's collapse-then-lowercase
+// step, exercised against a temp table with the same shape as `subscriptions`
+// rather than the migrated table itself (which already carries the resulting
+// check constraint and a schema_migrations row marking 018 applied). Same
+// approach as the publishers-lowercase test in identity.test.ts.
+//
+// The survivor rule is richer here than for publishers: a verified row is a
+// person who proved ownership of the address, so it must outlive the
+// unverified duplicates regardless of insertion order. Only when the verified
+// count is not exactly one does the earliest-wins `(created_at, ctid)` order
+// decide.
+describe('subscriptions-email-lowercase migration collapse', () => {
+  async function collapse(tx: TransactionSql): Promise<void> {
+    await tx`delete from subs_mig_test s
+      using subs_mig_test t
+      where s.channel = 'email' and t.channel = 'email'
+        and lower(s.endpoint) = lower(t.endpoint)
+        and s.endpoint <> t.endpoint
+        and (
+          s.verified < t.verified
+          or (s.verified = t.verified and (s.created_at, s.ctid) > (t.created_at, t.ctid))
+        )`;
+    await tx`update subs_mig_test set endpoint = lower(endpoint)
+      where channel = 'email' and endpoint <> lower(endpoint)`;
+  }
+
+  async function tempTable(tx: TransactionSql): Promise<void> {
+    await tx`create temporary table subs_mig_test (
+      channel    text not null,
+      endpoint   text not null,
+      verified   boolean not null default false,
+      created_at timestamptz not null default now(),
+      unique (channel, endpoint)
+    ) on commit drop`;
+  }
+
+  it('keeps the single verified row, lowercased, when three casings collide', async () => {
+    await sql.begin(async tx => {
+      await tempTable(tx);
+      await tx`insert into subs_mig_test (channel, endpoint, verified, created_at) values
+        ('email', 'Alice@X', false, '2026-01-01T00:00:00Z'),
+        ('email', 'alice@x', true,  '2026-01-02T00:00:00Z'),
+        ('email', 'ALICE@X', false, '2026-01-03T00:00:00Z')`;
+      await collapse(tx);
+      const rows = await tx`select endpoint, verified from subs_mig_test`;
+      expect(rows.length).toBe(1);
+      expect(rows[0].endpoint).toBe('alice@x');
+      expect(rows[0].verified).toBe(true);
+    });
+  });
+
+  it('falls back to earliest-wins when no row is verified', async () => {
+    await sql.begin(async tx => {
+      await tempTable(tx);
+      await tx`insert into subs_mig_test (channel, endpoint, verified, created_at) values
+        ('email', 'Bob@X', false, '2026-01-01T00:00:00Z'),
+        ('email', 'BOB@X', false, '2026-01-02T00:00:00Z')`;
+      await collapse(tx);
+      const rows = await tx`select endpoint, verified from subs_mig_test`;
+      expect(rows.length).toBe(1);
+      expect(rows[0].verified).toBe(false);
+    });
+  });
+
+  it('falls back to earliest-wins when more than one row is verified', async () => {
+    await sql.begin(async tx => {
+      await tempTable(tx);
+      await tx`insert into subs_mig_test (channel, endpoint, verified, created_at) values
+        ('email', 'Carol@X', true, '2026-01-01T00:00:00Z'),
+        ('email', 'CAROL@X', true, '2026-01-02T00:00:00Z')`;
+      await collapse(tx);
+      const rows = await tx`select endpoint, verified from subs_mig_test`;
+      expect(rows.length).toBe(1);
+      expect(rows[0].endpoint).toBe('carol@x');
+      expect(rows[0].verified).toBe(true);
+    });
+  });
+
+  it('leaves webhook rows alone, mixed case and all', async () => {
+    await sql.begin(async tx => {
+      await tempTable(tx);
+      await tx`insert into subs_mig_test (channel, endpoint) values
+        ('webhook', 'https://Example.com/Hook'),
+        ('webhook', 'https://example.com/hook')`;
+      await collapse(tx);
+      const rows = await tx`select endpoint from subs_mig_test order by endpoint`;
+      expect(rows.length).toBe(2);
+    });
+  });
+
+  it('is a no-op on an already-lowercase table (re-running is safe)', async () => {
+    await sql.begin(async tx => {
+      await tempTable(tx);
+      await tx`insert into subs_mig_test (channel, endpoint, verified) values
+        ('email', 'dave@x', true), ('email', 'erin@x', false)`;
+      await collapse(tx);
+      await collapse(tx);
+      const rows = await tx`select endpoint from subs_mig_test order by endpoint`;
+      expect(rows.map(r => r.endpoint)).toEqual(['dave@x', 'erin@x']);
+    });
+  });
+});
+
+describe('startEmailSubscription lowercases the address itself', () => {
+  it('a mixed-case then lowercase subscribe yields ONE row', async () => {
+    const { sender } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'Alice@Example.com' });
+    await startEmailSubscription(sql, sender, { email: 'alice@example.com' });
+    const rows = await sql`select endpoint from subscriptions where channel = 'email'`;
+    expect(rows.length).toBe(1);
+    expect(rows[0].endpoint).toBe('alice@example.com');
+  });
+
+  it('trims surrounding whitespace as well', async () => {
+    const { sender } = recorder();
+    await startEmailSubscription(sql, sender, { email: '  Bob@Example.com  ' });
+    const rows = await sql`select endpoint from subscriptions where channel = 'email'`;
+    expect(rows.length).toBe(1);
+    expect(rows[0].endpoint).toBe('bob@example.com');
   });
 });

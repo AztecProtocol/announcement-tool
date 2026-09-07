@@ -107,6 +107,12 @@
       # skipped by fail2ban itself rather than counted. That is correct
       # behaviour, since a Unix-socket connection did not come over the
       # network and cannot be IP-banned.
+      #
+      # `<HOST>` is left unexpanded on purpose: fail2ban expands it itself,
+      # and since 0.10 (Ubuntu 24.04 ships 1.0.x) that expansion is an
+      # alternation covering IPv4, hostnames AND bare unbracketed IPv6 — the
+      # form Postgres writes into %h — so an IPv6 client is matched and banned
+      # by this same line with no extra pattern.
       [Definition]
       failregex = ^\S+ \S+ \S+ \[\d+\] <HOST> FATAL:\s
       ignoreregex =
