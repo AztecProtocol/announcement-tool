@@ -17,7 +17,8 @@
  * Every refusal throws URL_NOT_ALLOWED with no detail: the message reaches
  * an anonymous caller, and the hostname or address would turn it into a probe.
  */
-import { isIP } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
+import type { LookupAddress } from 'node:dns';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { Agent, type Dispatcher } from 'undici';
 
@@ -81,9 +82,17 @@ function forbiddenV6(ip: string): boolean {
   if (isZero(0, 5) && g[5] === 0xffff) {                           // ::ffff:a.b.c.d  IPv4-mapped
     return forbiddenV4(`${g[6] >> 8}.${g[6] & 0xff}.${g[7] >> 8}.${g[7] & 0xff}`);
   }
+  if (isZero(0, 6) && !(g[6] === 0 && g[7] === 0)) {               // ::a.b.c.d  IPv4-compatible (deprecated)
+    return forbiddenV4(`${g[6] >> 8}.${g[6] & 0xff}.${g[7] >> 8}.${g[7] & 0xff}`);
+  }
   if (g[0] === 0x64 && g[1] === 0xff9b && isZero(2, 6)) {          // 64:ff9b::/96  NAT64
     return forbiddenV4(`${g[6] >> 8}.${g[6] & 0xff}.${g[7] >> 8}.${g[7] & 0xff}`);
   }
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) return true; // 64:ff9b:1::/48 local-use NAT64
+  if (g[0] === 0x2002) {                                           // 2002::/16 6to4, v4 in groups 1-2
+    return forbiddenV4(`${g[1] >> 8}.${g[1] & 0xff}.${g[2] >> 8}.${g[2] & 0xff}`);
+  }
+  if ((g[0] & 0xffc0) === 0xfec0) return true;                     // fec0::/10 site-local (deprecated)
   if ((g[0] & 0xfe00) === 0xfc00) return true;                     // fc00::/7 unique local
   if ((g[0] & 0xffc0) === 0xfe80) return true;                     // fe80::/10 link-local
   if ((g[0] & 0xff00) === 0xff00) return true;                     // ff00::/8 multicast
@@ -101,9 +110,12 @@ const FORBIDDEN_NAME = /(^|\.)(localhost|local|internal|home\.arpa|localdomain)$
 
 /** Hostname as produced by the URL parser: lowercase, brackets kept on IPv6 literals. */
 export function isForbiddenHostname(hostname: string): boolean {
-  const bare = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+  // A trailing root dot is the same name to the resolver ("localhost." resolves
+  // to localhost), so strip one before either check or it bypasses the list.
+  const name = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
+  const bare = name.startsWith('[') && name.endsWith(']') ? name.slice(1, -1) : name;
   if (isIP(bare)) return isForbiddenAddress(bare);
-  return FORBIDDEN_NAME.test(hostname);
+  return FORBIDDEN_NAME.test(name);
 }
 
 const defaultLookup: LookupFn = async hostname =>
@@ -120,8 +132,10 @@ export async function resolveDeliverableUrl(
     throw new Error(URL_NOT_ALLOWED);
   }
   if (opts.allowPrivateHosts) {
-    // Development only. The production guard refuses this flag on a deployed
-    // instance; here it means "talk to a local test server over http".
+    // Test-only escape hatch, meaning "talk to a local test server over http".
+    // It is a function argument with no environment mapping, so nothing in a
+    // deployed instance can turn it on, and both production call sites (the
+    // webhook adapter and the registration flow) omit it.
     return { url: u, addresses: [] };
   }
   if (u.protocol !== 'https:') throw new Error(URL_NOT_ALLOWED);
@@ -146,10 +160,12 @@ export async function resolveDeliverableUrl(
  * not the address).
  */
 export function pinnedDispatcher(addresses: Array<{ address: string; family: 4 | 6 }>): Dispatcher {
-  const first = addresses[0];
-  return new Agent({
-    connect: {
-      lookup: (_hostname, _opts, cb) => { cb(null, first.address, first.family); },
-    },
-  });
+  // The callback MUST use the array form. Node enables autoSelectFamily by
+  // default, so net/tls call a custom lookup with { all: true } and reject the
+  // three-argument (address, family) form with "Invalid IP address: undefined".
+  // Both forms satisfy LookupFunction's union-typed callback, so only a test
+  // that really dispatches catches this.
+  const vetted: LookupAddress[] = addresses.map(a => ({ address: a.address, family: a.family }));
+  const lookup: LookupFunction = (_hostname, _opts, cb) => { cb(null, vetted); };
+  return new Agent({ connect: { lookup } });
 }

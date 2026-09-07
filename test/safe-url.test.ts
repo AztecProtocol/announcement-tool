@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createServer, type Server } from 'node:http';
 import {
   isForbiddenAddress, isForbiddenHostname, resolveDeliverableUrl, pinnedDispatcher, URL_NOT_ALLOWED,
 } from '../src/core/safe-url.js';
@@ -15,6 +16,7 @@ describe('isForbiddenAddress', () => {
     '224.0.0.1', '239.255.255.255', '240.0.0.1', '255.255.255.255',
     '::', '::1', 'fc00::1', 'fdff::1', 'fe80::1', 'febf::1', 'ff02::1',
     '::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:10.0.0.1', '::ffff:a9fe:a9fe', '64:ff9b::7f00:1',
+    '::127.0.0.1', 'fec0::1', '2002:7f00:1::', '64:ff9b:1::1',
   ];
   const allowed = ['203.0.113.10', '8.8.8.8', '100.63.255.255', '100.128.0.0', '172.32.0.1', '2606:4700::1111', '::ffff:8.8.8.8'];
   for (const ip of forbidden) it(`forbids ${ip}`, () => expect(isForbiddenAddress(ip)).toBe(true));
@@ -22,7 +24,7 @@ describe('isForbiddenAddress', () => {
 });
 
 describe('isForbiddenHostname', () => {
-  for (const h of ['localhost', 'LOCALHOST', 'foo.localhost', 'db.local', 'metadata.google.internal', 'x.internal', 'host.home.arpa', '127.0.0.1', '[::1]', '[fd00::1]', '100.100.100.100']) {
+  for (const h of ['localhost', 'LOCALHOST', 'localhost.', 'metadata.google.internal.', 'foo.localhost', 'db.local', 'metadata.google.internal', 'x.internal', 'host.home.arpa', '127.0.0.1', '[::1]', '[fd00::1]', '100.100.100.100']) {
     it(`forbids ${h}`, () => expect(isForbiddenHostname(h)).toBe(true));
   }
   for (const h of ['example.com', 'hooks.example.org', '203.0.113.10', '[2606:4700::1111]']) {
@@ -69,5 +71,27 @@ describe('pinnedDispatcher', () => {
     const d = pinnedDispatcher([{ address: '203.0.113.10', family: 4 }]);
     expect(typeof (d as { dispatch?: unknown }).dispatch).toBe('function');
     await d.close();
+  });
+
+  // The type system does not catch a wrong callback shape here: LookupFunction's
+  // callback takes `string | LookupAddress[]`, so the three-argument form compiles
+  // and then fails every real request. Only dispatching for real proves the pin.
+  it('actually dispatches to the pinned address for a name that does not resolve', async () => {
+    let seen: string | undefined;
+    const server: Server = createServer((req, res) => { seen = req.url; res.writeHead(200); res.end('ok'); });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as { port: number };
+    const d = pinnedDispatcher([{ address: '127.0.0.1', family: 4 }]);
+    try {
+      const res = await fetch(`http://a-name-that-does-not-resolve.invalid:${port}/pinned`, {
+        dispatcher: d,
+      } as RequestInit & { dispatcher?: unknown });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('ok');
+      expect(seen).toBe('/pinned');
+    } finally {
+      await d.close();
+      await new Promise<void>(r => server.close(() => r()));
+    }
   });
 });
