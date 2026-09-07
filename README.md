@@ -170,10 +170,12 @@ Posts to the Telegram Bot API `sendMessage` endpoint, as plain text, not Markdow
 ```sql
 insert into channel_settings (key, channel, config) values
   ('telegram:testnet-updates', 'telegram', '{
-     "networks": ["testnet"], "types": ["upgrade","incident","info"],
+     "networks": ["testnet"], "types": ["upgrade","governance","info"],
      "chat_id": "-1001234567890"
    }');
 ```
+
+The `types` list accepts `upgrade`, `governance` and `info`, the values in `src/core/types.ts`.
 
 - `chat_id` (required) — the numeric Telegram chat/channel id (channels are typically negative, prefixed `-100`).
 - **Env vars:** `TELEGRAM_BOT_TOKEN` (required) — the bot token from BotFather. The bot must already be an admin/poster in the target chat.
@@ -195,7 +197,7 @@ Sends via a `signal-cli-rest-api` sidecar (`bbernhard/signal-cli-rest-api`, see 
 ```sql
 insert into channel_settings (key, channel, config) values
   ('signal:mainnet-ops', 'signal', '{
-     "networks": ["mainnet"], "types": ["upgrade","incident"],
+     "networks": ["mainnet"], "types": ["upgrade","governance"],
      "group_id": "group.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX="
    }');
 ```
