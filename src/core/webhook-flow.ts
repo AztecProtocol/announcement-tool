@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres';
 import { createSubscription, updateSubscriptionFilters, verifySubscription, type Subscription, type SubscriptionFilters } from './subscriptions.js';
-import { assertDeliverableUrl, signPayload } from '../adapters/webhook.js';
+import { signPayload } from '../adapters/webhook.js';
+import { resolveDeliverableUrl, pinnedDispatcher, URL_NOT_ALLOWED, type LookupFn } from './safe-url.js';
 import { publicBaseUrl } from './public-base-url.js';
 
 const NOT_AUTHORIZED = 'not authorized or not registered';
@@ -26,16 +27,22 @@ export async function registerWebhook(
   input: {
     url: string; filters?: Partial<SubscriptionFilters>; secret?: string;
     fetchImpl?: typeof fetch; allowPrivateHosts?: boolean; timeoutMs?: number; baseUrl?: string;
+    lookup?: LookupFn;
     // Injectable in place of the real createSubscription — used by tests to
     // simulate the concurrent-insert race (create the row, then throw 23505)
     // without fighting ESM module mocking.
     createSubscriptionImpl?: typeof createSubscription;
   },
 ): Promise<{ secretOnce?: string; unsubscribeUrl?: string; verified: boolean; error?: string }> {
+  // The destination is resolved and vetted BEFORE the row is created, so a
+  // refused URL never reaches the database and never reaches the network.
+  let addresses: Array<{ address: string; family: 4 | 6 }>;
   try {
-    assertDeliverableUrl(input.url, input.allowPrivateHosts);
-  } catch (err) {
-    return { verified: false, error: String(err instanceof Error ? err.message : err) };
+    ({ addresses } = await resolveDeliverableUrl(input.url, {
+      lookup: input.lookup, allowPrivateHosts: input.allowPrivateHosts,
+    }));
+  } catch {
+    return { verified: false, error: URL_NOT_ALLOWED };
   }
 
   const topLevelFilterErr = emptyFilterError(input.filters);
@@ -92,6 +99,7 @@ export async function registerWebhook(
     message: 'Aztec announcements webhook verification. Respond 2xx to activate this endpoint.',
   });
   const ts = String(Math.floor(Date.now() / 1000));
+  const dispatcher = addresses.length ? pinnedDispatcher(addresses) : undefined;
   try {
     const res = await doFetch(input.url, {
       method: 'POST',
@@ -104,10 +112,15 @@ export async function registerWebhook(
       body,
       redirect: 'error',
       signal: AbortSignal.timeout(input.timeoutMs ?? 10_000),
-    });
+      // Node's fetch honours `dispatcher` at runtime; the DOM RequestInit
+      // type it is declared with does not carry the field.
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit & { dispatcher?: unknown });
     if (!res.ok) return { secretOnce, unsubscribeUrl, verified: false, error: `endpoint answered HTTP ${res.status}` };
   } catch (err) {
     return { secretOnce, unsubscribeUrl, verified: false, error: String(err instanceof Error ? err.message : err).slice(0, 200) };
+  } finally {
+    await dispatcher?.close();
   }
   await verifySubscription(sql, subId);
   return { secretOnce, unsubscribeUrl, verified: true };

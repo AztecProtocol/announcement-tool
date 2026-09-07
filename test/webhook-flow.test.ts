@@ -21,6 +21,8 @@ function listen(handler: Parameters<typeof createServer>[1]): Promise<{ server: 
   });
 }
 
+const publicLookup = async () => [{ address: '203.0.113.10', family: 4 as const }];
+
 describe('registerWebhook', () => {
   it('creates the sub, sends a verifiable signed test event, marks verified on 2xx', async () => {
     let seen: { body: string; headers: Record<string, string | string[] | undefined> } | undefined;
@@ -73,7 +75,10 @@ describe('registerWebhook', () => {
   it('rejects a non-https public url without touching the database', async () => {
     const res = await registerWebhook(sql, { url: 'http://example.com/hook' });
     expect(res.verified).toBe(false);
-    expect(res.error).toMatch(/https/);
+    // Refusals answer with one opaque constant. The old message named the
+    // scheme and the host, which let an anonymous caller probe the network.
+    expect(res.error).toBe('webhook url not allowed');
+    expect(res.error).not.toMatch(/example\.com/);
     const [{ c }] = await sql`select count(*)::int as c from subscriptions`;
     expect(c).toBe(0);
   });
@@ -153,7 +158,23 @@ describe('registerWebhook', () => {
   });
 
   it('an unregistered url with a wrong secret answers identically — no existence oracle', async () => {
-    const a = await registerWebhook(sql, { url: 'https://never-registered.example.com/h', secret: 'whsec_wrong' });
+    const a = await registerWebhook(sql, {
+      url: 'https://never-registered.example.com/h', secret: 'whsec_wrong', lookup: publicLookup,
+    });
     expect(a.error).toBe('not authorized or not registered');
+  });
+
+  it('refuses a public name that resolves to a private address, without contacting it', async () => {
+    let called = false;
+    const fetchImpl: typeof fetch = async () => { called = true; return new Response('', { status: 200 }); };
+    const res = await registerWebhook(sql, {
+      url: 'https://rebind.attacker.example/h',
+      lookup: async () => [{ address: '10.0.0.5', family: 4 }],
+      fetchImpl,
+    });
+    expect(res).toEqual({ verified: false, error: 'webhook url not allowed' });
+    expect(called).toBe(false);
+    const rows = await sql`select id from subscriptions where endpoint = 'https://rebind.attacker.example/h'`;
+    expect(rows.length).toBe(0);
   });
 });

@@ -63,6 +63,8 @@ npm run worker
 
 ## Webhook Payload Format
 
+**Destination policy.** Before any request, the tool resolves the endpoint's hostname and refuses it if any address is loopback, link-local, private (RFC 1918), carrier-grade NAT (`100.64.0.0/10`, the tailnet range), multicast, reserved, or an IPv6 unique-local or link-local address, including IPv4-mapped and NAT64 forms. Names ending in `localhost`, `.local`, `.internal`, `.home.arpa` are refused without resolving. The connection is then pinned to the resolved address, so a DNS answer that changes between check and connect has no effect. Redirects are refused. Only `https:` is accepted. Every refusal returns the same message to the caller.
+
 Webhook subscribers receive a POST with this JSON body:
 
 ```json
