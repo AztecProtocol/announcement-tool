@@ -84,6 +84,21 @@
       # rather than trying to match several different trailing message
       # shapes.
       #
+      # The regex anchors on the three space-separated fields of
+      # log_line_prefix=%m [%p] %h  (date, time, zone), then the pid in
+      # brackets, then the host, instead of a leading `^.*`. Postgres
+      # echoes the client-supplied username verbatim into the FATAL
+      # message, so a client can connect with a username like
+      # `a [999] 198.51.100.77 FATAL: `. A greedy `^.*` re-anchors
+      # inside that forged text and reports 198.51.100.77 as the
+      # offending host, banning an address the attacker chose instead
+      # of their own. Anchoring on the fixed prefix shape (fixed field
+      # count, not fixed field content) closes that off: `<HOST>` can
+      # only bind to the fourth field, right after the real `[pid]`.
+      # See files/failregex-check.py for a runnable check that proves
+      # this against a benign line, a forged-username line, and a
+      # Unix-socket line.
+      #
       # Note: a connection over the Unix socket (used by tools running
       # on this host, e.g. `docker compose exec db psql`) logs `[local]`
       # in the %h position instead of an IP. fail2ban's <HOST> only binds
@@ -93,7 +108,7 @@
       # behaviour, since a Unix-socket connection did not come over the
       # network and cannot be IP-banned.
       [Definition]
-      failregex = ^.*\[\d+\]\s+<HOST>\s+FATAL:\s
+      failregex = ^\S+ \S+ \S+ \[\d+\] <HOST> FATAL:\s
       ignoreregex =
 
 - name: Install the postgres jail
