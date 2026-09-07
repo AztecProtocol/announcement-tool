@@ -62,9 +62,17 @@ export interface Identity { email: string; name?: string; source: 'auth0' | 'tai
  * is a gate that will be forgotten.
  */
 export function resolveIdentity(headers: Headers, opts: { devEmail?: string } = {}): Identity | undefined {
+  // One normalisation boundary for every identity source: isPublisher and the
+  // four-eyes checks already compare case-insensitively, but resolving to a
+  // consistently-cased identity here means every caller of resolveIdentity
+  // (17 call sites) sees the same value for "this person" regardless of which
+  // source produced it, rather than depending on each downstream comparison
+  // to remember to normalise. emailFromClaims already lowercases the Auth0
+  // claim before it reaches this header, so this is defence in depth there,
+  // and the only normalisation for the Tailscale and dev-fallback sources.
   const auth0Email = headers.get(AUTH0_IDENTITY_HEADER);
   if (auth0Email) {
-    const trimmed = auth0Email.trim();
+    const trimmed = auth0Email.trim().toLowerCase();
     if (trimmed) return { email: trimmed, source: 'auth0' };
   }
 
@@ -73,11 +81,11 @@ export function resolveIdentity(headers: Headers, opts: { devEmail?: string } = 
     const tsUser = headers.get('Tailscale-User-Login');
     if (tsUser) {
       const name = headers.get('Tailscale-User-Name') ?? undefined;
-      return { email: tsUser, ...(name ? { name } : {}), source: 'tailscale' };
+      return { email: tsUser.trim().toLowerCase(), ...(name ? { name } : {}), source: 'tailscale' };
     }
   }
   const dev = opts.devEmail ?? process.env.ADMIN_EMAIL;
-  return dev ? { email: dev, source: 'dev' } : undefined;
+  return dev ? { email: dev.trim().toLowerCase(), source: 'dev' } : undefined;
 }
 
 export async function listPublishers(sql: Sql): Promise<string[]> {

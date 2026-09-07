@@ -304,7 +304,7 @@ export async function withdrawPublish(sql: Sql, id: string, actor: string): Prom
     if (a.status !== 'publish_requested') {
       throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
     }
-    if (a.publishRequestedBy !== actor) {
+    if (a.publishRequestedBy?.toLowerCase() !== actor.toLowerCase()) {
       throw new Error('only the publisher who requested this can withdraw it');
     }
     const [row] = await tx`update announcements
@@ -334,7 +334,7 @@ export async function rejectPublish(
     if (a.status !== 'publish_requested') {
       throw new Error(`announcement is not awaiting confirmation (status ${a.status})`);
     }
-    if (a.publishRequestedBy === actor) {
+    if (a.publishRequestedBy?.toLowerCase() === actor.toLowerCase()) {
       throw new Error('you requested this publication — withdraw it instead of rejecting it');
     }
     const [row] = await tx`update announcements
