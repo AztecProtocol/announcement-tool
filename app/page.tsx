@@ -34,7 +34,7 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
         <div className="notice"><p>Enter a valid email address.</p></div>
       )}
       {error === 'rate' && (
-        <div className="notice"><p>Too many requests, please try again shortly.</p></div>
+        <div className="notice"><p>Too many requests. Try again in an hour.</p></div>
       )}
 
       <div className="card">

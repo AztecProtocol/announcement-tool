@@ -604,11 +604,15 @@ relying on them:
   rebuild of a real Hetzner volume, to observe directly. The development
   sandbox had no systemd and no real boot sequence.
 - **`fail2ban-client status <jail>` on a live jail.** The regex was
-  proven correct against real captured Postgres log lines from a real
-  container: six real failed logins, all six correctly matched and
-  IP-extracted. But `fail2ban` itself could not be installed in the
-  development sandbox (no root or apt access), so the jail has never
-  actually banned a real repeated-failure source IP end to end.
+  re-verified with `infra/ansible/roles/fail2ban/files/failregex-check.py`
+  against a benign line, a line with a hostile username, and a
+  Unix-socket line. The earlier six-login test used only benign
+  usernames and could not have caught the log-injection case where a
+  client-supplied username forges a fake `[pid] <IP> FATAL:` sequence
+  to make fail2ban ban an address the attacker chose. But `fail2ban`
+  itself could not be installed in the development sandbox (no root or
+  apt access), so the jail has never actually banned a real
+  repeated-failure source IP end to end.
 - **A full, non-syntax-check `ansible-playbook` run against a live
   host.** Only `--syntax-check` and `ansible-lint` (clean at the
   `production` profile) were run. There was no real inventory host to
@@ -642,5 +646,6 @@ against a seeded certificate, including its ambiguous-multi-issuer
 refusal, incomplete-pair detection, and rejected-SIGHUP detection (a
 deliberately mismatched key, confirmed via `openssl s_client` that
 Postgres kept serving the old certificate while the naive checks would
-have reported success); and the fail2ban filter regex against real
-captured Postgres auth-failure log lines.
+have reported success); and the fail2ban filter regex against a benign
+line, a hostile-username line, and a Unix-socket line, with
+`failregex-check.py`.

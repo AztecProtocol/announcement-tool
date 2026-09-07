@@ -33,6 +33,14 @@ describe('publish flow', () => {
     expect(done.status).toBe('published');
   });
 
+  // Email identity is case-insensitive: one person cannot satisfy four-eyes
+  // alone by requesting under one casing and confirming under another.
+  it('critical: confirming under a different casing of the requester is still rejected', async () => {
+    const a = await createDraft(sql, critical, 'alice@example.com');
+    await requestPublish(sql, a.id, 'alice@example.com');
+    await expect(confirmPublish(sql, a.id, 'Alice@Example.com')).rejects.toThrow(FourEyesError);
+  });
+
   it('non-critical publishes immediately on request', async () => {
     const a = await createDraft(sql, { ...critical, severity: 'info', type: 'info', links: [] }, 'alice@x');
     const done = await requestPublish(sql, a.id, 'alice@x');

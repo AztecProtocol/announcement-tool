@@ -12,6 +12,14 @@ describe('emailFromClaims', () => {
       .toBe('publisher@example.com');
   });
 
+  // Publisher identity is compared case-insensitively everywhere downstream
+  // (four-eyes, the allowlist). Normalising here, once, means every caller
+  // gets a lowercase identity for free instead of having to remember to do it.
+  it('lowercases the email', () => {
+    expect(emailFromClaims({ email: ' Alice@Example.COM ', email_verified: true }))
+      .toBe('alice@example.com');
+  });
+
   // The four-eyes rule compares the confirmer's email to the requester's. An
   // unverified address means someone could register an address they do not own
   // and become a valid second approver.

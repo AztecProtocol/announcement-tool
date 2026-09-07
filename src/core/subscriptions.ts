@@ -2,6 +2,11 @@ import type { Sql } from 'postgres';
 import type { AnnouncementType, Severity, Network, Audience } from './types.js';
 import { newSubscriptionId, newSecret, newToken } from './ids.js';
 
+// Confirmation links (verify_token) are valid for this many hours after
+// issuance, and only once — see verifySubscription and
+// getSubscriptionByVerifyToken below.
+export const VERIFY_TOKEN_TTL_HOURS = 72;
+
 export interface SubscriptionFilters {
   networks: Network[]; types: AnnouncementType[]; severities: Severity[]; audiences: Audience[];
 }
@@ -43,9 +48,9 @@ export async function createSubscription(
   const unsubscribeToken = newToken();
   const verifyToken = newToken();
   const [row] = await sql`insert into subscriptions
-    (id, channel, endpoint, secret, filter_networks, filter_types, filter_severities, filter_audiences, unsubscribe_token, verify_token)
+    (id, channel, endpoint, secret, filter_networks, filter_types, filter_severities, filter_audiences, unsubscribe_token, verify_token, verify_token_issued_at)
     values (${id}, ${input.channel}, ${input.endpoint}, ${secret},
-            ${f.networks}, ${f.types}, ${f.severities}, ${f.audiences}, ${unsubscribeToken}, ${verifyToken})
+            ${f.networks}, ${f.types}, ${f.severities}, ${f.audiences}, ${unsubscribeToken}, ${verifyToken}, now())
     returning *`;
   return rowToSub(row);
 }
@@ -67,7 +72,7 @@ export async function updateSubscriptionFilters(
 }
 
 export async function verifySubscription(sql: Sql, id: string): Promise<void> {
-  await sql`update subscriptions set verified = true where id = ${id}`;
+  await sql`update subscriptions set verified = true, verify_token = null, verify_token_issued_at = null where id = ${id}`;
 }
 
 export async function getSubscription(sql: Sql, id: string): Promise<Subscription | undefined> {
@@ -76,7 +81,9 @@ export async function getSubscription(sql: Sql, id: string): Promise<Subscriptio
 }
 
 export async function getSubscriptionByVerifyToken(sql: Sql, token: string): Promise<Subscription | undefined> {
-  const rows = await sql`select * from subscriptions where verify_token = ${token}`;
+  const rows = await sql`select * from subscriptions
+    where verify_token = ${token}
+    and verify_token_issued_at > now() - (${VERIFY_TOKEN_TTL_HOURS} || ' hours')::interval`;
   return rows[0] ? rowToSub(rows[0]) : undefined;
 }
 

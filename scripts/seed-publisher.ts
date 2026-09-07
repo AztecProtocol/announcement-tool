@@ -8,7 +8,10 @@ import { loadEnv } from '../src/env.js';
 loadEnv();
 import { connect, dbEnvFromProcessEnv } from '../src/db/connect.js';
 
-const email = process.argv[2];
+// Lowercase before insert: the publishers table only accepts lowercase rows
+// (see migrations/015_publishers_lowercase.sql), and every comparison against
+// it is case-insensitive, so storing anything else would just be misleading.
+const email = process.argv[2]?.trim().toLowerCase();
 
 if (!email) {
   console.error('\nUsage: npm run seed:publisher -- you@example.com\n');

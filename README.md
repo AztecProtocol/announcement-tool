@@ -63,6 +63,8 @@ npm run worker
 
 ## Webhook Payload Format
 
+**Destination policy.** Before any request, the tool resolves the endpoint's hostname and refuses it if any address is loopback, link-local, private (RFC 1918), carrier-grade NAT (`100.64.0.0/10`, the tailnet range), multicast, reserved, or an IPv6 unique-local or link-local address, including IPv4-mapped and NAT64 forms. Names ending in `localhost`, `.local`, `.internal`, `.home.arpa` are refused without resolving. The connection is then pinned to the resolved address, so a DNS answer that changes between check and connect has no effect. Redirects are refused. Only `https:` is accepted. Every refusal returns the same message to the caller.
+
 Webhook subscribers receive a POST with this JSON body:
 
 ```json
@@ -272,9 +274,20 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 | `/manage/<token>` | Update email subscription filters. |
 | `/docs/webhooks` | Webhook consumer docs — payload shape, headers, signature verification, retries. |
 
+**Rate limits:** Both public write paths are throttled per fixed clock hour: 3 email subscribe attempts per address, 10 per caller IP, and 5 webhook registrations per caller IP. Counters are rows in the `rate_limits` table, not process memory, because serverless instances share nothing across cold starts. A refused email attempt returns to the subscribe page with one generic message that does not say which limit was hit; a refused webhook registration says so in the form result. Netlify's own rate limiting cannot cover these paths — Server Actions POST to the page's own URL, so no path rule can separate them from ordinary page loads; see the comment block in `netlify.toml`.
+
 **Run it:** `npm run web` for dev (Next dev server); `npm run web:build && npm run web:start` for a production build.
 
-**Behavior notes:** Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
+**Security headers:** every response carries `Content-Security-Policy`,
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`,
+`Strict-Transport-Security`, and a restrictive `Permissions-Policy` (set in
+`next.config.mjs`). The CSP covers framing, plugins, `base-uri`, and
+`form-action` only. It does not set `script-src` or `style-src`: Next
+injects inline scripts and styles at render time, and restricting those
+needs a nonce strategy, which is a follow-up, not part of this change.
+
+**Behavior notes:** Email addresses are stored lowercase, so the same address in any casing is one subscription rather than two. Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. The confirmation link is valid for 72 hours and works once; after that, the subscriber submits the form again to receive a new link. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
 
 ## Admin
 
