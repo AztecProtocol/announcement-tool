@@ -36,7 +36,20 @@ export function makeTelegramAdapter(
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (!res.ok) throw new Error(`telegram delivery failed: HTTP ${res.status}`);
+      if (!res.ok) {
+        // Telegram explains a refusal in the body (`description`); the status
+        // alone ("HTTP 400") tells an operator nothing about chat ids or bot
+        // rights. Read it best-effort: a non-JSON body must not mask the
+        // original failure with a parse error.
+        let reason = '';
+        try {
+          const body = await res.json() as { description?: string };
+          reason = typeof body.description === 'string' ? body.description : '';
+        } catch {
+          reason = '';
+        }
+        throw new Error(`telegram delivery failed: HTTP ${res.status}${reason ? ` — ${reason}` : ''}`);
+      }
       const json = await res.json() as { ok?: boolean; description?: string };
       if (json.ok !== true) throw new Error(`telegram delivery failed: ${json.description ?? 'ok:false'}`);
     },
