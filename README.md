@@ -278,6 +278,15 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 
 **Run it:** `npm run web` for dev (Next dev server); `npm run web:build && npm run web:start` for a production build.
 
+**Security headers:** every response carries `Content-Security-Policy`,
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`,
+`Strict-Transport-Security`, and a restrictive `Permissions-Policy` (set in
+`next.config.mjs`). The CSP covers framing, plugins, `base-uri`, and
+`form-action` only. It does not set `script-src` or `style-src`: Next
+injects inline scripts and styles at render time, and restricting those
+needs a nonce strategy, which is a follow-up, not part of this change.
+
 **Behavior notes:** Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. The confirmation link is valid for 72 hours and works once; after that, the subscriber submits the form again to receive a new link. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
 
 ## Admin
