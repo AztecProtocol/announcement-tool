@@ -196,7 +196,7 @@ describe('previewAnnouncement', () => {
     expect(preview.email!.html).toContain('author-chosen-slug');
   });
 
-  it('omits the discord prefix in the preview when no role is selected', async () => {
+  it('carries the discord prefix alone, with no mention, when no role is selected', async () => {
     const prefix = 'Announcement:';
     const roles = [{ name: 'Mainnet', id: '111' }];
     await sql`insert into channel_settings (key, channel, config) values
@@ -206,7 +206,7 @@ describe('previewAnnouncement', () => {
 
     const res = await previewAnnouncement(sql, { ...input, mentionRoleIds: [] });
     const entry = res.discord?.[0];
-    expect(entry?.prefix).toBeUndefined();
+    expect(entry?.prefix).toBe(prefix);
     expect(entry?.content).not.toContain('<@&');
   });
 

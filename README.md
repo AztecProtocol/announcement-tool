@@ -388,7 +388,7 @@ The compose form's role checkboxes decide, per announcement, which roles a Disco
 
 **Caution before selecting `@everyone` or `@here`:** Discord's everyone permission has no id-list form. Selecting either one also re-enables any literal `@everyone` or `@here` that ends up in the message body. This happens even though the body warning above told you not to put one there. Selecting only named roles does not have this effect: a stray literal mention in the body still cannot ping. The review page shows a banner above the preview tabs naming every role the post will notify. A confirming publisher sees the mention set without opening the Discord tab. Before publishing, read the raw Discord preview and confirm the mentions shown are the ones you intend.
 
-With that in mind, the author can check or uncheck any of the roles before requesting or publishing. Selecting none sends the post with no mention line at all. Every other channel is unaffected regardless of what is selected here.
+With that in mind, the author can check or uncheck any of the roles before requesting or publishing. Selecting none omits the mentions, but the emoji preamble, if configured, is still sent. Every other channel is unaffected regardless of what is selected here.
 
 A destination configured before named roles existed — one with only a `prefix` and no `roles` — keeps posting its prefix unchanged. It has no roles to select, and the prefix carries no mention, as above.
 

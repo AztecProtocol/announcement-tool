@@ -40,18 +40,38 @@ describe('composeMentionLine', () => {
     expect(composeMentionLine(both, [A.id])).toBe(`🇦🇿🇹🇪🇨 <@&${A.id}>`);
   });
 
-  it('returns undefined when nothing is selected', () => {
+  it('returns undefined when nothing is selected and there is no prefix', () => {
     expect(composeMentionLine(withRoles, [])).toBeUndefined();
     expect(composeMentionLine(withRoles, undefined)).toBeUndefined();
   });
 
+  it('returns the prefix alone when nothing is selected', () => {
+    expect(composeMentionLine(prefixOnly, [])).toBe(prefixOnly.prefix);
+  });
+
   it('does not mention from a bare prefix without a selection', () => {
     // Deliberate change: mentions come only from an explicit selection now.
-    expect(composeMentionLine(prefixOnly, undefined)).toBeUndefined();
+    // The prefix itself still goes out, unaccompanied by any mention.
+    expect(composeMentionLine(prefixOnly, undefined)).toBe(prefixOnly.prefix);
+  });
+
+  it('returns the prefix alone when roles are configured but none is selected', () => {
+    expect(composeMentionLine(both, [])).toBe(both.prefix);
+    expect(composeMentionLine(both, [])).not.toContain('<@&');
   });
 
   it('ignores an id the destination does not offer', () => {
     expect(composeMentionLine(withRoles, ['not-a-configured-id'])).toBeUndefined();
+  });
+
+  it('ignores an id the destination does not offer, but still sends the prefix', () => {
+    expect(composeMentionLine(both, ['not-a-configured-id'])).toBe(both.prefix);
+  });
+
+  it('strips a pasted role mention from the prefix even without a selection', () => {
+    const cfg = { prefix: '<@&999999999999999999> 🇦🇿' } as Record<string, unknown>;
+    expect(composeMentionLine(cfg, undefined)).toBe('🇦🇿');
+    expect(composeMentionLine(cfg, undefined)).not.toContain('<@&');
   });
 
   it('renders @everyone as a literal, not a role id', () => {
@@ -119,6 +139,11 @@ describe('mentionedRoleIds', () => {
 
   it('reports nothing when the selection is undefined', () => {
     expect(mentionedRoleIds(withRoles, undefined)).toEqual([]);
+  });
+
+  it('reports nothing when a prefix is sent but no role is selected', () => {
+    expect(mentionedRoleIds(both, [])).toEqual([]);
+    expect(mentionedRoleIds(both, undefined)).toEqual([]);
   });
 });
 

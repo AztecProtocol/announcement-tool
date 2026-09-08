@@ -9,7 +9,9 @@ import type { DiscordRole } from './types.js';
  * mitigation for sending allowed_mentions with mentions enabled.
  *
  * Mentions come only from an explicit selection. A destination's `prefix` is
- * the emoji preamble and never mentions on its own.
+ * the emoji preamble and never mentions on its own. The line carries the
+ * preamble always, whether or not a role is selected; the mentions are
+ * appended when there is a selection.
  */
 
 const ROLE_MENTION = (id: string) => `<@&${id}>`;
@@ -112,25 +114,24 @@ export function parseDiscordRoles(config: Record<string, unknown>): DiscordRole[
 export function composeMentionLine(
   cfg: Record<string, unknown>, selectedIds: string[] | undefined,
 ): string | undefined {
-  if (!selectedIds || selectedIds.length === 0) return undefined;
-
   const prefix = stripRoleMentions((cfg.prefix as string | undefined) ?? '');
 
   // Built-ins first, then configured roles in config order — not selection
   // order — so the line reads the same however the author clicked.
+  const ids = selectedIds ?? [];
   const builtins = BUILTIN_ROLES
-    .filter(r => selectedIds.includes(r.id))
+    .filter(r => ids.includes(r.id))
     .map(r => `@${r.name}`);
   const roles = parseDiscordRoles(cfg)
-    .filter(r => selectedIds.includes(r.id))
+    .filter(r => ids.includes(r.id))
     .map(r => ROLE_MENTION(r.id));
-
-  if (builtins.length === 0 && roles.length === 0) return undefined;
 
   // The prefix (the emoji preamble) leads, then the mentions. Discord renders
   // a mention as a coloured pill, so putting the emoji first keeps the branding
   // at the start of the line where a reader's eye lands.
-  return [...(prefix ? [prefix] : []), ...builtins, ...roles].join(' ').trim() || undefined;
+  const parts = [...(prefix ? [prefix] : []), ...builtins, ...roles];
+  const line = parts.join(' ').trim();
+  return line || undefined;
 }
 
 /** The snowflake role ids the composed line mentions. Excludes built-ins. */
