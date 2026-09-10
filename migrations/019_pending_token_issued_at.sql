@@ -6,5 +6,10 @@
 --
 -- No grant needed: announce_app already holds select/insert/update/delete on
 -- subscriptions (migrations/014_app_role.sql).
+-- Backfill uses now(), not created_at like migration 016. pending_token is
+-- minted on an update to an existing row, so no column records when it was
+-- issued. Using created_at would retroactively expire every live
+-- filter-change link at deploy time. Cost: a stale, unconsumed link gets one
+-- fresh 72-hour window at deploy.
 alter table subscriptions add column pending_token_issued_at timestamptz;
 update subscriptions set pending_token_issued_at = now() where pending_token is not null;
