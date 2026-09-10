@@ -336,10 +336,14 @@ reviewer can see what was asked and what the answer turned out to be.
 5. **The `vm` deployment shape end to end.** The Tailscale-header identity path is live code and a
    `DEPLOY_TARGET` change away from being the trust boundary. It should get the same treatment as the
    Netlify path, or be deleted if it is not going to be used.
-   → **Latent, not live.** `infra/docker-compose.split.yml` defines no app service and the VM has no Node
-   runtime, so the shape is not deployed anywhere. The `DEPLOY_TARGET` gate is an exact-match allowlist, and
-   `middleware.ts` strips both identity headers unconditionally before anything else. **Open recommendation:
-   delete the branch and keep the strips.** This is the one lead where the reviewers' judgement is wanted.
+   → **Latent, not live, and kept deliberately.** `infra/docker-compose.split.yml` defines no app service and
+   the VM has no Node runtime, so the shape is not deployed anywhere. The `DEPLOY_TARGET` gate is an
+   exact-match allowlist, and `middleware.ts` strips both identity headers unconditionally before anything
+   else, so the branch is unreachable in production. It is retained as the non-Netlify deployment option
+   (`npm run worker` is the same shape's fan-out process). **Out of scope for review:** the properties it
+   would satisfy are P4 and P5, and a reviewer can skip them. If the shape is ever deployed, its identity
+   path needs a decision of its own — a forgeable header is sound only behind `tailscale serve` on a
+   loopback-bound port, which is not something the code can enforce.
 6. **Webhook consumer guidance** (`/docs/webhooks`): does it tell consumers to compare signatures in constant
    time and enforce a timestamp window? A correct signer with a naive verifier is still forgeable.
    → **Confirmed gap, and fixed.** The page modelled `signature !== expected` and never mentioned the signed
@@ -355,11 +359,17 @@ reviewer can see what was asked and what the answer turned out to be.
    startup line that logs the database root certificate carries only public CA material, and the Ansible role
    deliberately never templates the VM's `.env`.
 
-**Still open, and worth a reviewer's time:** the `vm` shape decision in lead 5, and the Content-Security-Policy.
-The CSP carries no `script-src` and includes `'unsafe-inline'`, so it constrains framing, plugins, base URI and
-form targets, and **is not an XSS control today**. That is a deliberate scoping choice — Next injects inline
-scripts, so a nonce strategy is its own piece of work — but it is unscheduled, and the property should not be
-read as stronger than it is.
+**Still open, and worth a reviewer's time:** the Content-Security-Policy. It carries no `script-src` and
+includes `'unsafe-inline'`, so it constrains framing, plugins, base URI and form targets, and **is not an XSS
+control today**. That is a deliberate scoping choice — Next injects inline scripts, so a nonce strategy is its
+own piece of work — but it is unscheduled, and the property should not be read as stronger than it is. The
+system renders publisher-authored Markdown into a public archive, so whether that is an acceptable posture is
+a judgement worth taking from outside this repo.
+
+**Also never tested end to end:** the forged-header refusal on the live Netlify deployment. `README.md` has
+flagged it since before launch — sending `/admin` a request with the internal identity header hand-set, and
+confirming it is refused, needs a live Auth0 tenant and has only ever been exercised in unit tests. It is a
+short check for anyone with access, and it is the single most valuable thing an outside reviewer could run.
 
 ## 7. How to use this
 
