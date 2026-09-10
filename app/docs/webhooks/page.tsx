@@ -81,7 +81,7 @@ if (a.length !== b.length || !timingSafeEqual(a, b)) {
 }`}</pre>
       <p>Use a constant-time comparison for the signature. A character-by-character comparison stops at the first difference it finds. The time it takes can tell an attacker how much of the signature is correct.</p>
       <p><code>timingSafeEqual</code> throws an error when the two buffers have different lengths. Check the length first, before you call it.</p>
-      <p>The tool signs the timestamp together with the body, so nobody can change it in transit. Your endpoint must still reject a delivery with an old timestamp. Without this check, a captured delivery stays valid forever. A window of five minutes is common. This check is different from <code>event_id</code> deduplication: deduplication stops a repeat of a delivery you already processed, and the timestamp window stops an old delivery from being replayed at you later.</p>
+      <p>The tool signs the timestamp together with the body, so nobody can change it in transit. Your endpoint must still reject a delivery with an old timestamp. Without this check, a captured delivery stays valid forever. A window of five minutes is common. The tool signs each retry with a new timestamp. A five-minute window does not reject a retry. This check is different from <code>event_id</code> deduplication. Deduplication stops a repeat of a delivery you already processed. The timestamp window stops an old delivery being replayed at you later.</p>
 
       <h2>Retries</h2>
       <p>The tool makes up to 5 delivery attempts for each event. After a failed attempt, the tool waits 2, 5, 10, 20 and then 30 minutes before the next attempt. After the fifth failed attempt, the tool marks the delivery as <code>exhausted</code> and stops.</p>
