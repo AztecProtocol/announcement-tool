@@ -142,6 +142,52 @@ describe('publishDueScheduled', () => {
     expect((await getLatest(sql, a.id))!.status).toBe('published');
   });
 
+  // A critical announcement is exactly the kind four-eyes exists to protect, so
+  // the two publishers who approved it must survive the worker's send.
+  it('keeps both publishers on a scheduled critical announcement', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'critical' }), 'alice@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'alice@example.com');
+    await confirmSchedule(sql, a.id, 'bob@example.com');
+    await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+
+    await publishDueScheduled(sql);
+
+    const published = (await getLatest(sql, a.id))!;
+    expect(published.status).toBe('published');
+    expect(published.publishRequestedBy).toBe('alice@example.com');
+    expect(published.publishConfirmedBy).toBe('bob@example.com');
+  });
+
+  // No second human approved a non-critical announcement, so naming the machine
+  // is accurate rather than a loss of information.
+  it('records the machine on a scheduled non-critical announcement', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'recommended' }), 'author@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'author@example.com');
+    await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+
+    await publishDueScheduled(sql);
+
+    const published = (await getLatest(sql, a.id))!;
+    expect(published.status).toBe('published');
+    expect(published.publishConfirmedBy).toBe('scheduler');
+  });
+
+  // The send was performed by a machine. That part of the record is correct.
+  it('still names the machine as the actor of the send in the audit log', async () => {
+    const a = await createDraft(sql, draftInput({ severity: 'critical' }), 'alice@example.com');
+    await schedulePublish(sql, a.id, FUTURE, 'alice@example.com');
+    await confirmSchedule(sql, a.id, 'bob@example.com');
+    await sql`update announcements set scheduled_for = now() - interval '1 minute' where id = ${a.id}`;
+
+    await publishDueScheduled(sql);
+
+    const [row] = await sql`select * from audit_log
+      where target = ${a.id} and action = 'scheduled_publish_sent'`;
+    expect(row.actor).toBe('scheduler');
+    expect(row.detail.requestedBy).toBe('alice@example.com');
+    expect(row.detail.confirmedBy).toBe('bob@example.com');
+  });
+
   it('leaves an announcement that is not due yet', async () => {
     const a = await createDraft(sql, draftInput({ severity: 'info' }), 'author@example.com');
     await schedulePublish(sql, a.id, FUTURE, 'author@example.com');

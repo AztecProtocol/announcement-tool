@@ -51,7 +51,10 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
       <div className="notice">
         <p>
           Published {announcement.publishedAt ? formatDeadline(announcement.publishedAt) : ''}
-          {announcement.publishConfirmedBy ? ` by ${announcement.publishConfirmedBy}` : ''}.
+          {announcement.publishRequestedBy && announcement.publishConfirmedBy
+            && announcement.publishRequestedBy !== announcement.publishConfirmedBy
+            ? ` — requested by ${announcement.publishRequestedBy}, approved by ${announcement.publishConfirmedBy}`
+            : announcement.publishConfirmedBy ? ` by ${announcement.publishConfirmedBy}` : ''}.
         </p>
       </div>
     );

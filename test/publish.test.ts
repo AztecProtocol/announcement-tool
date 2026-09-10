@@ -31,6 +31,9 @@ describe('publish flow', () => {
     await expect(confirmPublish(sql, a.id, 'alice@x')).rejects.toThrow(FourEyesError);
     const done = await confirmPublish(sql, a.id, 'bob@x');
     expect(done.status).toBe('published');
+    // The immediate path records the confirming human, not a machine.
+    expect(done.publishRequestedBy).toBe('alice@x');
+    expect(done.publishConfirmedBy).toBe('bob@x');
   });
 
   // Email identity is case-insensitive: one person cannot satisfy four-eyes

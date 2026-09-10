@@ -113,9 +113,21 @@ export class FourEyesError extends Error {
   constructor() { super('critical announcements require confirmation by a different publisher'); }
 }
 
-async function performPublish(tx: TransactionSql, a: Announcement, confirmer: string): Promise<Announcement> {
+async function performPublish(
+  tx: TransactionSql, a: Announcement, confirmer: string,
+  opts: { preserveConfirmer?: boolean } = {},
+): Promise<Announcement> {
+  // preserveConfirmer: the scheduled path. A machine performs the send, but a
+  // human approved it, and those are different facts. Overwriting the column
+  // with 'scheduler' destroyed the second publisher's name on exactly the
+  // announcements four-eyes exists to protect, leaving the admin page reading
+  // "Published by scheduler". The audit_log actor stays 'scheduler' — that
+  // row records the send, not the approval. The ?? fallback covers a
+  // non-critical scheduled announcement, which reaches 'scheduled' with no
+  // confirmer at all (see schedulePublish), so naming the machine is right.
+  const confirmedBy = opts.preserveConfirmer ? (a.publishConfirmedBy ?? confirmer) : confirmer;
   const [row] = await tx`update announcements
-    set status = 'published', published_at = now(), publish_confirmed_by = ${confirmer}
+    set status = 'published', published_at = now(), publish_confirmed_by = ${confirmedBy}
     where id = ${a.id} and revision = ${a.revision} returning *`;
   const published = rowToAnnouncement(row);
   await enqueueDeliveries(tx, published, 'publish');
@@ -136,9 +148,11 @@ async function performPublish(tx: TransactionSql, a: Announcement, confirmer: st
  * is never touched — the worker cannot approve anything, it can only carry out
  * what two people already approved.
  *
- * The actor is 'scheduler' because no person performed this send. Note that
- * performPublish overwrites publish_confirmed_by with that literal, so the
- * audit detail below carries the humans who actually approved it.
+ * The audit actor is 'scheduler' because no person performed this send. The
+ * approval is a separate fact from the send, so performPublish is called with
+ * preserveConfirmer: publish_confirmed_by keeps the publisher who approved the
+ * schedule, and only a non-critical announcement — which reaches 'scheduled'
+ * with no confirmer at all — records the machine there.
  *
  * No `distinct on (id)` here, unlike listDrafts/listAwaitingConfirmation in
  * queries.ts: reviseDraft refuses any status but 'draft', and every other
@@ -163,7 +177,7 @@ export async function publishDueScheduled(sql: Sql, batch = 20): Promise<Announc
     const sent: Announcement[] = [];
     for (const row of due) {
       const a = rowToAnnouncement(row);
-      const published = await performPublish(tx, a, 'scheduler');
+      const published = await performPublish(tx, a, 'scheduler', { preserveConfirmer: true });
       await tx`insert into audit_log (actor, action, target, detail)
         values ('scheduler', 'scheduled_publish_sent', ${a.id},
                 ${tx.json({
