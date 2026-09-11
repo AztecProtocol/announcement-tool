@@ -1,15 +1,5 @@
 # aztec-announce (announcement-tool) — security properties spec
 
-**Status:** draft, for review. Written from the code at `AztecProtocol/announcement-tool@9ce7f32` (`main`).
-**Purpose:** give a security reviewer a checkable list of the properties this system is supposed to hold,
-so a review can be an attempt to break named invariants rather than an unguided read.
-
-There is **no spec in the repo today.** `README.md`, `infra/README.md` and `infra/DEPLOY.md` document the
-deployment shape and some of the reasoning, and several source files carry unusually good "this is the
-trust boundary" comments (`middleware.ts` above all), but nothing states the properties as properties.
-This document is a first draft of that; it should end up in the repo (e.g. `docs/SECURITY-PROPERTIES.md`)
-so it is reviewed alongside the code.
-
 **What has already been reviewed.** A threat-modelled security review ran on 2026-09-07 against the code
 and the infrastructure. It produced 0 Critical, 3 High, 4 Medium, 6 Low and 5 Informational findings. Every
 High and Medium finding is fixed and merged: webhook SSRF (the destination blocklist matched hostname text
@@ -36,8 +26,8 @@ Telegram and Signal subscribers, plus public Atom/JSON feeds and an archive page
 
 Deployed shape (`DEPLOY_TARGET=netlify`): app + worker on Netlify; a Hetzner VM runs only Postgres, the
 Signal sidecar and Caddy. A second supported shape (`DEPLOY_TARGET=vm`) puts the app on a VM behind
-Tailscale and takes identity from `Tailscale-User-*` headers. **Both shapes are in the code, so both are in
-scope for review** — the properties below say which shape they depend on.
+Tailscale and takes identity from `Tailscale-User-*` headers. **Only `DEPLOY_TARGET=netlify` is in
+scope for review**. The second shape was designed originally, then retired but stayed in the code in case a decision taken to move the entire deployment to a VM instead of Netlify.
 
 ## 2. Assets, in the order an attacker would want them
 
@@ -66,7 +56,7 @@ compromised (that assumption is what four-eyes exists for).
 | **Network attacker between app and DB / Signal sidecar** | Goal: read or alter DB traffic (TLS + pinned CA is the control). |
 | **Mail-path attacker** | Controls a mail client or an intermediary that prefetches links. Goal: unsubscribe others, or hijack a confirmation link. |
 
-Out of scope for this draft (state explicitly if that is wrong): a compromised Auth0 tenant, a malicious
+Out of scope for this draft: a compromised Auth0 tenant, a malicious
 Netlify or Hetzner, and a compromised publisher *pair* acting in collusion.
 
 ## 4. Trust boundaries
@@ -306,11 +296,6 @@ not documentary. A destructive default protected by a README line is one CI misc
 
 ## 6. Open items for the deeper review
 
-These were **leads, not findings** — properties stated above that the first draft did not verify to a
-reportable standard. All eight were verified against `main` on 2026-09-10, and the three actionable ones
-were fixed. The verdicts below replace the original open questions; the leads are kept in place so a
-reviewer can see what was asked and what the answer turned out to be.
-
 1. **`pending_token` (preference-change link) has no expiry and no `issued_at` column** — `migrations/006`
    adds only `pending_filters` and `pending_token`, and `confirmFilterChange` matches on the token alone.
    `verify_token` got a 72-hour TTL in `migrations/016`; this sibling token did not. It is single-use (nulled
@@ -333,28 +318,17 @@ reviewer can see what was asked and what the answer turned out to be.
    → **Held.** Every reference to the four actor fields resolves to `app/admin/*` or the mutation layer. The
    feeds emit no author element, and the webhook payload uses an explicit field allowlist rather than a row
    spread. No change needed.
-5. **The `vm` deployment shape end to end.** The Tailscale-header identity path is live code and a
-   `DEPLOY_TARGET` change away from being the trust boundary. It should get the same treatment as the
-   Netlify path, or be deleted if it is not going to be used.
-   → **Latent, not live, and kept deliberately.** `infra/docker-compose.split.yml` defines no app service and
-   the VM has no Node runtime, so the shape is not deployed anywhere. The `DEPLOY_TARGET` gate is an
-   exact-match allowlist, and `middleware.ts` strips both identity headers unconditionally before anything
-   else, so the branch is unreachable in production. It is retained as the non-Netlify deployment option
-   (`npm run worker` is the same shape's fan-out process). **Out of scope for review:** the properties it
-   would satisfy are P4 and P5, and a reviewer can skip them. If the shape is ever deployed, its identity
-   path needs a decision of its own — a forgeable header is sound only behind `tailscale serve` on a
-   loopback-bound port, which is not something the code can enforce.
-6. **Webhook consumer guidance** (`/docs/webhooks`): does it tell consumers to compare signatures in constant
+5. **Webhook consumer guidance** (`/docs/webhooks`): does it tell consumers to compare signatures in constant
    time and enforce a timestamp window? A correct signer with a naive verifier is still forgeable.
    → **Confirmed gap, and fixed.** The page modelled `signature !== expected` and never mentioned the signed
    `x-announce-timestamp` header, so a consumer following it exactly had a timing side channel and accepted a
    replay indefinitely. The sample now uses a length check followed by `timingSafeEqual`, and enforces a
    timestamp window. The page also states that the tool re-signs every retry, so a five-minute window does not
    reject the tool's own backoff.
-7. **Slow-body / connection-holding behaviour** of the 10 s webhook timeout (P26).
+6. **Slow-body / connection-holding behaviour** of the 10 s webhook timeout (P26).
    → **Held.** `AbortSignal.timeout` stays attached to the response body under Node 22 and tears the socket
    down even when the body is never read, verified by direct probe. The adapter reads only `res.ok`.
-8. **Secret-in-log sweep** (P37) — mechanical, not yet done.
+7. **Secret-in-log sweep** (P37) — mechanical, not yet done.
    → **Done, clean.** No secret reaches any `console.*` call or any thrown Error on a reachable path. The
    startup line that logs the database root certificate carries only public CA material, and the Ansible role
    deliberately never templates the VM's `.env`.
@@ -370,12 +344,3 @@ a judgement worth taking from outside this repo.
 flagged it since before launch — sending `/admin` a request with the internal identity header hand-set, and
 confirming it is refused, needs a live Auth0 tenant and has only ever been exercised in unit tests. It is a
 short check for anyone with access, and it is the single most valuable thing an outside reviewer could run.
-
-## 7. How to use this
-
-For a review: take the properties in §5.1, §5.2 and §5.4 first — they hold A1 and A6 — and for each, try to
-construct the change or the request that breaks it. The "breaks if" clauses are deliberately written as the
-next plausible refactor, because that is how these properties actually die.
-
-For the repo: land this as `docs/SECURITY-PROPERTIES.md`, and treat "does this PR touch a numbered property?"
-as a review checklist item. Where a property has no test named against it, that is the gap to close first.
