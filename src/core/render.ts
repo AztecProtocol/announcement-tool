@@ -49,7 +49,20 @@ function linkLines(a: Announcement): string[] {
   return a.links.map(l => `${l.label}: ${l.url}`);
 }
 
-const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/**
+ * Escape for HTML text content AND for a double- or single-quoted attribute
+ * value. The quotes are not optional: this output is inserted into href
+ * attributes (mdInlineHtml, renderTelegramHtml, renderEmail), and an
+ * unescaped quote there closes the attribute and lets author-supplied text
+ * become an event handler. &#39; rather than &apos; because &apos; is not in
+ * the HTML 4 entity set and some mail clients render it literally.
+ */
+const escapeHtml = (s: string) => s
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 /**
  * A markdown heading line: 2-3 leading hashes, then a space, at line start.
@@ -97,11 +110,57 @@ export function headingToBold(md: string): string {
  * an unmatched ** or backtick stays literal, so emitted tags always balance
  * (Telegram would reject a malformed entity; email clients render it wrong).
  */
+/**
+ * A URL that is safe to place in an href. Deliberately stricter than the
+ * markdown pattern: http(s) only, and no character that could terminate the
+ * attribute or the tag. The markdown pattern already excludes whitespace and
+ * ")", and escapeHtml has already neutralised <, > and the quotes — this is
+ * the belt to that braces, so a future change to either does not silently
+ * reopen the hole.
+ */
+const SAFE_URL_RE = /^https?:\/\/[^"'<>\s]+$/;
+
+/**
+ * Undo escapeHtml, so SAFE_URL_RE judges the URL the author actually wrote.
+ * Without this the check is a no-op on the one input it exists for: by the
+ * time the link pattern runs, a hostile `"` is already `&quot;`, which
+ * contains no character SAFE_URL_RE rejects. &amp; is unescaped last so
+ * "&amp;quot;" decodes to the literal "&quot;" and not to a quote.
+ */
+const unescapeHtml = (s: string) => s
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'")
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&amp;/g, '&');
+
 export function mdInlineHtml(md: string): string {
   return escapeHtml(md)
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
+    // Two layers, both deliberate. escapeHtml has already run, so a quote the
+    // author wrote is now &quot; and cannot close the attribute — that alone
+    // makes the output safe. The re-validation on top rejects the link
+    // outright rather than emitting an href full of escaped handler text, and
+    // it is what stops javascript: and data: should a later edit loosen the
+    // pattern above. It runs on the decoded URL, because the escaped form
+    // hides the very characters it looks for. A URL that fails is left as
+    // literal markdown text.
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (whole, label: string, url: string) =>
+      SAFE_URL_RE.test(unescapeHtml(url)) ? `<a href="${url}">${label}</a>` : whole);
+}
+
+/**
+ * One entry of the links list as an anchor, for the Telegram and email
+ * renderers. Both values are escaped, so neither can close the attribute; the
+ * URL is additionally held to SAFE_URL_RE, and a link that fails it degrades
+ * to "label: url" as plain escaped text rather than becoming an href. Same two
+ * layers, and same reason, as the markdown link replacement above.
+ */
+function linkAnchor(l: { label: string; url: string }): string {
+  const label = escapeHtml(l.label);
+  if (!SAFE_URL_RE.test(l.url)) return `${label}: ${escapeHtml(l.url)}`;
+  return `<a href="${escapeHtml(l.url)}">${label}</a>`;
 }
 
 /** Body → Telegram HTML: headings to bold lines, everything else inline-converted. */
@@ -146,6 +205,8 @@ export function renderPlain(a: Announcement, kind: DeliveryKind): string {
  * Telegram rendering uses HTML parse mode: unlike MarkdownV2 (18 characters to
  * escape, one miss rejects the message), HTML needs only &, <, > escaped —
  * which escapeHtml does completely — and gives real bold and clickable links.
+ * escapeHtml also escapes the quotes, which Telegram does not require but the
+ * href attributes below do; Telegram decodes &quot; and &#39; normally.
  */
 export function renderTelegramHtml(a: Announcement, kind: DeliveryKind): string {
   return [
@@ -155,7 +216,7 @@ export function renderTelegramHtml(a: Announcement, kind: DeliveryKind): string 
     '',
     telegramBodyHtml(a.bodyMd),
     ...(a.actionsRequired.length ? ['', ...actionLines(a, '- ').map(escapeHtml)] : []),
-    ...(a.links.length ? ['', ...a.links.map(l => `<a href="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>`)] : []),
+    ...(a.links.length ? ['', ...a.links.map(linkAnchor)] : []),
     '',
     canonicalUrl(a),
   ].join('\n');
@@ -188,7 +249,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
       + `</ul>`
     : '';
   const links = a.links.length
-    ? `<p style="margin:0 0 12px">${a.links.map(l => `<a href="${escapeHtml(l.url)}">${escapeHtml(l.label)}</a>`).join(' · ')}</p>`
+    ? `<p style="margin:0 0 12px">${a.links.map(linkAnchor).join(' · ')}</p>`
     : '';
   // Inline styles + fixed light colors on purpose: email clients ignore <style>
   // blocks unpredictably and handle dark mode themselves.

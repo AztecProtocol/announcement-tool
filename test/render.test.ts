@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml, formatDeadline, headingToBold } from '../src/core/render.js';
+import { canonicalUrl, tagLine, kindPrefix, renderPlain, renderMarkdown, renderEmail, renderTelegramHtml, stripMarkdown, renderBodyHtml, formatDeadline, headingToBold, mdInlineHtml } from '../src/core/render.js';
 import type { Announcement } from '../src/core/types.js';
 
 const baseAnnouncement: Announcement = {
@@ -113,6 +113,80 @@ describe('renderBodyHtml', () => {
   it('renders markdown paragraphs with escaped entities', () => {
     const html = renderBodyHtml('One **bold**.\n\nTwo < three.');
     expect(html).toBe('<p style="margin:0 0 12px">One <b>bold</b>.</p>\n<p style="margin:0 0 12px">Two &lt; three.</p>');
+  });
+});
+
+/**
+ * Author-supplied text reaches an href attribute in mdInlineHtml,
+ * renderTelegramHtml and renderEmail. A quote that survives escaping closes
+ * that attribute and turns the rest of the value into an event handler, which
+ * the Content-Security-Policy ('unsafe-inline', no script-src) would run.
+ */
+describe('attribute injection', () => {
+  const BREAKOUT = '[x](https://e.com/"onfocus="alert(document.domain)"autofocus=")';
+  const SINGLE = "[x](https://e.com/'onclick='alert(1))";
+  const LABEL = '[a" onmouseover="alert(1)](https://e.com/)';
+
+  const hostile: Announcement = {
+    ...baseAnnouncement,
+    bodyMd: BREAKOUT,
+    actionsRequired: [],
+    links: [{ label: 'x", onmouseover="alert(1)', url: 'https://e.com/" onfocus="alert(1)' }],
+  };
+
+  /**
+   * The property that matters is that no emitted TAG carries an event-handler
+   * attribute. Asserting merely that the substring "onfocus" is absent would
+   * be wrong in both directions: it fails on a payload that is correctly
+   * neutralised into visible literal text, and it would pass on an attribute
+   * spelled with an entity. So parse the tags and inspect them.
+   */
+  const handlerAttrs = (html: string): string[] =>
+    (html.match(/<[a-zA-Z][^>]*>/g) ?? []).filter(t => /\son[a-z]+\s*=/i.test(t));
+
+  it('a quote in the URL cannot close the href attribute', () => {
+    const out = mdInlineHtml(BREAKOUT);
+    expect(handlerAttrs(out)).toEqual([]);
+    expect((out.match(/<a /g) ?? []).length).toBeLessThanOrEqual(1);
+    // the raw quote is gone, so nothing can terminate an attribute value
+    expect(out).not.toContain('"onfocus');
+  });
+
+  it('a single quote in the URL cannot open an attribute', () => {
+    const out = mdInlineHtml(SINGLE);
+    expect(handlerAttrs(out)).toEqual([]);
+    expect(out).not.toContain("'onclick");
+  });
+
+  it('a quote in the label cannot inject an attribute', () => {
+    const out = mdInlineHtml(LABEL);
+    expect(handlerAttrs(out)).toEqual([]);
+    // the label stays visible text: its quote is an entity, so it is inside
+    // the element, not inside the opening tag
+    expect(out).toContain('a&quot; onmouseover=&quot;alert(1)</a>');
+    expect(out).not.toContain('" onmouseover="');
+  });
+
+  it('renderBodyHtml carries the same protection', () => {
+    expect(handlerAttrs(renderBodyHtml(BREAKOUT))).toEqual([]);
+  });
+
+  it('renderTelegramHtml escapes quotes in the body and in the link list', () => {
+    expect(handlerAttrs(renderTelegramHtml(hostile, 'publish'))).toEqual([]);
+  });
+
+  it('renderEmail escapes quotes in the body and in the link list', () => {
+    expect(handlerAttrs(renderEmail(hostile, 'publish').html)).toEqual([]);
+  });
+
+  it('a hostile url degrades to literal text rather than an anchor', () => {
+    expect(mdInlineHtml(BREAKOUT)).not.toContain('<a ');
+    expect(renderTelegramHtml(hostile, 'publish')).not.toContain('href="https://e.com/');
+  });
+
+  it('leaves a legitimate link byte-identical', () => {
+    expect(mdInlineHtml('[link](https://example.com/x)'))
+      .toBe('<a href="https://example.com/x">link</a>');
   });
 });
 

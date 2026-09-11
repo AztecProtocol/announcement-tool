@@ -21,6 +21,20 @@ describe('feeds', () => {
     expect(items[0].date_published).toBe('2026-08-06T10:00:00.000Z');
   });
 
+  it('carries no event-handler attribute from a hostile body', () => {
+    const hostile = {
+      ...ann,
+      bodyMd: '[x](https://e.com/"onfocus="alert(document.domain)"autofocus=")',
+    };
+    const feed = buildJsonFeed([hostile]) as Record<string, unknown>;
+    const items = feed.items as Array<Record<string, unknown>>;
+    const html = items[0].content_html as string;
+    const tags = (html.match(/<[a-zA-Z][^>]*>/g) ?? []).filter(t => /\son[a-z]+\s*=/i.test(t));
+    expect(tags).toEqual([]);
+    expect(html).not.toContain('"onfocus');
+    expect(buildAtomFeed([hostile])).not.toContain('"onfocus');
+  });
+
   it('builds Atom with XML-escaped titles and content', () => {
     const xml = buildAtomFeed([ann]);
     expect(xml).toContain('<feed xmlns="http://www.w3.org/2005/Atom">');
