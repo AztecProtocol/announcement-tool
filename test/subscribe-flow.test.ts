@@ -213,14 +213,65 @@ describe('email double-opt-in', () => {
 
     const token = sent[1].text.match(/\/confirm-change\/([0-9a-f]{32})/)![1];
     expect(await confirmFilterChange(sql, token)).toBe(true);
-    const [after] = await sql`select filter_severities, pending_filters, pending_token from subscriptions where endpoint = 'cc@example.com'`;
+    const [after] = await sql`select filter_severities, pending_filters, pending_token, pending_token_issued_at from subscriptions where endpoint = 'cc@example.com'`;
     expect(after.filter_severities).toEqual(['info']);
     expect(after.pending_filters).toBeNull();
     expect(after.pending_token).toBeNull(); // single-use
+    expect(after.pending_token_issued_at).toBeNull();
   });
 
   it('confirmFilterChange rejects an unknown token', async () => {
     expect(await confirmFilterChange(sql, 'a'.repeat(32))).toBe(false);
+  });
+
+  it('a pending-change token older than 72 hours is refused; 71 hours is accepted', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'change-expiring@example.com' });
+    await confirmSubscription(sql, sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1]);
+
+    await startEmailSubscription(sql, sender, {
+      email: 'change-expiring@example.com', filters: { severities: ['info'] },
+    });
+    const token = sent[1].text.match(/\/confirm-change\/([0-9a-f]{32})/)![1];
+
+    await sql`update subscriptions set pending_token_issued_at = now() - interval '73 hours' where endpoint = 'change-expiring@example.com'`;
+    expect(await confirmFilterChange(sql, token)).toBe(false);
+    const [row] = await sql`select filter_severities from subscriptions where endpoint = 'change-expiring@example.com'`;
+    expect(row.filter_severities).toEqual(['critical', 'recommended', 'info']); // unchanged
+
+    await startEmailSubscription(sql, sender, { email: 'change-expiring2@example.com' });
+    await confirmSubscription(sql, sent[2].text.match(/\/confirm\/([0-9a-f]{32})/)![1]);
+    await startEmailSubscription(sql, sender, {
+      email: 'change-expiring2@example.com', filters: { severities: ['info'] },
+    });
+    const token2 = sent[3].text.match(/\/confirm-change\/([0-9a-f]{32})/)![1];
+    await sql`update subscriptions set pending_token_issued_at = now() - interval '71 hours' where endpoint = 'change-expiring2@example.com'`;
+    expect(await confirmFilterChange(sql, token2)).toBe(true);
+  });
+
+  it('requesting a new filter change issues a fresh token and a fresh pending_token_issued_at', async () => {
+    const { sender, sent } = recorder();
+    await startEmailSubscription(sql, sender, { email: 'change-refresh@example.com' });
+    await confirmSubscription(sql, sent[0].text.match(/\/confirm\/([0-9a-f]{32})/)![1]);
+
+    await startEmailSubscription(sql, sender, {
+      email: 'change-refresh@example.com', filters: { severities: ['info'] },
+    });
+    const firstToken = sent[1].text.match(/\/confirm-change\/([0-9a-f]{32})/)![1];
+    const [before] = await sql`select pending_token, pending_token_issued_at from subscriptions where endpoint = 'change-refresh@example.com'`;
+
+    await sql`update subscriptions set pending_token_issued_at = now() - interval '1 hour' where endpoint = 'change-refresh@example.com'`;
+
+    await startEmailSubscription(sql, sender, {
+      email: 'change-refresh@example.com', filters: { severities: ['critical'] },
+    });
+    const secondToken = sent[2].text.match(/\/confirm-change\/([0-9a-f]{32})/)![1];
+    const [after] = await sql`select pending_token, pending_token_issued_at from subscriptions where endpoint = 'change-refresh@example.com'`;
+
+    expect(secondToken).not.toBe(firstToken);
+    expect(after.pending_token).toBe(secondToken);
+    expect(before.pending_token).not.toBe(after.pending_token);
+    expect(new Date(after.pending_token_issued_at).getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 });
 

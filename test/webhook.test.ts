@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { createHmac } from 'node:crypto';
 import type { Sql } from 'postgres';
@@ -95,5 +95,46 @@ describe('makeWebhookAdapter', () => {
     const adapter = makeWebhookAdapter(sql, { allowPrivateHosts: true });
     await expect(adapter.deliver(ann, sub.id, 'publish')).rejects.toThrow();
     server.close();
+  });
+
+  it('re-signs a retry with a fresh timestamp instead of reusing the first attempt\'s', async () => {
+    const seen: Array<{ body: string; ts: string; sig: string }> = [];
+    const { server, url } = await listen((req, res) => {
+      let data = '';
+      req.on('data', c => { data += c; });
+      req.on('end', () => {
+        seen.push({
+          body: data,
+          ts: req.headers['x-announce-timestamp'] as string,
+          sig: (req.headers['x-announce-signature'] as string).replace('v1=', ''),
+        });
+        res.writeHead(200);
+        res.end();
+      });
+    });
+    const sub = await createSubscription(sql, { channel: 'webhook', endpoint: url });
+    await verifySubscription(sql, sub.id);
+    const adapter = makeWebhookAdapter(sql, { allowPrivateHosts: true });
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      await adapter.deliver(ann, sub.id, 'publish');
+
+      // Simulate the gap before a backoff retry (e.g. the 10-minute step).
+      vi.setSystemTime(new Date('2026-01-01T00:10:00Z'));
+      await adapter.deliver(ann, sub.id, 'publish');
+    } finally {
+      vi.useRealTimers();
+    }
+    server.close();
+
+    expect(seen).toHaveLength(2);
+    const [first, second] = seen;
+    expect(second.ts).not.toBe(first.ts);
+    // The second attempt's signature must match its own timestamp, not the
+    // first attempt's — this fails if `ts` were hoisted out of deliver()
+    // while the signature computation still used a per-call value.
+    expect(second.sig).toBe(signPayload(sub.secret!, second.ts, second.body));
   });
 });

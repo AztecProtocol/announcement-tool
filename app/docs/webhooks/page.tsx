@@ -55,20 +55,33 @@ export default function WebhookDocsPage() {
 
       <h2>Signature verification</h2>
       <p>Compute <code>v1=hex(hmac_sha256(secret, timestamp + "." + body))</code>. Use the raw request body, before JSON parsing. Compare the result with the <code>x-announce-signature</code> header. Reject the request if they are different.</p>
-      <pre>{`import { createHmac } from 'node:crypto';
+      <pre>{`import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const secret = '...your webhook secret...';
 const timestamp = req.headers['x-announce-timestamp'];
 const signature = req.headers['x-announce-signature'];
 const body = req.rawBody; // raw request body as a string, not the parsed JSON
 
+// Reject a delivery whose timestamp is far from your own clock. The signature
+// covers the timestamp, so an attacker cannot change it, but a captured
+// delivery stays valid forever without this check.
+const age = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));
+if (!Number.isFinite(age) || age > 300) {
+  throw new Error('stale timestamp');
+}
+
 const expected = 'v1=' + createHmac('sha256', secret)
   .update(\`\${timestamp}.\${body}\`)
   .digest('hex');
 
-if (signature !== expected) {
+const a = Buffer.from(signature ?? '');
+const b = Buffer.from(expected);
+if (a.length !== b.length || !timingSafeEqual(a, b)) {
   throw new Error('invalid signature');
 }`}</pre>
+      <p>Use a constant-time comparison for the signature. A character-by-character comparison stops at the first difference it finds. The time it takes can tell an attacker how much of the signature is correct.</p>
+      <p><code>timingSafeEqual</code> throws an error when the two buffers have different lengths. Check the length first, before you call it.</p>
+      <p>The tool signs the timestamp together with the body, so nobody can change it in transit. Your endpoint must still reject a delivery with an old timestamp. Without this check, a captured delivery stays valid forever. A window of five minutes is common. The tool signs each retry with a new timestamp. A five-minute window does not reject a retry. This check is different from <code>event_id</code> deduplication. Deduplication stops a repeat of a delivery you already processed. The timestamp window stops an old delivery being replayed at you later.</p>
 
       <h2>Retries</h2>
       <p>The tool makes up to 5 delivery attempts for each event. After a failed attempt, the tool waits 2, 5, 10, 20 and then 30 minutes before the next attempt. After the fifth failed attempt, the tool marks the delivery as <code>exhausted</code> and stops.</p>

@@ -7,6 +7,11 @@ import { newSubscriptionId, newSecret, newToken } from './ids.js';
 // getSubscriptionByVerifyToken below.
 export const VERIFY_TOKEN_TTL_HOURS = 72;
 
+// Filter-change confirmation links (pending_token) carry the same lifetime
+// and single-use property as verify_token — see confirmFilterChange in
+// subscribe-flow.ts.
+export const PENDING_TOKEN_TTL_HOURS = 72;
+
 export interface SubscriptionFilters {
   networks: Network[]; types: AnnouncementType[]; severities: Severity[]; audiences: Audience[];
 }

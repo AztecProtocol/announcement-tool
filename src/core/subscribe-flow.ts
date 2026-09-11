@@ -2,6 +2,7 @@ import type { Sql } from 'postgres';
 import type { EmailSender } from '../adapters/esp.js';
 import {
   createSubscription, getSubscriptionByVerifyToken, updateSubscriptionFilters, verifySubscription,
+  PENDING_TOKEN_TTL_HOURS,
   type Subscription, type SubscriptionFilters,
 } from './subscriptions.js';
 import { newToken } from './ids.js';
@@ -69,7 +70,7 @@ async function updateExistingAndNotify(
     // secret). Require a confirm-change click before applying anything.
     if (input.filters) {
       const pendingToken = newToken();
-      await sql`update subscriptions set pending_filters = ${sql.json(input.filters)}, pending_token = ${pendingToken}
+      await sql`update subscriptions set pending_filters = ${sql.json(input.filters)}, pending_token = ${pendingToken}, pending_token_issued_at = now()
         where id = ${existing[0].id}`;
       await sendConfirmChange(sender, input.email, pendingToken, input.baseUrl);
       return 'change_pending';
@@ -144,10 +145,12 @@ export async function confirmSubscription(sql: Sql, token: string): Promise<Subs
 }
 
 export async function confirmFilterChange(sql: Sql, token: string): Promise<boolean> {
-  const rows = await sql`select id, pending_filters from subscriptions where pending_token = ${token}`;
+  const rows = await sql`select id, pending_filters from subscriptions
+    where pending_token = ${token}
+    and pending_token_issued_at > now() - (${PENDING_TOKEN_TTL_HOURS} || ' hours')::interval`;
   if (!rows[0]) return false;
   const f = rows[0].pending_filters as Partial<SubscriptionFilters>;
   await updateSubscriptionFilters(sql, rows[0].id as string, f);
-  await sql`update subscriptions set pending_filters = null, pending_token = null where id = ${rows[0].id}`;
+  await sql`update subscriptions set pending_filters = null, pending_token = null, pending_token_issued_at = null where id = ${rows[0].id}`;
   return true;
 }
