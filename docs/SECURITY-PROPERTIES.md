@@ -133,6 +133,15 @@ cannot confirm their own request, on either the immediate or the scheduled path.
 *Enforced:* `confirmPublish` and `confirmSchedule` in `src/core/announcements.ts` (`FourEyesError`).
 *Tested:* `test/publish.test.ts`, `test/scheduling.test.ts`, `test/withdraw-reject.test.ts`.
 
+*Scope, decided deliberately:* four-eyes applies to `critical` only. A `recommended` or `info` announcement
+publishes on one publisher's action (`requestPublish` in `src/core/announcements.ts` returns
+`performPublish` directly when the severity is not `critical`), and it still reaches every Discord and
+Telegram destination and every email subscriber. The line is drawn at `critical` because that severity
+mentions a Discord role, and a role ping is the irreversible act: it notifies people out of band and cannot
+be withdrawn. A non-critical announcement can be withdrawn from the archive and corrected by a follow-up.
+Reviewed and kept on 2026-09-11. This is a policy decision, not an oversight — raise it as a change of
+policy if you disagree, not as a defect.
+
 **P11 — No state transition launders a request into an approval.** `withdrawPublish`, `rejectPublish` and
 `cancelSchedule` all return the row to `draft` **and clear** `publish_requested_by` / `publish_confirmed_by`,
 so re-publishing needs a fresh request *and* a fresh second confirmation.
