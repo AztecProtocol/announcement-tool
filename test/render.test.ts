@@ -135,32 +135,58 @@ describe('attribute injection', () => {
   };
 
   /**
-   * The property that matters is that no emitted TAG carries an event-handler
-   * attribute. Asserting merely that the substring "onfocus" is absent would
-   * be wrong in both directions: it fails on a payload that is correctly
-   * neutralised into visible literal text, and it would pass on an attribute
-   * spelled with an entity. So parse the tags and inspect them.
+   * Asserting merely that the substring "onfocus" is absent would be wrong in
+   * both directions: it fails on a payload correctly neutralised into visible
+   * literal text, and it would pass on an attribute spelled with an entity.
+   * So parse the emitted tags and check the properties the renderer actually
+   * guarantees.
+   *
+   * Checking only for on*= would pin something weaker than the code provides,
+   * and would pass today purely because SAFE_URL_RE independently blocks the
+   * rest — so a later loosening of that regex would go uncaught. Hence all
+   * four: no event handler (including one separated by "/" rather than
+   * whitespace, which HTML accepts), every href is http(s), only the three
+   * tags the renderer emits from author content, and no <script> at all.
+   *
+   * `extraTags` lists tags contributed by a surrounding template (renderEmail
+   * and renderBodyHtml wrap content in p/h1/div/...), which are not
+   * author-controlled.
    */
-  const handlerAttrs = (html: string): string[] =>
-    (html.match(/<[a-zA-Z][^>]*>/g) ?? []).filter(t => /\son[a-z]+\s*=/i.test(t));
+  const violations = (html: string, extraTags: string[] = []): string[] => {
+    const allowed = new Set(['a', 'b', 'code', ...extraTags]);
+    const out: string[] = [];
+    if (/<script/i.test(html)) out.push('script tag present');
+    for (const tag of html.match(/<[a-zA-Z][^>]*>/g) ?? []) {
+      const name = /^<([a-zA-Z0-9]+)/.exec(tag)![1].toLowerCase();
+      if (!allowed.has(name)) out.push(`disallowed tag: ${tag}`);
+      // whitespace OR "/" before the attribute name: <a href="x"/onfocus="…">
+      if (/[\s/]on[a-z]+\s*=/i.test(tag)) out.push(`event handler: ${tag}`);
+      for (const [, href] of tag.matchAll(/\shref\s*=\s*"([^"]*)"/gi)) {
+        if (!/^https?:\/\//.test(href)) out.push(`non-http href: ${href}`);
+      }
+    }
+    return out;
+  };
 
   it('a quote in the URL cannot close the href attribute', () => {
     const out = mdInlineHtml(BREAKOUT);
-    expect(handlerAttrs(out)).toEqual([]);
+    expect(violations(out)).toEqual([]);
     expect((out.match(/<a /g) ?? []).length).toBeLessThanOrEqual(1);
     // the raw quote is gone, so nothing can terminate an attribute value
     expect(out).not.toContain('"onfocus');
+    expect(out).toContain('%22onfocus'); // percent-encoded, hence inert
   });
 
   it('a single quote in the URL cannot open an attribute', () => {
     const out = mdInlineHtml(SINGLE);
-    expect(handlerAttrs(out)).toEqual([]);
+    expect(violations(out)).toEqual([]);
     expect(out).not.toContain("'onclick");
+    expect(out).toContain('%27onclick');
   });
 
   it('a quote in the label cannot inject an attribute', () => {
     const out = mdInlineHtml(LABEL);
-    expect(handlerAttrs(out)).toEqual([]);
+    expect(violations(out)).toEqual([]);
     // the label stays visible text: its quote is an entity, so it is inside
     // the element, not inside the opening tag
     expect(out).toContain('a&quot; onmouseover=&quot;alert(1)</a>');
@@ -168,20 +194,53 @@ describe('attribute injection', () => {
   });
 
   it('renderBodyHtml carries the same protection', () => {
-    expect(handlerAttrs(renderBodyHtml(BREAKOUT))).toEqual([]);
+    expect(violations(renderBodyHtml(BREAKOUT), ['p', 'h2', 'h3', 'br'])).toEqual([]);
   });
 
   it('renderTelegramHtml escapes quotes in the body and in the link list', () => {
-    expect(handlerAttrs(renderTelegramHtml(hostile, 'publish'))).toEqual([]);
+    expect(violations(renderTelegramHtml(hostile, 'publish'))).toEqual([]);
   });
 
   it('renderEmail escapes quotes in the body and in the link list', () => {
-    expect(handlerAttrs(renderEmail(hostile, 'publish').html)).toEqual([]);
+    const { html } = renderEmail(hostile, 'publish');
+    // {{UNSUBSCRIBE}} is a placeholder the mail adapter substitutes, so the
+    // template's own anchors are excluded from the href check by matching
+    // only the part of the document the author controls.
+    const body = html.split('<hr')[0];
+    expect(violations(body, ['div', 'p', 'h1', 'br', 'ul', 'li', 'strong'])).toEqual([]);
   });
 
-  it('a hostile url degrades to literal text rather than an anchor', () => {
-    expect(mdInlineHtml(BREAKOUT)).not.toContain('<a ');
-    expect(renderTelegramHtml(hostile, 'publish')).not.toContain('href="https://e.com/');
+  it('an apostrophe in the url does not become an undocumented entity', () => {
+    // Telegram HTML mode documents &lt; &gt; &amp; &quot; only; &#39; must
+    // never reach it, in text or in an href.
+    const out = renderTelegramHtml({ ...baseAnnouncement, bodyMd: "Aztec's release" }, 'publish');
+    expect(out).not.toContain('&#39;');
+    expect(out).toContain("Aztec's release");
+  });
+
+  /**
+   * An apostrophe is an RFC 3986 sub-delim and is legal unencoded in a path,
+   * so these are ordinary links, not attacks. They must keep working: the fix
+   * percent-encodes the quote instead of dropping the link to plain text.
+   */
+  describe('legitimate urls containing a quote still render as links', () => {
+    const URLS: Array<[string, string]> = [
+      ["https://en.wikipedia.org/wiki/O'Brien", 'https://en.wikipedia.org/wiki/O%27Brien'],
+      ["https://en.wikipedia.org/wiki/Hell's_Kitchen", 'https://en.wikipedia.org/wiki/Hell%27s_Kitchen'],
+      ["https://www.google.com/search?q=don't", 'https://www.google.com/search?q=don%27t'],
+    ];
+
+    for (const [raw, encoded] of URLS) {
+      it(`markdown path: ${raw}`, () => {
+        expect(mdInlineHtml(`[w](${raw})`)).toBe(`<a href="${encoded}">w</a>`);
+      });
+
+      it(`links[] path: ${raw}`, () => {
+        const ann = { ...baseAnnouncement, links: [{ label: 'w', url: raw }] };
+        expect(renderTelegramHtml(ann, 'publish')).toContain(`<a href="${encoded}">w</a>`);
+        expect(renderEmail(ann, 'publish').html).toContain(`<a href="${encoded}">w</a>`);
+      });
+    }
   });
 
   it('leaves a legitimate link byte-identical', () => {
