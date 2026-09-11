@@ -229,11 +229,19 @@ timestamps outside a window.
 its own target: `&`,`<`,`>` for the Telegram/Discord/email HTML paths, no raw HTML passthrough,
 no `dangerouslySetInnerHTML` anywhere in the tree.
 *Enforced:* `src/core/render.ts` (`escapeHtml`); *tested:* `test/render.test.ts`, `test/crlf.test.ts`.
+*Refuted by an external review on 2026-09-11:* `escapeHtml` escaped `&`, `<` and `>` but not quotation marks,
+so a quote inside author-supplied content reached an attribute unescaped and could open a new attribute such
+as an inline event handler. **Fixed on this branch:** `escapeHtml` now also escapes `"`; covered by
+`test/render.test.ts`.
 
 **P29 — Link URLs in an announcement cannot become `javascript:`/`data:` in a rendered channel.**
 *Reviewer note:* `escapeHtml(l.url)` escapes the value into the attribute but does **not** restrict the
 scheme. Confirm scheme validation exists in `src/core/validate.ts` or add it — this is a named property, not
 an assertion that it holds.
+*Refuted by an external review on 2026-09-11:* the markdown link renderer re-inserted the captured URL into a
+double-quoted `href` after escaping, so a URL containing a quote could close the attribute and inject a new
+one, for example an `onfocus` handler. **Fixed on this branch:** a separate `escapeAttrUrl` percent-encodes
+`'` and `"` where a URL enters an href, independently gated by `SAFE_URL_RE`; covered by `test/render.test.ts`.
 
 **P30 — Announcement fields cannot inject headers or control bytes into email/Signal/Telegram payloads.**
 CRLF handling is covered by `test/crlf.test.ts`; recipients are never taken from author input.
@@ -332,6 +340,9 @@ not documentary. A destructive default protected by a README line is one CI misc
    → **Done, clean.** No secret reaches any `console.*` call or any thrown Error on a reachable path. The
    startup line that logs the database root certificate carries only public CA material, and the Ansible role
    deliberately never templates the VM's `.env`.
+8. **P28/P29 attribute injection** (external review, 2026-09-11) — the compensating control for an inline
+   handler reaching a rendered page would have been the CSP's `script-src`. See the CSP gap at the end of
+   this section: it carries no `script-src`, so it did not contain this and does not contain a recurrence.
 
 **Still open, and worth a reviewer's time:** the Content-Security-Policy. It carries no `script-src` and
 includes `'unsafe-inline'`, so it constrains framing, plugins, base URI and form targets, and **is not an XSS
