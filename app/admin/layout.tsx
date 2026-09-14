@@ -72,7 +72,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     );
   }
   const bootstrapping = publishers.length === 0;
-  const sourceLabel = identity.source === 'tailscale' ? 'tailnet' : 'dev';
+  const sourceLabel = { auth0: 'google', tailscale: 'tailnet', dev: 'dev' }[identity.source];
+  // Only a browser session can be ended. A tailnet or dev identity comes with
+  // every request, so a sign-out link there would do nothing.
+  const canSignOut = identity.source === 'auth0';
 
   return (
     <div>
@@ -84,6 +87,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             repeating them here is noise. */}
         <nav className="admin-identity-nav">
           <a href="/admin">Admin</a>
+          {canSignOut && <a href="/admin/logout">Sign out</a>}
         </nav>
       </div>
       {bootstrapping && (
