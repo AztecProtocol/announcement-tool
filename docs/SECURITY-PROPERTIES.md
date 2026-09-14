@@ -133,6 +133,15 @@ cannot confirm their own request, on either the immediate or the scheduled path.
 *Enforced:* `confirmPublish` and `confirmSchedule` in `src/core/announcements.ts` (`FourEyesError`).
 *Tested:* `test/publish.test.ts`, `test/scheduling.test.ts`, `test/withdraw-reject.test.ts`.
 
+*Scope, decided deliberately:* four-eyes applies to `critical` only. A `recommended` or `info` announcement
+publishes on one publisher's action (`requestPublish` in `src/core/announcements.ts` returns
+`performPublish` directly when the severity is not `critical`), and it still reaches every Discord and
+Telegram destination and every email subscriber. The line is drawn at `critical` because that severity
+mentions a Discord role, and a role ping is the irreversible act: it notifies people out of band and cannot
+be withdrawn. A non-critical announcement can be withdrawn from the archive and corrected by a follow-up.
+Reviewed and kept on 2026-09-11. This is a policy decision, not an oversight — raise it as a change of
+policy if you disagree, not as a defect.
+
 **P11 — No state transition launders a request into an approval.** `withdrawPublish`, `rejectPublish` and
 `cancelSchedule` all return the row to `draft` **and clear** `publish_requested_by` / `publish_confirmed_by`,
 so re-publishing needs a fresh request *and* a fresh second confirmation.
@@ -286,10 +295,11 @@ the audit log.
 
 **P40 — Browser hardening headers are set on every response**: CSP, `X-Frame-Options: DENY`, `nosniff`,
 `Referrer-Policy`, HSTS, `Permissions-Policy`.
-*Enforced:* `next.config.mjs`.
-*Known gap, deliberately:* the CSP has no `script-src` and carries `'unsafe-inline'`, so it currently
-constrains framing, plugins, base URI and form targets — **not script execution**. It is not an XSS mitigation
-today. A nonce strategy is the follow-up.
+*Enforced:* `next.config.mjs` for the five static headers; `middleware.ts` with `src/web/csp.ts` for the CSP,
+which carries a per-request nonce and so cannot be a static value.
+*Not yet a control:* the CSP restricts `script-src` to nonce-bearing scripts, but ships **report-only** by
+default, so the browser reports and blocks nothing. It becomes a control when `CSP_MODE=enforce` is set. See
+the end of this section.
 
 **P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd;
 fail2ban filter anchored on the log prefix so a username cannot forge a banned address, covering IPv6.
@@ -341,15 +351,25 @@ not documentary. A destructive default protected by a README line is one CI misc
    startup line that logs the database root certificate carries only public CA material, and the Ansible role
    deliberately never templates the VM's `.env`.
 8. **P28/P29 attribute injection** (external review, 2026-09-11) — the compensating control for an inline
-   handler reaching a rendered page would have been the CSP's `script-src`. See the CSP gap at the end of
-   this section: it carries no `script-src`, so it did not contain this and does not contain a recurrence.
+   handler reaching a rendered page would have been the CSP's `script-src`. See the CSP note at the end of
+   this section: the policy now carries a `script-src`, but until it is enforced it does not contain a
+   recurrence.
 
-**Still open, and worth a reviewer's time:** the Content-Security-Policy. It carries no `script-src` and
-includes `'unsafe-inline'`, so it constrains framing, plugins, base URI and form targets, and **is not an XSS
-control today**. That is a deliberate scoping choice — Next injects inline scripts, so a nonce strategy is its
-own piece of work — but it is unscheduled, and the property should not be read as stronger than it is. The
-system renders publisher-authored Markdown into a public archive, so whether that is an acceptable posture is
-a judgement worth taking from outside this repo.
+**Still open, and worth a reviewer's time:** the Content-Security-Policy. The policy now restricts scripts to
+nonce-bearing ones: `middleware.ts` generates a random nonce per request, Next stamps it onto every script it
+emits, and `script-src 'self' 'nonce-...' 'strict-dynamic'` allows only those. An injected inline handler does
+not carry the nonce.
+
+It ships **report-only**. In that mode the browser reports what it would block, to `/api/csp-report`, and
+blocks nothing, so **it is still not a control**. It becomes one when the operator sets `CSP_MODE=enforce` and
+redeploys, which is the intended step once a live click-through of the public pages and the admin surface
+reports no violation. Unsetting the variable is the rollback.
+
+*Enforcement date:* pending — the operator fills this in when `CSP_MODE=enforce` goes live.
+
+`style-src` stays `'unsafe-inline'`. The app and the publisher-authored announcement HTML both use inline
+`style` attributes, which a nonce cannot cover, and inline styles are not the script-execution vector this
+policy addresses. Tightening styles is separate work.
 
 **Also never tested end to end:** the forged-header refusal on the live Netlify deployment. `README.md` has
 flagged it since before launch — sending `/admin` a request with the internal identity header hand-set, and

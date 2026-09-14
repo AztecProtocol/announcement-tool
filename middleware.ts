@@ -55,6 +55,7 @@ import { emailFromClaims, AUTH0_IDENTITY_HEADER } from './src/core/auth0-claims.
 // the way in. Do not reintroduce a private copy here.
 import { auth0ConfigFromEnv, verifyAuth0Token } from './src/core/auth0-verify.js';
 import { SESSION_COOKIE, verifySession } from './src/core/session.js';
+import { buildCsp, cspHeaderName, generateNonce } from './src/web/csp.js';
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   // ── STEP 1 — STRIP. FIRST. UNCONDITIONAL. ─────────────────────────────────
@@ -74,7 +75,38 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // From here on, `headers` is guaranteed free of any client-supplied identity.
   // Every failure path below simply forwards it unchanged, which denies access.
-  const deny = () => NextResponse.next({ request: { headers } });
+
+  // ── STEP 1b — CSP: one nonce per request ──────────────────────────────────
+  // The nonce goes on the REQUEST headers because that is how Next learns it:
+  // Next reads the `Content-Security-Policy` request header, pulls the
+  // `'nonce-...'` value out of its script-src, and stamps that value onto every
+  // script tag it emits. It also goes on the RESPONSE, under the header name
+  // CSP_MODE selects — `Content-Security-Policy` only when CSP_MODE is exactly
+  // `enforce`, otherwise `Content-Security-Policy-Report-Only`. The REQUEST
+  // header keeps its own name in both modes; renaming it there would stop Next
+  // finding the nonce and leave every script unstamped.
+  //
+  // This runs on every matched route, admin or not, so the whole site gets the
+  // policy. It sits below the strip above and adds no branch of its own.
+  const nonce = generateNonce();
+  const csp = buildCsp(nonce);
+  headers.set('x-nonce', nonce);
+  headers.set('Content-Security-Policy', csp);
+  const respond = (): NextResponse => {
+    const response = NextResponse.next({ request: { headers } });
+    response.headers.set(cspHeaderName(process.env.CSP_MODE), csp);
+    return response;
+  };
+
+  // ── STEP 1c — everything that is not the admin surface stops here ─────────
+  // The matcher covers the whole site so the strip above runs everywhere, but
+  // identity is only ever consumed under /admin. This early return is what keeps
+  // `bearerIdentity` and `sessionIdentity` off every public request: there is no
+  // other path to them below. The comparison is exact — a prefix test alone
+  // would also match a future sibling route such as `/administrative-notes`.
+  const { pathname } = request.nextUrl;
+  const isAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
+  if (!isAdmin) return respond();
 
   // ── STEP 2 — bearer token, unchanged ──────────────────────────────────────
   // Tried first and left exactly as it has always behaved. The deployment
@@ -83,10 +115,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
   // ── STEP 4 — set the internal header on the forwarded request ─────────────
   // Only reached when one of the two sources fully succeeded. Every other route
-  // out of this function forwards the stripped headers via `deny()`.
-  if (!email) return deny();
+  // out of this function forwards the stripped headers via `respond()`.
+  if (!email) return respond();
   headers.set(AUTH0_IDENTITY_HEADER, email);
-  return NextResponse.next({ request: { headers } });
+  return respond();
 }
 
 /**
@@ -144,9 +176,14 @@ async function sessionIdentity(request: NextRequest): Promise<string | undefined
 }
 
 export const config = {
-  // Scoped to the admin surface — the only place identity is consumed. Widening
-  // this is safe; NARROWING it is not, because any /admin route left unmatched
-  // would skip the strip in step 1 and accept a client-supplied identity header.
+  // The whole site, because the CSP has to reach every page. This is a WIDENING
+  // of the former `/admin/:path*`, which is safe in the direction that matters:
+  // the strip in step 1 now runs on every request instead of only admin ones.
+  // NARROWING it is not safe, because any /admin route left unmatched would skip
+  // that strip and accept a client-supplied identity header.
+  //
+  // Identity is still confined to /admin by the exact path test in step 1c, not
+  // by this matcher.
   //
   // /admin/login, /admin/callback and /admin/logout are matched too, and that is
   // correct: they need the strip like everything else. They cannot be locked out
@@ -156,5 +193,30 @@ export const config = {
   // through to them and the login flow works while signed out. Do not add a
   // redirect-to-login here: /admin/login is under this matcher, so redirecting
   // unauthenticated requests would bounce it to itself forever.
-  matcher: ['/admin/:path*'],
+  //
+  // ⚠️ PATH EXCLUSIONS ONLY. NEVER A `missing` OR `has` CONDITION. ⚠️
+  //
+  // This middleware is the trust boundary for admin identity, so it must run on
+  // EVERY request that can reach a page. A matcher condition keyed on a request
+  // header is a client-controlled opt-out of the strip in step 1: request
+  // headers are set by whoever makes the request, and nothing proves one came
+  // from Next's own router. A `missing: [{ type: 'header', key: 'purpose',
+  // value: 'prefetch' }]` entry lived here briefly and was exactly that hole —
+  // `curl -H 'purpose: prefetch' -H '<identity header>: attacker@example.com'
+  // /admin` skipped the middleware and rendered the admin page as the forged
+  // address, collapsing four-eyes. Do not reintroduce one for any reason.
+  //
+  // Next's own nonce guide shows a `missing` block to keep prefetched documents
+  // from being cached with one request's nonce and replayed under another's
+  // policy. That concern does not apply here: every page route is dynamic
+  // (`ƒ` in the build output), so no document response is cached and replayed.
+  // Even if it did apply, a caching optimisation would not be worth a bypass of
+  // the identity strip.
+  //
+  // The remaining exclusions are by PATH, which the client cannot forge into
+  // something else: the build's own static output (`_next/static`,
+  // `_next/image`) and `favicon.ico` carry no scripts and need no policy, and
+  // `api/csp-report` is excluded so a violation report never picks up a policy
+  // header of its own and never touches the identity path.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/csp-report).*)'],
 };

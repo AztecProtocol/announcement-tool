@@ -12,7 +12,7 @@ export interface RateLimitResult {
 }
 
 /**
- * Limits for the two public, unauthenticated write paths. Both are per fixed
+ * Limits for the public, unauthenticated write paths. All are per fixed
  * clock window (not a sliding window), so a caller who exhausts a window waits
  * only until that window ends.
  *
@@ -20,11 +20,16 @@ export interface RateLimitResult {
  * address given, so an unthrottled endpoint is an email bomber pointed at a
  * third party. The per-address limit stops one victim being mailed repeatedly;
  * the per-IP limit stops one source walking through many addresses.
+ *
+ * cspReportPerIp bounds the CSP report endpoint, a log-write path with no
+ * other cost limit of its own: 60/hour is generous for a real browser
+ * (a handful of violations per page load) but caps a scripted flood.
  */
 export const RATE_LIMITS = {
   emailPerAddress: { limit: 3, windowSeconds: 3600 },
   emailPerIp: { limit: 10, windowSeconds: 3600 },
   webhookPerIp: { limit: 5, windowSeconds: 3600 },
+  cspReportPerIp: { limit: 60, windowSeconds: 3600 },
 } satisfies Record<string, RateLimitRule>;
 
 /** Rows in windows older than this are pruned opportunistically on every call. */
