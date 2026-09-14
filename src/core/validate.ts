@@ -24,7 +24,11 @@ const schema = z.object({
 
 // Exported so the compose form can mirror this check live in the UI —
 // the warning it renders must track this exact pattern, not a copy of it.
-export const GH_RELEASE = /^https:\/\/github\.com\/AztecProtocol\/[^/]+\/releases\//;
+// Defined in gh-release.ts so the compose form can import it without pulling
+// this module's zod dependency into the browser bundle; re-exported here for
+// server-side callers.
+import { GH_RELEASE } from './gh-release.js';
+export { GH_RELEASE };
 
 export function validateAnnouncement(input: AnnouncementInput): { warnings: string[] } {
   schema.parse(input);
