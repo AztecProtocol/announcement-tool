@@ -279,17 +279,24 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 
 **Run it:** `npm run web` for dev (Next dev server); `npm run web:build && npm run web:start` for a production build.
 
-**Security headers:** every response carries `Content-Security-Policy`,
-`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+**Security headers:** every response carries `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`,
-`Strict-Transport-Security`, and a restrictive `Permissions-Policy` (set in
-`next.config.mjs`, except the CSP). The CSP is built per request in
-`middleware.ts` because it carries a nonce: `script-src` now carries a
-per-request nonce with `'strict-dynamic'`, so only the scripts Next stamps with
+`Strict-Transport-Security`, and a restrictive `Permissions-Policy`. Those five
+are static and are set in `next.config.mjs`.
+
+The Content-Security-Policy is separate. It carries a per-request nonce, so it
+cannot be a static value: `middleware.ts` builds it on every request that
+reaches a page, and `src/web/csp.ts` holds the policy itself. `script-src`
+carries the nonce with `'strict-dynamic'`, so only the scripts Next stamps with
 that nonce run, and an injected one does not. `style-src` keeps
 `'unsafe-inline'` because the app and the rendered announcement HTML use inline
-`style` attributes, which a nonce cannot cover. The policy ships report-only by
-default; see `CSP_MODE` in the configuration table.
+`style` attributes, which a nonce cannot cover.
+
+By default the policy is sent as `Content-Security-Policy-Report-Only`: the
+browser reports what it would block and blocks nothing. Setting
+`CSP_MODE=enforce` switches the header name to `Content-Security-Policy`, at
+which point the browser enforces it. See `CSP_MODE` in the configuration table.
 
 **Behavior notes:** Email addresses are stored lowercase, so the same address in any casing is one subscription rather than two. Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. The confirmation link is valid for 72 hours and works once; after that, the subscriber submits the form again to receive a new link. The filter-change confirmation link is likewise valid for 72 hours and works once; after that, the subscriber submits the form again. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
 

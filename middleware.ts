@@ -194,18 +194,29 @@ export const config = {
   // redirect-to-login here: /admin/login is under this matcher, so redirecting
   // unauthenticated requests would bounce it to itself forever.
   //
-  // Exclusions: the build's own static output (`_next/static`, `_next/image`)
-  // and `favicon.ico` carry no scripts and need no policy; `api/csp-report` is
-  // excluded so a violation report never picks up a policy header of its own and
-  // never touches the identity path. The `missing` block keeps Next's own
-  // prefetch requests out, as Next's nonce guide does — a prefetched document
-  // would otherwise be cached with one request's nonce and replayed under
-  // another's policy.
-  matcher: [{
-    source: '/((?!_next/static|_next/image|favicon.ico|api/csp-report).*)',
-    missing: [
-      { type: 'header', key: 'next-router-prefetch' },
-      { type: 'header', key: 'purpose', value: 'prefetch' },
-    ],
-  }],
+  // ⚠️ PATH EXCLUSIONS ONLY. NEVER A `missing` OR `has` CONDITION. ⚠️
+  //
+  // This middleware is the trust boundary for admin identity, so it must run on
+  // EVERY request that can reach a page. A matcher condition keyed on a request
+  // header is a client-controlled opt-out of the strip in step 1: request
+  // headers are set by whoever makes the request, and nothing proves one came
+  // from Next's own router. A `missing: [{ type: 'header', key: 'purpose',
+  // value: 'prefetch' }]` entry lived here briefly and was exactly that hole —
+  // `curl -H 'purpose: prefetch' -H '<identity header>: attacker@example.com'
+  // /admin` skipped the middleware and rendered the admin page as the forged
+  // address, collapsing four-eyes. Do not reintroduce one for any reason.
+  //
+  // Next's own nonce guide shows a `missing` block to keep prefetched documents
+  // from being cached with one request's nonce and replayed under another's
+  // policy. That concern does not apply here: every page route is dynamic
+  // (`ƒ` in the build output), so no document response is cached and replayed.
+  // Even if it did apply, a caching optimisation would not be worth a bypass of
+  // the identity strip.
+  //
+  // The remaining exclusions are by PATH, which the client cannot forge into
+  // something else: the build's own static output (`_next/static`,
+  // `_next/image`) and `favicon.ico` carry no scripts and need no policy, and
+  // `api/csp-report` is excluded so a violation report never picks up a policy
+  // header of its own and never touches the identity path.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/csp-report).*)'],
 };
