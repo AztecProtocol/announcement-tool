@@ -12,7 +12,9 @@ import { dirname, join, resolve } from 'node:path';
  */
 
 const ROOT = resolve(__dirname, '..');
-const NODE_BUILTIN = /^\s*import\s[^;]*?\sfrom\s+['"](node:[a-z_]+|crypto|fs|path|vm|buffer|os|child_process|net|tls|http|https|dns|stream|util)['"]/m;
+// Node built-ins, plus packages known to evaluate strings in the browser: zod 4
+// probes Function("") at first use, which the CSP reports as unsafe-eval.
+const NODE_BUILTIN = /^\s*import\s[^;]*?\sfrom\s+['"](node:[a-z_]+|crypto|fs|path|vm|buffer|os|child_process|net|tls|http|https|dns|stream|util|zod)['"]/m;
 // `import ... from` and `export ... from` both pull the target into the bundle.
 // Dynamic import() is not handled; none exist in app/ or src/ today.
 const VALUE_IMPORT = /^\s*(?:import|export)\s+(?!type\s)[^;]*?\sfrom\s+['"](\.{1,2}\/[^'"]+)['"]/gm;

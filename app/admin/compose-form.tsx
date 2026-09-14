@@ -10,7 +10,7 @@ import { useActionState } from 'react';
 // admin client component had called useRouter until this one.
 import { useRouter } from 'next/dist/client/components/navigation.js';
 import { createDraftAction, saveRevisionAction, previewAction, saveTemplateAction } from './actions.js';
-import { GH_RELEASE } from '../../src/core/validate.js';
+import { GH_RELEASE } from '../../src/core/gh-release.js';
 import type { AnnouncementInput, AnnouncementType, Audience, DiscordRole, Network, Severity } from '../../src/core/types.js';
 import type { PreviewSet } from '../../src/core/preview.js';
 import { PreviewPane, CHANNEL_ORDER, type PreviewChannel, type PreviewMode } from './preview-pane.js';
