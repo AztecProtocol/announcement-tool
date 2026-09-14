@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeCspReport } from '../src/web/csp-report.js';
+import { shouldAcceptCspReport, summarizeCspReport } from '../src/web/csp-report.js';
+
+describe('shouldAcceptCspReport', () => {
+  it('accepts a normal report with no content-length and no throttle', () => {
+    expect(shouldAcceptCspReport({ contentLength: undefined, limited: false })).toBe(true);
+  });
+  it('accepts a report at or under the 16 KB cap', () => {
+    expect(shouldAcceptCspReport({ contentLength: 16_384, limited: false })).toBe(true);
+    expect(shouldAcceptCspReport({ contentLength: 100, limited: false })).toBe(true);
+  });
+  it('refuses a report whose declared content-length exceeds the cap', () => {
+    expect(shouldAcceptCspReport({ contentLength: 16_385, limited: false })).toBe(false);
+    expect(shouldAcceptCspReport({ contentLength: 20_000, limited: false })).toBe(false);
+  });
+  it('refuses a report once the caller is rate-limited, regardless of size', () => {
+    expect(shouldAcceptCspReport({ contentLength: undefined, limited: true })).toBe(false);
+    expect(shouldAcceptCspReport({ contentLength: 10, limited: true })).toBe(false);
+  });
+});
 
 describe('summarizeCspReport', () => {
   it('extracts the fields an operator needs from the legacy report-uri shape', () => {
