@@ -15,7 +15,7 @@ import type { AnnouncementInput, AnnouncementType, Audience, DiscordRole, Networ
 import type { PreviewSet } from '../../src/core/preview.js';
 import { PreviewPane, CHANNEL_ORDER, type PreviewChannel, type PreviewMode } from './preview-pane.js';
 import { normalizeSlug, slugError } from '../../src/core/slug.js';
-import { makeSlug } from '../../src/core/ids.js';
+import { makeSlug } from '../../src/core/slug.js';
 import { isoToUtcInput } from '../../src/core/datetime.js';
 import { parseRoles } from '../../src/core/roles.js';
 import { BUILTIN_ROLES } from '../../src/core/discord-mentions.js';
