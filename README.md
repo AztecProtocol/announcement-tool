@@ -218,6 +218,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `DATABASE_URL` | `postgres://announce:announce@127.0.0.1:5499/announce` | Postgres connection string used by the worker (or, on the Netlify shape, the `tick-background` function) and by migrations. On Netlify this must point at a reachable managed Postgres instance; there is no bundled database. It must NOT include `sslmode` or `sslrootcert` in its query string. Those bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below. Startup refuses to build a connection if either is present. |
 | `DATABASE_SSL_MODE` | *(unset)* | `verify-full` requires a verified TLS connection to Postgres. Set it whenever the database is reachable over more than a private network. Example: the Hetzner-VM split deployment, where the database port is exposed to the public internet. Unset means plaintext, for a private link such as loopback, Tailscale, or the docker-compose network. `require` is refused, because it encrypts but does not verify the server, so it does not stop an active attacker. Any other value fails startup. |
 | `DATABASE_SSL_ROOT_CERT` | *(unset)* | The CA bundle used to verify the Postgres server certificate. It can be a filesystem path, or the PEM content itself pasted inline (detected by its `-----BEGIN CERTIFICATE-----` header; see `resolveCaFile` in `src/db/connect.ts`). Inline PEM exists for deployments with no filesystem to place a CA file on, such as Netlify. Required whenever `DATABASE_SSL_MODE=verify-full`. Without an explicit CA, verification would silently fall back to the system trust store, which may not contain the issuer. So startup refuses, rather than connecting with an unverified guarantee. The app repairs a paste whose line breaks were flattened or removed, so any UI that mangles newlines when storing this value is fine. The value may also hold more than one root certificate concatenated. |
+| `CSP_MODE` | *(unset → report-only)* | `enforce` sends the Content-Security-Policy header so the browser blocks scripts that lack the per-request nonce. Any other value sends it as `Content-Security-Policy-Report-Only`: the browser reports what it would block, to `/api/csp-report`, and blocks nothing. Change the variable and redeploy to switch; unsetting it is the rollback. |
 | `PUBLIC_BASE_URL` | `https://announce.aztec.network` | Base URL used to build the email unsubscribe link (`/u/<token>`). |
 | `PUBLIC_DISCORD_URL` | *(unset)* | Invite link shown under "Broadcast channels" on the subscribe page. Unset hides the Discord entry. Must be an `https://` URL. |
 | `PUBLIC_TELEGRAM_URL` | *(unset)* | Same, for the Telegram channel. |
@@ -282,10 +283,13 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: strict-origin-when-cross-origin`,
 `Strict-Transport-Security`, and a restrictive `Permissions-Policy` (set in
-`next.config.mjs`). The CSP covers framing, plugins, `base-uri`, and
-`form-action` only. It does not set `script-src` or `style-src`: Next
-injects inline scripts and styles at render time, and restricting those
-needs a nonce strategy, which is a follow-up, not part of this change.
+`next.config.mjs`, except the CSP). The CSP is built per request in
+`middleware.ts` because it carries a nonce: `script-src` now carries a
+per-request nonce with `'strict-dynamic'`, so only the scripts Next stamps with
+that nonce run, and an injected one does not. `style-src` keeps
+`'unsafe-inline'` because the app and the rendered announcement HTML use inline
+`style` attributes, which a nonce cannot cover. The policy ships report-only by
+default; see `CSP_MODE` in the configuration table.
 
 **Behavior notes:** Email addresses are stored lowercase, so the same address in any casing is one subscription rather than two. Email subscribing is double-opt-in. A new address gets a confirmation link and receives nothing until it is clicked. The confirmation link is valid for 72 hours and works once; after that, the subscriber submits the form again to receive a new link. The filter-change confirmation link is likewise valid for 72 hours and works once; after that, the subscriber submits the form again. Re-submitting an already-confirmed address just updates its filters. Both cases redirect to the same `/subscribed` page, so the response never reveals which happened. Registering a webhook sends an immediate `kind: "test"` verification POST to the endpoint, signed the same way as real deliveries. It only activates the subscription on a 2xx response. The signing secret is shown exactly once, on the registration result, and is never displayed again.
 
