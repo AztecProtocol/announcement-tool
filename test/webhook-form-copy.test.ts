@@ -25,4 +25,13 @@ describe('webhook registration panel copy', () => {
   ])('contains %j', (s) => {
     expect(src).toContain(s);
   });
+
+  // Regression pin for the stale-state bug: without key={token}, useActionState
+  // on TestButton keeps the previous registration's pass/fail line and disabled
+  // button showing after a second registration in the same page session. See
+  // the Playwright check recorded in the final-fix-report for the end-to-end
+  // proof; this just pins the source fix so it can't silently regress.
+  it('remounts TestButton on a new registration via key={token}', () => {
+    expect(src).toContain('key={token}');
+  });
 });

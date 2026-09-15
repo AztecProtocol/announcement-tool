@@ -33,6 +33,13 @@ function emptyFilterError(f?: Partial<SubscriptionFilters>): string | undefined 
   return undefined;
 }
 
+/**
+ * Re-registration with the correct secret runs the test immediately, unlike
+ * a fresh registration, because supplying the correct secret is proof the
+ * caller already holds it — the precondition a fresh, no-secret call cannot
+ * meet (and that the form path also lacks, which is why the form gets the
+ * generic already-registered message instead of a live test send).
+ */
 export async function registerWebhook(
   sql: Sql,
   input: {
@@ -105,6 +112,13 @@ export async function registerWebhook(
       secret = row[0].secret as string;
       const filterErr = await applyFilters(sql, subId, input.filters);
       if (filterErr) return filterErr;
+      // The race loser did not create the row and was never given the
+      // secret out of band (no secretOnce, no manageUrl) — it has no more
+      // standing to trigger a signed test than a fresh, no-secret caller
+      // does. Report unverified without sending; the winner's own return
+      // (or an explicit Send test event click from whoever holds the
+      // manage link) is what runs the verification.
+      return { verified: false };
     }
   }
 

@@ -72,7 +72,11 @@ export default function WebhookForm() {
                 <li>Store the webhook page link somewhere safe. Anyone with the link can remove the webhook.</li>
                 <li>When your endpoint has the secret, click <strong>Send test event</strong> below. Your endpoint must answer with a 2xx status. The webhook becomes active only after a passed test.</li>
               </ol>
-              <TestButton token={token} />
+              {/* key={token} forces a remount on a new registration in the
+                  same page session — without it useActionState keeps the
+                  previous webhook's pass/fail line and disabled state
+                  showing under the new secret/link. */}
+              <TestButton key={token} token={token} />
             </>
           )}
         </div>

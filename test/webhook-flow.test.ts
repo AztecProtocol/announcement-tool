@@ -190,9 +190,15 @@ describe('registerWebhook', () => {
   // concurrent winner committing first) and then throws a Postgres-shaped 23505
   // error, so registerWebhook's own insert branch truly hits the catch block,
   // re-selects the row, and falls through to applyFilters — proving that exact
-  // code path never throws and never re-exposes the secret.
+  // code path never throws and never re-exposes the secret. The loser did not
+  // create the row and was never handed the secret out of band, so under the
+  // two-step contract it must not itself trigger a signed test to an endpoint
+  // that has not been given the secret — it reports unverified and sends
+  // nothing; the request landing at `url` is a plain hit counter that must
+  // stay at 0.
   it('does not throw when the insert loses the unique-violation race (23505 catch path)', async () => {
-    const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
+    let hits = 0;
+    const { server, url } = await listen((_req, res) => { hits++; res.writeHead(200); res.end(); });
 
     let realSub: { id: string; secret?: string } | undefined;
     const raceCreate: typeof createSubscription = async (sql2, input2) => {
@@ -208,12 +214,14 @@ describe('registerWebhook', () => {
     server.close();
 
     expect(res.secretOnce).toBeUndefined();
-    expect(res.verified).toBe(true);
+    expect(res.manageUrl).toBeUndefined();
+    expect(res.verified).toBe(false);
+    expect(hits).toBe(0);
     const [row] = await sql`select id, secret, filter_severities, verified from subscriptions where endpoint = ${url}`;
     expect(row.id).toBe(realSub!.id);
     expect(row.secret).toBe(realSub!.secret);
     expect(row.filter_severities).toEqual(['critical']);
-    expect(row.verified).toBe(true);
+    expect(row.verified).toBe(false);
   });
 
   it('fresh registration with an empty filter array returns an error without creating a row', async () => {
