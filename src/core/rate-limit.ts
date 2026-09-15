@@ -24,12 +24,19 @@ export interface RateLimitResult {
  * cspReportPerIp bounds the CSP report endpoint, a log-write path with no
  * other cost limit of its own: 60/hour is generous for a real browser
  * (a handful of violations per page load) but caps a scripted flood.
+ *
+ * webhookTestPerSub / webhookTestPerIp bound the on-demand test event: each is
+ * a signed POST to a subscriber-chosen URL, so the per-subscription limit caps
+ * what one token holder can aim at their own endpoint and the per-IP limit
+ * caps a caller cycling tokens.
  */
 export const RATE_LIMITS = {
   emailPerAddress: { limit: 3, windowSeconds: 3600 },
   emailPerIp: { limit: 10, windowSeconds: 3600 },
   webhookPerIp: { limit: 5, windowSeconds: 3600 },
   cspReportPerIp: { limit: 60, windowSeconds: 3600 },
+  webhookTestPerSub: { limit: 10, windowSeconds: 3600 },
+  webhookTestPerIp: { limit: 20, windowSeconds: 3600 },
 } satisfies Record<string, RateLimitRule>;
 
 /** Rows in windows older than this are pruned opportunistically on every call. */
@@ -43,8 +50,8 @@ const PRUNE_AGE_MS = 86_400_000;
  * single statement, so concurrent requests cannot both read a stale count.
  *
  * `key` MUST be prefixed by its caller (`email:addr:`, `email:ip:`,
- * `webhook:ip:`) so that raw user input from one path can never collide with
- * a counter belonging to another.
+ * `webhook:ip:`, `webhook:test:sub:`, `webhook:test:ip:`) so that raw user
+ * input from one path can never collide with a counter belonging to another.
  */
 export async function consumeRateLimit(
   sql: Sql,

@@ -10,7 +10,8 @@ import { clientIpFromHeaders } from '../src/web/client-ip.js';
 import { URL_NOT_ALLOWED } from '../src/core/safe-url.js';
 import { senderFromEnv } from '../src/adapters/esp.js';
 import { startEmailSubscription } from '../src/core/subscribe-flow.js';
-import { registerWebhook } from '../src/core/webhook-flow.js';
+import { registerWebhook, sendWebhookTest, type RegisterResult, type TestResult, ENDPOINT_NOT_VERIFIED } from '../src/core/webhook-flow.js';
+import { ALREADY_REGISTERED } from '../src/web/webhook-copy.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../src/core/types.js';
 
 function filtersFrom(formData: FormData) {
@@ -52,7 +53,7 @@ export async function subscribeEmail(formData: FormData): Promise<void> {
   redirect('/subscribed'); // same page regardless of prior state — no subscription-existence leak
 }
 
-export async function subscribeWebhook(formData: FormData): Promise<{ secretOnce?: string; verified: boolean; error?: string }> {
+export async function subscribeWebhook(formData: FormData): Promise<RegisterResult> {
   const url = String(formData.get('url') ?? '').trim();
   // Refused with the same message as any other disallowed URL — the length
   // cap is not a distinct signal worth handing back.
@@ -65,5 +66,25 @@ export async function subscribeWebhook(formData: FormData): Promise<{ secretOnce
     return { verified: false, error: 'Too many webhook registrations from your network. Try again in an hour.' };
   }
 
-  return registerWebhook(sql, { url, filters: filtersFrom(formData) });
+  const r = await registerWebhook(sql, { url, filters: filtersFrom(formData) });
+  // The core message stays generic for the API path (P22). The form has no
+  // secret field, so the only way a person reaches it is by re-registering
+  // a URL that exists; tell them the way back.
+  if (r.error === 'not authorized or not registered') return { verified: false, error: ALREADY_REGISTERED };
+  return r;
+}
+
+export async function testWebhook(formData: FormData): Promise<TestResult> {
+  const token = String(formData.get('token') ?? '');
+  if (!/^[0-9a-f]{32}$/.test(token)) return { verified: false, error: ENDPOINT_NOT_VERIFIED };
+  const sql = getDb();
+  const ip = clientIpFromHeaders(await headers());
+  const byIp = await consumeRateLimit(sql, `webhook:test:ip:${ip}`, RATE_LIMITS.webhookTestPerIp);
+  if (!byIp.allowed) return { verified: false, error: 'Too many test events from your network. Try again in an hour.' };
+  // Keyed by token rather than subscription id: the id is not known before
+  // the lookup inside sendWebhookTest, and the token identifies the row
+  // one-to-one, so the limit is the same.
+  const bySub = await consumeRateLimit(sql, `webhook:test:sub:${token}`, RATE_LIMITS.webhookTestPerSub);
+  if (!bySub.allowed) return { verified: false, error: 'Too many test events for this webhook. Try again in an hour.' };
+  return sendWebhookTest(sql, { token });
 }

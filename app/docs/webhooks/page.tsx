@@ -48,7 +48,7 @@ export default async function WebhookDocsPage() {
     "published_at": "2026-08-06T10:00:00Z"
   }
 }`}</pre>
-      <p>The <code>kind</code> field is <code>publish</code>, <code>update</code> or <code>reminder</code> for a real delivery. Registration sends one test event with <code>kind: "test"</code>. See "Verification test event" below.</p>
+      <p>The <code>kind</code> field is <code>publish</code>, <code>update</code> or <code>reminder</code> for a real delivery. You can also send a test event with <code>kind: "test"</code>. See "Verification test event" below.</p>
 
       <h2>Headers</h2>
       <table>
@@ -64,7 +64,7 @@ export default async function WebhookDocsPage() {
       <p>Compute <code>v1=hex(hmac_sha256(secret, timestamp + "." + body))</code>. Use the raw request body, before JSON parsing. Compare the result with the <code>x-announce-signature</code> header. Reject the request if they are different.</p>
       <pre>{`import { createHmac, timingSafeEqual } from 'node:crypto';
 
-const secret = '...your webhook secret...';
+const secret = process.env.ANNOUNCE_WEBHOOK_SECRET; // the value shown once at registration
 const timestamp = req.headers['x-announce-timestamp'];
 const signature = req.headers['x-announce-signature'];
 const body = req.rawBody; // raw request body as a string, not the parsed JSON
@@ -97,8 +97,7 @@ if (a.length !== b.length || !timingSafeEqual(a, b)) {
       <p>A retry can send the same event more than one time. Use <code>event_id</code> to identify duplicates. The value is the same for each attempt of one announcement, revision and delivery kind.</p>
 
       <h2>Verification test event</h2>
-      <p>When you register a webhook, the tool sends one test request at once. The request has <code>kind: "test"</code> and an <code>event_id</code> of the form <code>whtest_&lt;subscription_id&gt;</code>. The signature is the same as for a real delivery.</p>
-      <p>Your endpoint must answer with a 2xx status. If the answer is not 2xx, or the request fails, the subscribe page shows the error and the webhook is not active.</p>
+      <p>Registration does not activate the webhook. It gives you the secret and a webhook page. Put the secret in your endpoint's configuration first, then click <strong>Send test event</strong> on the webhook page. The tool sends one signed request with <code>kind: "test"</code> and an <code>event_id</code> of the form <code>whtest_&lt;subscription_id&gt;</code>. Your endpoint must check the signature the same way as for a real delivery and answer with a 2xx status. You can send the test as often as you need. The webhook is active after the first passed test.</p>
     </>
   );
 }
