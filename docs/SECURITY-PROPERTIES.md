@@ -195,12 +195,12 @@ mutates (RFC 8058 one-click body, or the confirm form).
 *Enforced:* `app/u/[token]/route.ts`; *tested:* `test/unsubscribe-html.test.ts`.
 
 **P21 — A webhook secret is shown exactly once and never re-displayed.** `secretOnce` is returned from
-registration and not read back.
+registration and not read back. The on-demand test (`sendWebhookTest`) is keyed by the unsubscribe token and returns no secret.
 *Enforced:* `src/core/webhook-flow.ts`.
 
 **P22 — Failure messages do not disclose whether an address or endpoint is already subscribed.** One generic
 message on webhook verification failure; the email path returns the same shape for new and existing addresses.
-*Enforced:* `src/core/webhook-flow.ts` (`NOT_AUTHORIZED`, `ENDPOINT_NOT_VERIFIED`), `src/core/safe-url.ts`
+*Enforced:* `src/core/webhook-flow.ts` (`sendWebhookTest`, `NOT_AUTHORIZED`, `ENDPOINT_NOT_VERIFIED` — unknown token, non-webhook row, refused destination, non-2xx and exception all return `ENDPOINT_NOT_VERIFIED`), `src/core/safe-url.ts`
 (`URL_NOT_ALLOWED` — one message for every refusal reason), `app/admin/safe-error-message.ts`.
 *Tested:* `test/safe-error-message.test.ts`, `test/webhook-flow.test.ts`.
 
