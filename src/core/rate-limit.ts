@@ -50,8 +50,8 @@ const PRUNE_AGE_MS = 86_400_000;
  * single statement, so concurrent requests cannot both read a stale count.
  *
  * `key` MUST be prefixed by its caller (`email:addr:`, `email:ip:`,
- * `webhook:ip:`) so that raw user input from one path can never collide with
- * a counter belonging to another.
+ * `webhook:ip:`, `webhook:test:sub:`, `webhook:test:ip:`) so that raw user
+ * input from one path can never collide with a counter belonging to another.
  */
 export async function consumeRateLimit(
   sql: Sql,

@@ -1,6 +1,6 @@
 'use client';
 import { useActionState } from 'react';
-import { subscribeWebhook } from './actions.js';
+import { subscribeWebhook, testWebhook } from './actions.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../src/core/types.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
@@ -8,10 +8,14 @@ const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
 const SEVERITIES: Severity[] = ['critical', 'recommended', 'info'];
 const AUDIENCES: Audience[] = ['operators', 'ecosystem'];
 
-type Result = { secretOnce?: string; unsubscribeUrl?: string; verified: boolean; error?: string };
+type Result = { secretOnce?: string; manageUrl?: string; verified: boolean; error?: string };
+type TestResult = { verified: boolean; error?: string };
 
 async function action(_prev: Result | undefined, formData: FormData): Promise<Result> {
   return subscribeWebhook(formData);
+}
+async function testAction(_prev: TestResult | undefined, formData: FormData): Promise<TestResult> {
+  return testWebhook(formData);
 }
 
 const box = (name: string, value: string, checked: boolean) => (
@@ -20,8 +24,23 @@ const box = (name: string, value: string, checked: boolean) => (
   </label>
 );
 
+function TestButton({ token }: { token: string }) {
+  const [result, formAction, pending] = useActionState<TestResult | undefined, FormData>(testAction, undefined);
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="token" value={token} />
+      <button type="submit" disabled={pending || result?.verified === true}>
+        {pending ? 'Sending…' : 'Send test event'}
+      </button>
+      {result?.verified && <p><strong>✅ Test passed. The webhook is active.</strong></p>}
+      {result && !result.verified && <p><strong>❌ Test failed.</strong> {result.error}</p>}
+    </form>
+  );
+}
+
 export default function WebhookForm() {
   const [result, formAction, pending] = useActionState<Result | undefined, FormData>(action, undefined);
+  const token = result?.manageUrl?.split('/').pop();
 
   return (
     <div className="card">
@@ -39,13 +58,21 @@ export default function WebhookForm() {
 
       {result && (
         <div className="notice" style={{ marginTop: 16 }}>
-          <p><strong>{result.verified ? 'Verified' : 'Not verified'}</strong></p>
           {result.error && <p>Error: {result.error}</p>}
-          {result.secretOnce && (
+          {result.secretOnce && token && (
             <>
-              <p>Save both — shown only once. Store the secret to verify deliveries, and keep the unsubscribe link to stop or rotate this webhook later.</p>
+              <p><strong>Registered. Not active yet.</strong></p>
+              <p>Webhook secret — shown only once:</p>
               <pre>{result.secretOnce}</pre>
-              {result.unsubscribeUrl && <pre>{result.unsubscribeUrl}</pre>}
+              <p>Webhook page — keep this link, it is the only way back to this webhook:</p>
+              <pre>{result.manageUrl}</pre>
+              <p>Do this now, in this order:</p>
+              <ol>
+                <li>Put the secret in your webhook configuration. Your endpoint uses it to check the <code>x-announce-signature</code> header on every request.</li>
+                <li>Store the webhook page link somewhere safe. Anyone with the link can remove the webhook.</li>
+                <li>When your endpoint has the secret, click <strong>Send test event</strong> below. Your endpoint must answer with a 2xx status. The webhook becomes active only after a passed test.</li>
+              </ol>
+              <TestButton token={token} />
             </>
           )}
         </div>
