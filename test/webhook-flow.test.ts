@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { createHmac } from 'node:crypto';
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
-import { registerWebhook, ENDPOINT_NOT_VERIFIED } from '../src/core/webhook-flow.js';
+import { registerWebhook, sendWebhookTest, ENDPOINT_NOT_VERIFIED } from '../src/core/webhook-flow.js';
 import { createSubscription } from '../src/core/subscriptions.js';
 
 let sql: Sql;
@@ -24,31 +24,48 @@ function listen(handler: Parameters<typeof createServer>[1]): Promise<{ server: 
 const publicLookup = async () => [{ address: '203.0.113.10', family: 4 as const }];
 
 describe('registerWebhook', () => {
-  it('creates the sub, sends a verifiable signed test event, marks verified on 2xx', async () => {
+  it('registration creates the row, returns the secret and the manage link, and sends nothing', async () => {
+    let hits = 0;
+    const { server, url } = await listen((_req, res) => { hits++; res.writeHead(200); res.end(); });
+    const res = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    server.close();
+    expect(hits).toBe(0);
+    expect(res.verified).toBe(false);
+    expect(res.error).toBeUndefined();
+    expect(res.secretOnce).toMatch(/^whsec_/);
+    expect(res.manageUrl).toMatch(/^https:\/\/announce\.aztec\.network\/manage\/[0-9a-f]{32}$/);
+    const [row] = await sql`select verified, unsubscribe_token from subscriptions where endpoint = ${url}`;
+    expect(row.verified).toBe(false);
+    expect(res.manageUrl!.endsWith(row.unsubscribe_token)).toBe(true);
+  });
+
+  it('sendWebhookTest sends a verifiable signed test event and marks verified on 2xx', async () => {
     let seen: { body: string; headers: Record<string, string | string[] | undefined> } | undefined;
     const { server, url } = await listen((req, res) => {
       let d = ''; req.on('data', c => { d += c; });
       req.on('end', () => { seen = { body: d, headers: req.headers }; res.writeHead(200); res.end(); });
     });
-    const res = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const reg = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const token = reg.manageUrl!.split('/').pop()!;
+    const res = await sendWebhookTest(sql, { token, allowPrivateHosts: true });
     server.close();
 
-    expect(res.verified).toBe(true);
-    expect(res.secretOnce).toMatch(/^whsec_/);
-    expect(res.unsubscribeUrl).toMatch(/^https:\/\/announce\.aztec\.network\/u\/[0-9a-f]{32}$/);
+    expect(res).toEqual({ verified: true });
     const payload = JSON.parse(seen!.body);
     expect(payload.kind).toBe('test');
     expect(payload.event_id).toMatch(/^whtest_sub_/);
     const ts = seen!.headers['x-announce-timestamp'] as string;
     const sig = (seen!.headers['x-announce-signature'] as string).replace('v1=', '');
-    expect(sig).toBe(createHmac('sha256', res.secretOnce!).update(`${ts}.${seen!.body}`).digest('hex'));
+    expect(sig).toBe(createHmac('sha256', reg.secretOnce!).update(`${ts}.${seen!.body}`).digest('hex'));
     const [row] = await sql`select verified from subscriptions where endpoint = ${url}`;
     expect(row.verified).toBe(true);
   });
 
   it('endpoint failing the test event stays unverified with the generic message', async () => {
     const { server, url } = await listen((_req, res) => { res.writeHead(500); res.end(); });
-    const res = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const reg = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const token = reg.manageUrl!.split('/').pop()!;
+    const res = await sendWebhookTest(sql, { token, allowPrivateHosts: true });
     server.close();
     expect(res.verified).toBe(false);
     expect(res.error).toBe(ENDPOINT_NOT_VERIFIED);
@@ -64,19 +81,22 @@ describe('registerWebhook', () => {
   describe('verification failure never leaks upstream detail (H-2)', () => {
     it('a non-2xx status collapses to the generic message', async () => {
       const { server, url } = await listen((_req, res) => { res.writeHead(503); res.end(); });
-      const res = await registerWebhook(sql, { url, allowPrivateHosts: true });
+      const reg = await registerWebhook(sql, { url, allowPrivateHosts: true });
+      const token = reg.manageUrl!.split('/').pop()!;
+      const res = await sendWebhookTest(sql, { token, allowPrivateHosts: true });
       server.close();
       expect(res).toMatchObject({ verified: false, error: ENDPOINT_NOT_VERIFIED });
       expect(res.error).not.toContain('503');
     });
 
     it('a connection-refused exception collapses to the generic message', async () => {
+      const url = 'https://never-registered-2.example.com/h';
+      const reg = await registerWebhook(sql, { url, lookup: publicLookup });
+      const token = reg.manageUrl!.split('/').pop()!;
       const fetchImpl: typeof fetch = async () => {
         throw new Error('connect ECONNREFUSED 10.0.0.5:5432');
       };
-      const res = await registerWebhook(sql, {
-        url: 'https://never-registered-2.example.com/h', lookup: publicLookup, fetchImpl,
-      });
+      const res = await sendWebhookTest(sql, { token, lookup: publicLookup, fetchImpl });
       expect(res).toMatchObject({ verified: false, error: ENDPOINT_NOT_VERIFIED });
       expect(res.error).not.toContain('ECONNREFUSED');
       expect(res.error).not.toContain('10.0.0.5');
@@ -86,13 +106,48 @@ describe('registerWebhook', () => {
       class TimeoutError extends Error {
         constructor() { super('The operation was aborted due to timeout'); this.name = 'TimeoutError'; }
       }
+      const url = 'https://never-registered-3.example.com/h';
+      const reg = await registerWebhook(sql, { url, lookup: publicLookup });
+      const token = reg.manageUrl!.split('/').pop()!;
       const fetchImpl: typeof fetch = async () => { throw new TimeoutError(); };
-      const res = await registerWebhook(sql, {
-        url: 'https://never-registered-3.example.com/h', lookup: publicLookup, fetchImpl,
-      });
+      const res = await sendWebhookTest(sql, { token, lookup: publicLookup, fetchImpl });
       expect(res).toMatchObject({ verified: false, error: ENDPOINT_NOT_VERIFIED });
       expect(res.error).not.toContain('Timeout');
     });
+  });
+
+  it('sendWebhookTest with an unknown token answers with the generic message and contacts nothing', async () => {
+    const res = await sendWebhookTest(sql, { token: 'f'.repeat(32), allowPrivateHosts: true });
+    expect(res).toEqual({ verified: false, error: ENDPOINT_NOT_VERIFIED });
+  });
+
+  it('sendWebhookTest on an email subscription answers with the generic message', async () => {
+    const sub = await createSubscription(sql, { channel: 'email', endpoint: 'x@example.com' });
+    const res = await sendWebhookTest(sql, { token: sub.unsubscribeToken });
+    expect(res).toEqual({ verified: false, error: ENDPOINT_NOT_VERIFIED });
+  });
+
+  it('sendWebhookTest re-checks the destination and refuses a private address with the generic message', async () => {
+    const { server, url } = await listen((_req, res) => { res.writeHead(200); res.end(); });
+    const reg = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const token = reg.manageUrl!.split('/').pop()!;
+    // Without allowPrivateHosts the 127.0.0.1 endpoint is refused at resolve time.
+    const res = await sendWebhookTest(sql, { token });
+    server.close();
+    expect(res).toEqual({ verified: false, error: ENDPOINT_NOT_VERIFIED });
+    const [row] = await sql`select verified from subscriptions where endpoint = ${url}`;
+    expect(row.verified).toBe(false);
+  });
+
+  it('sendWebhookTest can be repeated after a failure and passes once the endpoint answers 2xx', async () => {
+    let ok = false;
+    const { server, url } = await listen((_req, res) => { res.writeHead(ok ? 200 : 400); res.end(); });
+    const reg = await registerWebhook(sql, { url, allowPrivateHosts: true });
+    const token = reg.manageUrl!.split('/').pop()!;
+    expect((await sendWebhookTest(sql, { token, allowPrivateHosts: true })).verified).toBe(false);
+    ok = true;
+    expect((await sendWebhookTest(sql, { token, allowPrivateHosts: true })).verified).toBe(true);
+    server.close();
   });
 
   it('re-registering with the correct secret updates filters, keeps the secret, does not return it again', async () => {
@@ -103,7 +158,7 @@ describe('registerWebhook', () => {
     });
     server.close();
     expect(again.secretOnce).toBeUndefined();
-    expect(again.unsubscribeUrl).toBeUndefined();
+    expect(again.manageUrl).toBeUndefined();
     expect(again.verified).toBe(true);
     const [row] = await sql`select secret, filter_severities from subscriptions where endpoint = ${url}`;
     expect(`whsec_${''}`.length).toBeGreaterThan(0); // structure guard
