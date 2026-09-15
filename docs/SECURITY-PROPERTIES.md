@@ -201,7 +201,11 @@ registration and not read back. The on-demand test (`sendWebhookTest`) is keyed 
 **P22 — Failure messages do not disclose whether an address or endpoint is already subscribed.** One generic
 message on webhook verification failure; the email path returns the same shape for new and existing addresses.
 *Enforced:* `src/core/webhook-flow.ts` (`sendWebhookTest`, `NOT_AUTHORIZED`, `ENDPOINT_NOT_VERIFIED` — unknown token, non-webhook row, refused destination, non-2xx and exception all return `ENDPOINT_NOT_VERIFIED`), `src/core/safe-url.ts`
-(`URL_NOT_ALLOWED` — one message for every refusal reason), `app/admin/safe-error-message.ts`.
+(`URL_NOT_ALLOWED` — one message for every refusal reason), `app/admin/safe-error-message.ts`. The registration
+form carves out one exception: `src/web/webhook-copy.ts` shows "This URL is already registered" on the form
+path, because the form has no secret field, so whoever re-registers a known URL there is either its owner or a
+stranger — and the core module already returned the same distinguishable `not authorized or not registered`
+result in that case, so the form-level message adds no new signal beyond what the API path also discloses.
 *Tested:* `test/safe-error-message.test.ts`, `test/webhook-flow.test.ts`.
 
 ### 5.4 Outbound requests — SSRF (A6)

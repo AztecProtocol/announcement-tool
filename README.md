@@ -272,7 +272,7 @@ A Next.js app (App Router) in `app/` serves the public subscribe page, archive, 
 | `/feed.atom` | Atom feed of published announcements. |
 | `/confirm/<token>` | Email double-opt-in confirmation link. |
 | `/u/<token>` | Unsubscribe — GET shows a confirm page, POST unsubscribes (also serves the RFC 8058 one-click `List-Unsubscribe-Post` request). |
-| `/manage/<token>` | Update email subscription filters. |
+| `/manage/<token>` | Update email subscription filters; for a webhook, shows status, the Send test event button, and the Remove webhook link. |
 | `/docs/webhooks` | Webhook consumer docs — payload shape, headers, signature verification, retries. |
 
 **Rate limits:** Both public write paths are throttled per fixed clock hour: 3 email subscribe attempts per address, 10 per caller IP, 5 webhook registrations per caller IP, and 10 test events per webhook plus 20 per caller IP. Counters are rows in the `rate_limits` table, not process memory, because serverless instances share nothing across cold starts. A refused email attempt returns to the subscribe page with one generic message that does not say which limit was hit; a refused webhook registration says so in the form result. Netlify's own rate limiting cannot cover these paths — Server Actions POST to the page's own URL, so no path rule can separate them from ordinary page loads; see the comment block in `netlify.toml`.
