@@ -154,7 +154,7 @@ alert_human() {
     set +a
     # shellcheck disable=SC1090
     . "$ALERT_LIB"
-    send_alert "announce cert-reload FAILED on $(hostname)" "$1"
+    send_alert "announce cert-reload failed on $(hostname)" "$1"
   ) || true
 }
 
@@ -164,7 +164,7 @@ fail() {
   # the same alert path a backup failure uses, so day-60 renewal is not
   # something that depends on an operator happening to read this host's
   # cron mail.
-  log "failed: $1"
+  log "FAILED: $1"
   alert_human "$1"
   exit 1
 }
