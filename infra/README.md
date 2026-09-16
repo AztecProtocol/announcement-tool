@@ -211,6 +211,7 @@ protected with `prevent_destroy` the same way the data volume is. Rebuilding
 the server with
 `terraform apply -replace=hcloud_server.announce` keeps both the address and
 the volume; `infra/DEPLOY.md` has the procedure under "Rebuilding the VM".
+A deployment created before the address was reserved adopts its existing address on the next apply through the module's `import` block; see "Adopting an existing server's address" there.
 
 ### 3. The DNS A record, and confirming it has propagated
 

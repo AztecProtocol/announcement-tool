@@ -629,36 +629,25 @@ volume and its data, the firewall, and the tailnet auth key.
 
 ### Adopting an existing server's address
 
-Use this once, on a deployment created before the reserved IP existed in
-this module. The server already has an address; import it instead of
-minting a new one, so DNS does not change.
+This applies once, to a deployment created before this module reserved the
+VM's address. Nothing to type: the module carries an `import` block that
+adopts the address the VM already has (`existing_ipv4`, default
+`2.28.39.240`) on the next `terraform apply`. The address does not change,
+DNS does not change, and the server is not touched.
 
-First, note the current address with `terraform output announce_server_ipv4` —
-the check after the apply compares against it.
+Before typing `yes`, read the plan by resource names:
 
-Find the id of the server's current IPv4. Either of these works:
+- `hcloud_primary_ip.announce`: **import**, then an in-place update (name to
+  `aztec-announce-ipv4`, labels, `auto_delete` from `true` to `false`).
+- If the plan shows `hcloud_primary_ip.announce` **must be replaced** (`location` in the diff), the VM is not in `var.hcloud_location`. Answer `no`. The apply would fail on `prevent_destroy` anyway; fix `hcloud_location` first.
+- `hcloud_server.announce`: no change. The server already holds this address.
+- If `public_net` appears in the server's diff, answer `no`: the provider powers the server off and on for any `public_net` change, whatever the change is.
+- Nothing created, nothing destroyed.
 
-```sh
-hcloud primary-ip list                      # the row whose IP matches terraform output announce_server_ipv4
-curl -sS -H "Authorization: Bearer $TF_VAR_hcloud_token" \
-  "https://api.hetzner.cloud/v1/primary_ips?ip=<current address>" | jq '.primary_ips[0].id'
-```
-
-Then import it and apply:
-
-```sh
-cd infra/terraform
-terraform import hcloud_primary_ip.announce <id>
-terraform apply
-```
-
-**Check:** before typing `yes`, the plan must show `hcloud_primary_ip.announce`
-updated in place (name, labels, `auto_delete` from `true` to `false`, if it
-is not already `false`) and nothing created or destroyed.
-`hcloud_server.announce` shows either no change or an in-place update of
-`public_net`. Warning: that update powers the server off and on. Do it
-before step 4 runs, while nothing is deployed on the host, or plan a short
-outage.
+Warning: a plan that shows `hcloud_primary_ip.announce` **created**, or
+`hcloud_server.announce` updated or replaced, means the adoption did not
+happen — usually because `existing_ipv4` does not match the VM's address.
+Answer `no`, run `terraform output announce_server_ipv4`, and compare.
 
 After the apply:
 
@@ -667,9 +656,11 @@ terraform output announce_server_ipv4
 dig +short db.announce.aztec.network
 ```
 
-Both must print the same address as before. If `terraform output` shows a
-different address, the import did not take and the apply minted a new IP;
-stop and read the state before touching DNS.
+Both must print the same address as before.
+
+On a brand-new deployment with no server yet, set `existing_ipv4 = ""` in
+`terraform.tfvars`; the import block is then inert and the apply creates a
+fresh reserved address.
 
 ### Later rebuilds (steady state)
 

@@ -96,10 +96,10 @@ resource "tailscale_tailnet_key" "announce" {
 # to a resource out-of-band. Setting assignee_type alone produces a provider
 # warning and invites state drift, so leave both unset here.
 #
-# On a server created before this resource existed, import its current
-# address (`terraform import hcloud_primary_ip.announce <id>`) rather than
-# letting apply mint a new one — see infra/DEPLOY.md, "Adopting an existing
-# server's address".
+# On a server created before this resource existed, the import block below
+# adopts the address the server already has, so a plain `terraform apply`
+# renames it in place instead of minting a new one — see infra/DEPLOY.md,
+# "Adopting an existing server's address".
 resource "hcloud_primary_ip" "announce" {
   name        = "aztec-announce-ipv4"
   type        = "ipv4"
@@ -114,6 +114,21 @@ resource "hcloud_primary_ip" "announce" {
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# Adopt the existing address. The lookup is by IP so nobody needs the primary
+# IP's numeric id; the import runs as part of the normal plan/apply and is a
+# no-op once the resource is in state. `count` makes the block inert when
+# existing_ipv4 is empty (a brand-new deployment with nothing to adopt).
+data "hcloud_primary_ip" "existing" {
+  count      = var.existing_ipv4 == "" ? 0 : 1
+  ip_address = var.existing_ipv4
+}
+
+import {
+  for_each = var.existing_ipv4 == "" ? {} : { adopt = var.existing_ipv4 }
+  to       = hcloud_primary_ip.announce
+  id       = data.hcloud_primary_ip.existing[0].id
 }
 
 resource "hcloud_server" "announce" {
