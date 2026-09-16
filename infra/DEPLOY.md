@@ -203,7 +203,7 @@ if you do:**
 | `BACKUP_S3_SECRET_ACCESS_KEY` | Yes | Same as `BACKUP_S3_BUCKET`. |
 | `BACKUP_S3_ENDPOINT` | Yes | Empty means Amazon S3. For Hetzner Object Storage it is required — see "Off-host backups on Hetzner Object Storage" below. |
 | `ALERT_EMAIL_TO` | Yes | Nobody is emailed when a backup or a certificate reload fails; the failure is only in the container log. One address, or several separated by commas. |
-| `ESP_PROVIDER`, `BREVO_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME` | Yes | Without them an alert is written to the log instead of sent. Use the same four values as in Netlify (step 8): `brevo`, the Brevo API key, an address at `mail.announce.aztec.network`, and the display name. |
+| `ESP_PROVIDER`, `BREVO_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME` | Yes | Without them an alert is written to the log instead of sent. Use the same four values as in Netlify (step 8): `brevo`, the Brevo API key, an address at `mail.announce.aztec.network`, and the display name. The VM alert path supports Brevo only (the compose file passes no Resend key to the backup container). |
 
 Fill in every value marked "No" above before continuing — the check at the
 end of step 4 will not pass otherwise. The values marked "Yes" can stay empty
@@ -488,7 +488,7 @@ EMAIL_FROM_NAME=<same as in Netlify>
 ```sh
 cd /opt/announce
 docker compose up -d backup
-docker compose run --rm backup /usr/local/bin/backup.sh
+docker compose run --rm --entrypoint /usr/local/bin/backup.sh backup
 ```
 
 The second command runs the whole nightly job once, in the foreground. It
@@ -515,11 +515,13 @@ server, not yet against Hetzner. Everything runs on the VM, from
 `/opt/announce`, inside the `backup` image, which has `aws`, `gpg`, `psql`
 and the `PG*` and `BACKUP_*` variables already set.
 
-**1. Open a shell in the backup image:**
+**1. Open a shell in the backup image.** Mount a host directory at `/tmp/r` so
+the unpacked files land on the VM, not only inside this container:
 
 ```sh
 cd /opt/announce
-docker compose run --rm --entrypoint bash backup
+mkdir -p /opt/announce/restore
+docker compose run --rm --entrypoint bash -v /opt/announce/restore:/tmp/r backup
 ```
 
 **2. Choose and fetch the archive.** Daily copies are under
@@ -539,10 +541,17 @@ mkdir -p /tmp/r && tar -xf /tmp/b.tar -C /tmp/r && ls -R /tmp/r
 ```
 
 You see `announce-<stamp>.sql.gz` and, when Signal was in use, a
-`signal-data/` directory.
+`signal-data/` directory. `mkdir -p /tmp/r` is harmless here — step 1 already
+mounted it from the host.
 
 **4. Load the database.** Restore into a new database first, then swap it in.
 Nothing is dropped until the restored copy is complete.
+
+Warning: on a rebuilt VM the application role does not exist yet, and the
+`GRANT ... TO announce_app` lines in the dump fail. Create it before loading:
+`psql -d postgres -c "create role announce_app nologin"`, then set its
+password as in step 6 of the deployment. On the original VM the role exists
+and this is not needed.
 
 ```sh
 psql -d postgres -c "create database announce_restored"
@@ -551,40 +560,54 @@ psql -d announce_restored -At -c "select count(*) from schema_migrations" \
   -c "select count(*) from subscriptions" -c "select count(*) from announcements"
 ```
 
-Warning: on a rebuilt VM the application role does not exist yet, and the
-`GRANT ... TO announce_app` lines in the dump fail. Create it before loading:
-`psql -d postgres -c "create role announce_app nologin"`, then set its
-password as in step 6 of the deployment. On the original VM the role exists
-and this is not needed.
-
 Swap when the counts look right. Every connection to the live database must
-end first: Netlify's functions reconnect by themselves afterwards.
+end first: Netlify's functions reconnect by themselves afterwards. Blocking
+new connections before terminating the old ones closes the window where a
+Netlify function reconnects between the terminate and the renames:
 
 ```sh
 psql -d postgres -v ON_ERROR_STOP=1 \
-  -c "select pg_terminate_backend(pid) from pg_stat_activity where datname in ('announce') and pid <> pg_backend_pid()" \
+  -c "alter database announce with allow_connections false" \
+  -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'announce' and pid <> pg_backend_pid()" \
   -c "alter database announce rename to announce_old_$(date -u +%Y%m%d)" \
   -c "alter database announce_restored rename to announce"
 ```
 
+If a later statement fails, put the old database back:
+`alter database announce_old_<date> with allow_connections true` and, if the
+last rename did not run, `alter database announce_old_<date> rename to
+announce`.
+
 The old database stays under its new name. Drop it once the site is confirmed
 working: `psql -d postgres -c "drop database announce_old_<date>"`.
 
-**5. Signal data (only if `signal-data/` was in the archive).** Do step 5
-before you `exit` the shell from step 1, or copy `signal-data/` to the host
-first with `docker compose cp`. Leave the image shell (`exit`), then copy the
-directory into the volume and restart the container:
+**5. Signal data (only if `signal-data/` was in the archive).** Leave the
+image shell (`exit`), then copy the directory into the volume and restart the
+container:
 
 ```sh
 docker compose stop signal signal-receive
-docker compose run --rm --entrypoint sh -v /tmp/r/signal-data:/restore:ro backup \
-  -c 'cp -a /restore/. /signal-data/'
+docker run --rm -v announce_signal-data:/signal-data -v /opt/announce/restore/signal-data:/restore:ro \
+  alpine:3.20 sh -c 'cp -a /restore/. /signal-data/'
 docker compose start signal signal-receive
 ```
+
+The volume name is `<project>_signal-data`, where the project is the compose
+directory name — `announce` for `/opt/announce`. Confirm it with
+`docker volume ls`.
 
 **6. Check:** open https://announce.aztec.network/archive and the admin page.
 Announcements and subscriber counts must match what you expect from the
 backup date.
+
+**7. Clean up.**
+
+Warning: `/opt/announce/restore` holds the decrypted dump, including
+subscriber emails. Do not leave it on disk.
+
+```sh
+rm -rf /opt/announce/restore
+```
 
 ## Rebuilding the VM
 
