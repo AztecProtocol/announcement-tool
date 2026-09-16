@@ -233,7 +233,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `EMAIL_FROM_NAME` | `Aztec Announcements` | From display name; used by `brevo` only. |
 | `RESEND_API_KEY` | *(unset)* | Required when `ESP_PROVIDER=resend`. |
 | `BREVO_API_KEY` | *(unset)* | Required when `ESP_PROVIDER=brevo`. |
-| `ALERT_EMAIL_TO` | *(unset)* | Destination address for channel-health alert emails. Not in `.env.example` (opt-in). Unset disables alerting entirely. See Alerting below. |
+| `ALERT_EMAIL_TO` | *(unset)* | Destination for channel-health alert emails and, on the VM, for backup and certificate-reload failures. One address, or several separated by commas. Not in `.env.example` (opt-in). Unset disables alerting entirely. See Alerting below. |
 | `ENABLED_CHANNELS` | *(unset)* | Comma-separated channels this deployment fans out to. Unset means all five. See "Which channels this deployment runs" under Admin. |
 
 Discord, Telegram, and Signal *destinations* (webhook URLs, chat/group ids) are not environment variables. They live in `channel_settings` rows, since a deployment typically has more than one destination per channel.

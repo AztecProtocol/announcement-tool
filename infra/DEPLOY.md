@@ -165,6 +165,12 @@ BACKUP_ENCRYPTION_KEY=
 BACKUP_S3_BUCKET=
 BACKUP_S3_ACCESS_KEY_ID=
 BACKUP_S3_SECRET_ACCESS_KEY=
+BACKUP_S3_ENDPOINT=
+ALERT_EMAIL_TO=
+ESP_PROVIDER=
+BREVO_API_KEY=
+EMAIL_FROM=
+EMAIL_FROM_NAME=
 EOF
 chmod 600 /opt/announce/.env
 ```
@@ -195,9 +201,12 @@ if you do:**
 | `BACKUP_S3_BUCKET` | Yes | Everything starts except `backup`, which restarts in a loop until an S3 destination is configured. `db`, `signal` and `caddy` are unaffected — your data is safe, it is just not being copied off-host yet. |
 | `BACKUP_S3_ACCESS_KEY_ID` | Yes | Same as `BACKUP_S3_BUCKET` — leave all three S3 variables empty together, or fill in all three together. |
 | `BACKUP_S3_SECRET_ACCESS_KEY` | Yes | Same as `BACKUP_S3_BUCKET`. |
+| `BACKUP_S3_ENDPOINT` | Yes | Empty means Amazon S3. For Hetzner Object Storage it is required — see "Off-host backups on Hetzner Object Storage" below. |
+| `ALERT_EMAIL_TO` | Yes | Nobody is emailed when a backup or a certificate reload fails; the failure is only in the container log. One address, or several separated by commas. |
+| `ESP_PROVIDER`, `BREVO_API_KEY`, `EMAIL_FROM`, `EMAIL_FROM_NAME` | Yes | Without them an alert is written to the log instead of sent. Use the same four values as in Netlify (step 8): `brevo`, the Brevo API key, an address at `mail.announce.aztec.network`, and the display name. |
 
 Fill in every value marked "No" above before continuing — the check at the
-end of step 4 will not pass otherwise. The four marked "Yes" can stay empty
+end of step 4 will not pass otherwise. The values marked "Yes" can stay empty
 for now and be filled in later, once a Signal number is registered or an S3
 bucket exists; there is no need to re-run Ansible for that, only to update
 this file and restart the affected container
@@ -435,6 +444,148 @@ Without them, announcements arrive in recipients' spam folders. This has
 already happened once during testing, and it looked like a broken tool rather
 than a DNS problem.
 
+## Off-host backups on Hetzner Object Storage
+
+The `backup` container runs every night at 03:00 UTC: it dumps the database,
+adds the signal-cli data, encrypts the bundle with `BACKUP_ENCRYPTION_KEY`,
+restores it into a scratch database to prove it loads, uploads it, and keeps
+30 daily and 12 monthly copies. It needs an S3-compatible bucket. The
+Foundation uses Hetzner Object Storage, in the same location as the VM.
+
+**1. Create the bucket and the credentials (Hetzner Cloud Console).** Both in
+the same Hetzner project as the VM: S3 credentials only work inside the
+project they were made in.
+
+- Object Storage → Create Bucket. Name `aztec-announce-backups` (names are
+  unique across all of Hetzner; pick another if it is taken), location
+  Falkenstein (`fsn1`), visibility **Private**.
+- Security → S3 Credentials → Generate credentials. The secret is shown once.
+  Put both in the password manager.
+
+Or, with credentials already in hand, from any machine with `aws-cli`:
+
+```sh
+AWS_ACCESS_KEY_ID=<access key> AWS_SECRET_ACCESS_KEY=<secret> \
+  aws s3 mb s3://aztec-announce-backups --region fsn1 --endpoint-url https://fsn1.your-objectstorage.com
+```
+
+**2. Fill in the VM's secrets file.** On the VM, edit `/opt/announce/.env`:
+
+```
+BACKUP_S3_BUCKET=aztec-announce-backups
+BACKUP_S3_ENDPOINT=https://fsn1.your-objectstorage.com
+BACKUP_S3_ACCESS_KEY_ID=<access key>
+BACKUP_S3_SECRET_ACCESS_KEY=<secret>
+ALERT_EMAIL_TO=<one or more addresses, separated by commas>
+ESP_PROVIDER=brevo
+BREVO_API_KEY=<same as in Netlify>
+EMAIL_FROM=<same as in Netlify>
+EMAIL_FROM_NAME=<same as in Netlify>
+```
+
+**3. Start the backup container and run one backup now.**
+
+```sh
+cd /opt/announce
+docker compose up -d backup
+docker compose run --rm backup /usr/local/bin/backup.sh
+```
+
+The second command runs the whole nightly job once, in the foreground. It
+must end with `backup complete: <stamp>, verified, uploaded to
+announce-backups/daily/announce-<stamp>.tar.gpg`. If it ends with `FAILED`,
+read the lines above it; the same text was emailed to `ALERT_EMAIL_TO`.
+
+**Check:**
+
+```sh
+docker compose run --rm --entrypoint sh backup -c \
+  'aws s3 ls "s3://$BACKUP_S3_BUCKET/announce-backups/daily/" --endpoint-url "$BACKUP_S3_ENDPOINT"'
+```
+
+One line per backup. Tomorrow there must be one more.
+
+**Cost:** Hetzner charges a base fee of about EUR 5 per month per project with
+1 TB of storage included. A backup of this database is a few kilobytes.
+
+## Restoring from a backup
+
+Rehearsed on 2026-09-15 against a local Postgres 16 and an S3-compatible
+server, not yet against Hetzner. Everything runs on the VM, from
+`/opt/announce`, inside the `backup` image, which has `aws`, `gpg`, `psql`
+and the `PG*` and `BACKUP_*` variables already set.
+
+**1. Open a shell in the backup image:**
+
+```sh
+cd /opt/announce
+docker compose run --rm --entrypoint bash backup
+```
+
+**2. Choose and fetch the archive.** Daily copies are under
+`announce-backups/daily/`, monthly under `announce-backups/monthly/`:
+
+```sh
+aws s3 ls "s3://$BACKUP_S3_BUCKET/announce-backups/daily/" --endpoint-url "$BACKUP_S3_ENDPOINT"
+aws s3 cp "s3://$BACKUP_S3_BUCKET/announce-backups/daily/announce-<stamp>.tar.gpg" /tmp/b.tar.gpg \
+  --endpoint-url "$BACKUP_S3_ENDPOINT"
+```
+
+**3. Decrypt and unpack:**
+
+```sh
+gpg --batch --quiet --passphrase "$BACKUP_ENCRYPTION_KEY" --decrypt /tmp/b.tar.gpg > /tmp/b.tar
+mkdir -p /tmp/r && tar -xf /tmp/b.tar -C /tmp/r && ls -R /tmp/r
+```
+
+You see `announce-<stamp>.sql.gz` and, when Signal was in use, a
+`signal-data/` directory.
+
+**4. Load the database.** Restore into a new database first, then swap it in.
+Nothing is dropped until the restored copy is complete.
+
+```sh
+psql -d postgres -c "create database announce_restored"
+gunzip -c /tmp/r/announce-*.sql.gz | psql -d announce_restored -v ON_ERROR_STOP=1 -q
+psql -d announce_restored -At -c "select count(*) from schema_migrations" \
+  -c "select count(*) from subscriptions" -c "select count(*) from announcements"
+```
+
+Warning: on a rebuilt VM the application role does not exist yet, and the
+`GRANT ... TO announce_app` lines in the dump fail. Create it before loading:
+`psql -d postgres -c "create role announce_app nologin"`, then set its
+password as in step 6 of the deployment. On the original VM the role exists
+and this is not needed.
+
+Swap when the counts look right. Every connection to the live database must
+end first: Netlify's functions reconnect by themselves afterwards.
+
+```sh
+psql -d postgres -v ON_ERROR_STOP=1 \
+  -c "select pg_terminate_backend(pid) from pg_stat_activity where datname in ('announce') and pid <> pg_backend_pid()" \
+  -c "alter database announce rename to announce_old_$(date -u +%Y%m%d)" \
+  -c "alter database announce_restored rename to announce"
+```
+
+The old database stays under its new name. Drop it once the site is confirmed
+working: `psql -d postgres -c "drop database announce_old_<date>"`.
+
+**5. Signal data (only if `signal-data/` was in the archive).** Do step 5
+before you `exit` the shell from step 1, or copy `signal-data/` to the host
+first with `docker compose cp`. Leave the image shell (`exit`), then copy the
+directory into the volume and restart the container:
+
+```sh
+docker compose stop signal signal-receive
+docker compose run --rm --entrypoint sh -v /tmp/r/signal-data:/restore:ro backup \
+  -c 'cp -a /restore/. /signal-data/'
+docker compose start signal signal-receive
+```
+
+**6. Check:** open https://announce.aztec.network/archive and the admin page.
+Announcements and subscriber counts must match what you expect from the
+backup date.
+
 ## Rebuilding the VM
 
 Use this when the server itself is broken — for example the tailnet join
@@ -551,3 +702,11 @@ This procedure has never run against a real VM. Several parts get their first
 real use on your deployment: the certificate request, the certificate renewal
 about 60 days later, the firewall, and the `fail2ban` rules.
 [`README.md`](README.md) lists all of them, with what was tested and how.
+
+The backup and restore procedures above were rehearsed on 2026-09-15 on a
+developer machine against Postgres 16 and a local S3-compatible server
+(MinIO), through the real `backup` image and `scripts/backup.sh`. They have
+not yet run against Hetzner Object Storage. The first real run is the
+`docker compose run --rm backup /usr/local/bin/backup.sh` command in the
+backup section; the first real restore is worth doing once, into
+`announce_restored`, without the swap.
