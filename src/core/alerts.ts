@@ -51,10 +51,11 @@ export async function dispatchHealthAlerts(
     if (fresh.length === 0) return;
 
     const lines = fresh.map(i => `- [${i.channel}] ${i.kind} on ${i.announcementId}: ${i.detail}`);
+    const n = fresh.length;
     await sender.send({
       to: recipients,
-      subject: `Aztec announcements: channel health — ${fresh.length} new issue${fresh.length === 1 ? '' : 's'}`,
-      text: `New channel-health issues detected by the announcement worker:\n\n${lines.join('\n')}\n\nEach issue is reported once. Check the delivery ledger for detail.\n`,
+      subject: `Aztec announcements: ${n} delivery problem${n === 1 ? '' : 's'}`,
+      text: `The worker found new delivery problems:\n\n${lines.join('\n')}\n\nEach problem is reported once. Open the announcement's review page in the admin for detail.\n`,
     });
     await tx`update alert_state set notified_at = now() where key in ${tx(fresh.map(alertKey))}`;
   });

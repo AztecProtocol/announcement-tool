@@ -154,7 +154,7 @@ alert_human() {
     set +a
     # shellcheck disable=SC1090
     . "$ALERT_LIB"
-    send_alert "announce cert-reload FAILED on $(hostname)" "$1"
+    send_alert "announce cert-reload failed on $(hostname)" "$1"
   ) || true
 }
 
