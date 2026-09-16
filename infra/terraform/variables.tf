@@ -64,3 +64,9 @@ variable "domain" {
   default     = "db.announce.aztec.network"
   description = "Public hostname this VM will serve. Terraform does not manage DNS here (the aztec.network nameservers are outside this repo's control) — this value is only used to make the required manual DNS step explicit in outputs.tf. An A record for this name must point at the VM's public IPv4 (see the observability apply pattern) before Caddy's ACME challenge can complete."
 }
+
+variable "existing_ipv4" {
+  type        = string
+  default     = "2.28.39.240"
+  description = "Public IPv4 the VM already holds. On a deployment created before this module reserved its address, the import block in vm.tf adopts this address as hcloud_primary_ip.announce on the next apply, so the address never changes. Set it to \"\" on a brand-new deployment where no server exists yet."
+}

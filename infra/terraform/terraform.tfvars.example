@@ -41,3 +41,4 @@ tailnet = "example.com"
 # image                = "ubuntu-24.04"
 # data_volume_size_gb  = 20
 # domain               = "db.announce.aztec.network"
+# existing_ipv4 = "2.28.39.240"   # default; set to "" for a brand-new deployment with no server yet
