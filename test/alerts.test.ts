@@ -26,7 +26,7 @@ describe('dispatchHealthAlerts', () => {
     const first = await dispatchHealthAlerts(sql, sender, { to: 'ops@aztec.foundation' });
     expect(first.length).toBeGreaterThan(0);
     expect(sent).toHaveLength(1);
-    expect(sent[0].to).toBe('ops@aztec.foundation');
+    expect(sent[0].to).toEqual(['ops@aztec.foundation']);
     expect(sent[0].subject).toContain('channel health');
     expect(sent[0].text).toContain('signal');
     expect(sent[0].text).toContain('Unregistered user');
@@ -93,6 +93,21 @@ describe('dispatchHealthAlerts', () => {
   it('does not swallow a failing sender', async () => {
     const failing: EmailSender = { name: 'boom', async send() { throw new Error('ESP down'); } };
     await expect(dispatchHealthAlerts(sql, failing, { to: 'ops@aztec.foundation' })).rejects.toThrow(/ESP down/);
+  });
+
+  it('sends one email to every address in a comma-separated list', async () => {
+    const { sender, sent } = recorder();
+    const issues = await dispatchHealthAlerts(sql, sender, { to: 'a@x.org, b@y.org,,a@x.org' });
+    expect(issues.length).toBeGreaterThan(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toEqual(['a@x.org', 'b@y.org']);
+  });
+
+  it('treats a list that is only commas and spaces as unset', async () => {
+    const { sender, sent } = recorder();
+    const res = await dispatchHealthAlerts(sql, sender, { to: ' , ' });
+    expect(res).toEqual([]);
+    expect(sent).toHaveLength(0);
   });
 
   it('leaves the row un-notified after a failed send, so it is retried later', async () => {

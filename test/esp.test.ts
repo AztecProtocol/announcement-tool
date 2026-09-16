@@ -46,6 +46,18 @@ describe('resend sender', () => {
     delete process.env.RESEND_API_KEY;
     await expect(makeResendSender({ from: 'a@b.c' }).send(msg)).rejects.toThrow(/RESEND_API_KEY/);
   });
+
+  it('sends the list as-is when to is a list', async () => {
+    let body = '';
+    const { server, base } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(200); res.end('{}'); });
+    });
+    await makeResendSender({ apiKey: 'RK', from: 'a@b.c', apiBase: base }).send({ ...msg, to: ['a@x.org', 'b@y.org'] });
+    server.close();
+    const p = JSON.parse(body);
+    expect(p.to).toEqual(['a@x.org', 'b@y.org']);
+  });
 });
 
 describe('brevo sender', () => {
@@ -65,6 +77,19 @@ describe('brevo sender', () => {
     expect(p.to).toEqual([{ email: 'ops@example.com' }]);
     expect(p.textContent).toBe('B');
     expect(p.htmlContent).toBe('<p>B</p>');
+  });
+
+  it('sends one recipient entry per address when to is a list', async () => {
+    let body = '';
+    const { server, base } = await listen((req, res) => {
+      let d = ''; req.on('data', c => { d += c; });
+      req.on('end', () => { body = d; res.writeHead(201); res.end('{}'); });
+    });
+    await makeBrevoSender({ apiKey: 'BK', from: 'no-reply@announce.example', fromName: 'Aztec', apiBase: base })
+      .send({ ...msg, to: ['a@x.org', 'b@y.org'] });
+    server.close();
+    const p = JSON.parse(body);
+    expect(p.to).toEqual([{ email: 'a@x.org' }, { email: 'b@y.org' }]);
   });
 });
 
