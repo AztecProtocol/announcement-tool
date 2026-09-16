@@ -164,7 +164,7 @@ fail() {
   # the same alert path a backup failure uses, so day-60 renewal is not
   # something that depends on an operator happening to read this host's
   # cron mail.
-  log "FAILED: $1"
+  log "failed: $1"
   alert_human "$1"
   exit 1
 }

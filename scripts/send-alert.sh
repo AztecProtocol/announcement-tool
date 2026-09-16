@@ -93,7 +93,7 @@ send_alert() {
   local _resend_api_key="${RESEND_API_KEY:-}"
 
   if [ -z "$_alert_email_to" ]; then
-    log "ALERT_EMAIL_TO not set — alert NOT sent (would have said: $subject)"
+    log "ALERT_EMAIL_TO not set — alert NOT sent (would have said: $subject -- $body)"
     return 0
   fi
   case "$_esp_provider" in

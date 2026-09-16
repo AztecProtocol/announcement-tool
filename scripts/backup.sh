@@ -78,6 +78,13 @@ WORKDIR="$(mktemp -d /tmp/announce-backup.XXXXXX)"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DAY_OF_MONTH="$(date -u +%d)"
 
+# Where the run is when it fails; the alert names it so nobody has to read
+# the log to learn whether the dump, the upload or the pruning broke.
+# Defaults set here, before the trap, so that under `set -u` both variables
+# already exist no matter how early a failure happens.
+STEP=start
+HUMAN_STAMP="$(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+
 trap 'rc=$?; cleanup "$rc"' EXIT
 
 log() { printf '[backup %s] %s\n' "$(date -u +%H:%M:%S)" "$1" >&2; }
@@ -100,12 +107,24 @@ cleanup() {
   local rc="$1"
   if [ "$rc" -ne 0 ]; then
     log "FAILED (exit $rc) — see errors above"
-    send_alert "Aztec announcements: backup FAILED" \
-      "The nightly backup script exited with status $rc at ${STAMP}. Check the backup service logs on the VM immediately -- an untested or missing backup is not a backup."
+    send_alert "Aztec announcements: backup failed" \
+      "The backup run at ${HUMAN_STAMP} failed with exit status $rc at step: ${STEP}. No copy was stored off the VM.
+
+Log: on the VM, cd /opt/announce && docker compose logs --tail 50 backup"
   fi
   rm -rf "$WORKDIR"
   exit "$rc"
 }
+
+STEP=config
+
+# A value copied from the Hetzner console is the bucket's own hostname
+# without a scheme; aws-cli rejects it only at upload time, after the dump
+# and the restore-verify have already run. Refuse it here instead.
+case "$BACKUP_S3_ENDPOINT" in
+  ""|https://*|http://*) ;;
+  *) log "ERROR: BACKUP_S3_ENDPOINT must start with https:// (or http:// for a local test server); got: $BACKUP_S3_ENDPOINT"; exit 1 ;;
+esac
 
 mkdir -p "$WORKDIR"
 log "workdir: $WORKDIR"
@@ -113,6 +132,7 @@ log "workdir: $WORKDIR"
 # ---------------------------------------------------------------------------
 # Step 1: dump the whole database, compressed.
 # ---------------------------------------------------------------------------
+STEP=dump
 DUMP_FILE="$WORKDIR/announce-${STAMP}.sql.gz"
 log "dumping $PGDATABASE from $PGHOST:$PGPORT..."
 # --no-owner: the restore target may be a different cluster whose superuser
@@ -134,6 +154,7 @@ log "dump ok: $(wc -c < "$DUMP_FILE") bytes"
 # Step 2: bundle in the signal-cli data directory (the one credential that
 # cannot be re-issued — losing it means re-registering the phone number).
 # ---------------------------------------------------------------------------
+STEP=bundle
 BUNDLE_FILE="$WORKDIR/announce-${STAMP}.tar"
 STAGE_DIR="$WORKDIR/stage"
 mkdir -p "$STAGE_DIR"
@@ -157,6 +178,7 @@ tar -cf "$BUNDLE_FILE" -C "$STAGE_DIR" .
 # BACKUP_ENCRYPTION_KEY. This happens before the archive ever leaves the
 # process's own temp directory.
 # ---------------------------------------------------------------------------
+STEP=encrypt
 ENC_FILE="${BUNDLE_FILE}.gpg"
 log "encrypting..."
 gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_ENCRYPTION_KEY" \
@@ -175,6 +197,7 @@ log "encrypted ok: $(wc -c < "$ENC_FILE") bytes"
 # backup from a hopeful one. A corrupt/truncated dump must fail this step
 # loudly, not slide through.
 # ---------------------------------------------------------------------------
+STEP=restore-verify
 SCRATCH_DB="announce_backup_verify_$$"
 log "restore-verify: creating scratch database $SCRATCH_DB..."
 psql -d postgres -v ON_ERROR_STOP=1 -c "create database \"$SCRATCH_DB\";"
@@ -251,6 +274,7 @@ log "restore-verify passed: all tables present with matching row counts"
 # ---------------------------------------------------------------------------
 # Step 5: upload the encrypted archive off-host. Only after verification.
 # ---------------------------------------------------------------------------
+STEP=upload
 REMOTE_NAME="${BACKUP_S3_PREFIX}/daily/announce-${STAMP}.tar.gpg"
 if [ -n "$BACKUP_LOCAL_DEST" ]; then
   log "*** BACKUP_LOCAL_DEST is set: uploading to a LOCAL directory, NOT real object storage. Do not set this in production. ***"
@@ -326,6 +350,7 @@ prune() {
   fi
 }
 
+STEP=prune
 if ! prune "${BACKUP_S3_PREFIX}/daily" "$RETENTION_DAILY"; then
   log "WARNING: pruning daily retention failed (non-fatal — today's verified backup still stands)"
 fi

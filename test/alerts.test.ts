@@ -27,7 +27,9 @@ describe('dispatchHealthAlerts', () => {
     expect(first.length).toBeGreaterThan(0);
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toEqual(['ops@aztec.foundation']);
-    expect(sent[0].subject).toContain('channel health');
+    expect(sent[0].subject).toMatch(/Aztec announcements: \d+ delivery problems?$/);
+    expect(sent[0].text).toContain('The worker found new delivery problems:');
+    expect(sent[0].text).toContain("Open the announcement's review page in the admin for detail.");
     expect(sent[0].text).toContain('signal');
     expect(sent[0].text).toContain('Unregistered user');
 
