@@ -639,7 +639,9 @@ Before typing `yes`, read the plan by resource names:
 
 - `hcloud_primary_ip.announce`: **import**, then an in-place update (name to
   `aztec-announce-ipv4`, labels, `auto_delete` from `true` to `false`).
+- If the plan shows `hcloud_primary_ip.announce` **must be replaced** (`location` in the diff), the VM is not in `var.hcloud_location`. Answer `no`. The apply would fail on `prevent_destroy` anyway; fix `hcloud_location` first.
 - `hcloud_server.announce`: no change. The server already holds this address.
+- If `public_net` appears in the server's diff, answer `no`: the provider powers the server off and on for any `public_net` change, whatever the change is.
 - Nothing created, nothing destroyed.
 
 Warning: a plan that shows `hcloud_primary_ip.announce` **created**, or
