@@ -60,6 +60,13 @@ _json_escape() {
 _recipients_json() {
   local raw="$1" style="$2" out="" seen="," addr
   local IFS=','
+  # Word-splitting $raw below also pathname-expands each word (`*`, `?`,
+  # `[...]`): an address of literally "*" would otherwise become whatever
+  # files happen to match `*` in the current directory. `set -f` disables
+  # that expansion for the loop; restore whatever the caller's state was
+  # rather than assuming it was on, since this file is sourced into
+  # backup.sh and cert-reload.sh.j2's own shells.
+  case "$-" in *f*) ;; *) set -f; local restore_f=1 ;; esac
   for addr in $raw; do
     addr="$(printf '%s' "$addr" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     [ -z "$addr" ] && continue
@@ -72,6 +79,7 @@ _recipients_json() {
       out="$out\"$(_json_escape "$addr")\""
     fi
   done
+  [ -n "${restore_f:-}" ] && set +f
   printf '[%s]' "$out"
 }
 
