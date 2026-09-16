@@ -115,7 +115,15 @@ log "workdir: $WORKDIR"
 # ---------------------------------------------------------------------------
 DUMP_FILE="$WORKDIR/announce-${STAMP}.sql.gz"
 log "dumping $PGDATABASE from $PGHOST:$PGPORT..."
-pg_dump --no-owner --no-privileges | gzip -9 > "$DUMP_FILE"
+# --no-owner: the restore target may be a different cluster whose superuser
+# is not "announce". Privileges ARE dumped (no --no-privileges): the
+# application connects as the least-privilege role announce_app, whose
+# grants live only in the database. A dump without them restores a database
+# the app cannot read. The role itself is cluster-level and not in the dump;
+# infra/DEPLOY.md "Restoring from a backup" creates it if absent before the
+# restore. The nightly restore-verify runs on the same cluster, where the
+# role exists, so the GRANT statements apply there too.
+pg_dump --no-owner | gzip -9 > "$DUMP_FILE"
 if [ ! -s "$DUMP_FILE" ]; then
   log "ERROR: pg_dump produced an empty file"
   exit 1
