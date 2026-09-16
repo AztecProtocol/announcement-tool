@@ -1,10 +1,12 @@
 export interface EmailMessage {
-  to: string; subject: string; text: string; html?: string; headers?: Record<string, string>;
+  to: string | string[]; subject: string; text: string; html?: string; headers?: Record<string, string>;
 }
 export interface EmailSender {
   name: string;
   send(msg: EmailMessage): Promise<void>;
 }
+
+const toList = (to: string | string[]): string[] => Array.isArray(to) ? to : [to];
 
 type HttpOpts = { apiKey?: string; from?: string; apiBase?: string; fetchImpl?: typeof fetch; timeoutMs?: number };
 
@@ -36,7 +38,7 @@ export function makeResendSender(opts: HttpOpts = {}): EmailSender {
       const from = opts.from ?? process.env.EMAIL_FROM;
       if (!from) throw new Error('EMAIL_FROM is not set');
       await postJson(doFetch, `${apiBase}/emails`, { authorization: `Bearer ${key}` },
-        { from, to: [msg.to], subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), ...(msg.headers ? { headers: msg.headers } : {}) },
+        { from, to: toList(msg.to), subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}), ...(msg.headers ? { headers: msg.headers } : {}) },
         timeoutMs, 'resend');
     },
   };
@@ -57,7 +59,7 @@ export function makeBrevoSender(opts: HttpOpts & { fromName?: string } = {}): Em
       await postJson(doFetch, `${apiBase}/v3/smtp/email`, { 'api-key': key },
         {
           sender: { email: from, ...(name ? { name } : {}) },
-          to: [{ email: msg.to }],
+          to: toList(msg.to).map((email) => ({ email })),
           subject: msg.subject, textContent: msg.text,
           ...(msg.html ? { htmlContent: msg.html } : {}),
           ...(msg.headers ? { headers: msg.headers } : {}),
@@ -76,7 +78,7 @@ export function makeConsoleSender(): EmailSender {
     name: 'console',
     async send(msg: EmailMessage): Promise<void> {
       console.log(
-        `\n${'='.repeat(72)}\n[email:console] to: ${msg.to}\nsubject: ${msg.subject}\n${'-'.repeat(72)}\n${msg.text}${'='.repeat(72)}\n`,
+        `\n${'='.repeat(72)}\n[email:console] to: ${toList(msg.to).join(', ')}\nsubject: ${msg.subject}\n${'-'.repeat(72)}\n${msg.text}${'='.repeat(72)}\n`,
       );
     },
   };

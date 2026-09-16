@@ -375,7 +375,16 @@ reports no violation. Unsetting the variable is the rollback.
 `style` attributes, which a nonce cannot cover, and inline styles are not the script-execution vector this
 policy addresses. Tightening styles is separate work.
 
-**Also never tested end to end:** the forged-header refusal on the live Netlify deployment. `README.md` has
-flagged it since before launch — sending `/admin` a request with the internal identity header hand-set, and
-confirming it is refused, needs a live Auth0 tenant and has only ever been exercised in unit tests. It is a
-short check for anyone with access, and it is the single most valuable thing an outside reviewer could run.
+**Tested live:** the forged-header refusal on the Netlify deployment. On 2026-09-04 and again on 2026-09-14,
+`/admin` was requested from outside with the internal identity header hand-set to a publisher's address, and
+the response body was byte-identical to the request without the header: the middleware strips the header
+before anything reads it (P1). The check is one `curl` pair and is worth repeating after any change to
+`middleware.ts` or its matcher:
+
+```sh
+curl -s https://announce.aztec.network/admin > a.html
+curl -s -H 'x-announce-internal-auth0-email: <a publisher address>' https://announce.aztec.network/admin > b.html
+cmp a.html b.html && echo identical
+```
+
+The two files must be identical.

@@ -53,6 +53,36 @@ _json_escape() {
   fi
 }
 
+# ALERT_EMAIL_TO may hold several addresses separated by commas. Same rule
+# as src/core/recipients.ts in the app: split, trim, drop empties, drop
+# exact duplicates, keep order. $1 = the raw value, $2 = "brevo" or "resend"
+# (Brevo wants [{"email":..}], Resend wants [".."]). Prints a JSON array.
+_recipients_json() {
+  local raw="$1" style="$2" out="" seen="," addr
+  local IFS=','
+  # Word-splitting $raw below also pathname-expands each word (`*`, `?`,
+  # `[...]`): an address of literally "*" would otherwise become whatever
+  # files happen to match `*` in the current directory. `set -f` disables
+  # that expansion for the loop; restore whatever the caller's state was
+  # rather than assuming it was on, since this file is sourced into
+  # backup.sh and cert-reload.sh.j2's own shells.
+  case "$-" in *f*) ;; *) set -f; local restore_f=1 ;; esac
+  for addr in $raw; do
+    addr="$(printf '%s' "$addr" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [ -z "$addr" ] && continue
+    case "$seen" in *",$addr,"*) continue ;; esac
+    seen="$seen$addr,"
+    [ -n "$out" ] && out="$out,"
+    if [ "$style" = "brevo" ]; then
+      out="$out{\"email\":\"$(_json_escape "$addr")\"}"
+    else
+      out="$out\"$(_json_escape "$addr")\""
+    fi
+  done
+  [ -n "${restore_f:-}" ] && set +f
+  printf '[%s]' "$out"
+}
+
 send_alert() {
   local subject="$1" body="$2"
   local _alert_email_to="${ALERT_EMAIL_TO:-}"
@@ -72,11 +102,17 @@ send_alert() {
         log "ALERT SEND SKIPPED: BREVO_API_KEY/EMAIL_FROM not set"
         return 0
       fi
+      local _to_brevo
+      _to_brevo="$(_recipients_json "$_alert_email_to" brevo)"
+      if [ "$_to_brevo" = "[]" ]; then
+        log "ALERT SEND SKIPPED: ALERT_EMAIL_TO is empty"
+        return 0
+      fi
       curl -fsS -X POST "https://api.brevo.com/v3/smtp/email" \
         -H "api-key: $_brevo_api_key" -H "content-type: application/json" \
-        -d "$(printf '{"sender":{"email":"%s","name":"%s"},"to":[{"email":"%s"}],"subject":"%s","textContent":"%s"}' \
+        -d "$(printf '{"sender":{"email":"%s","name":"%s"},"to":%s,"subject":"%s","textContent":"%s"}' \
           "$(_json_escape "$_email_from")" "$(_json_escape "${_email_from_name:-Aztec Announcements}")" \
-          "$(_json_escape "$_alert_email_to")" "$(_json_escape "$subject")" "$(_json_escape "$body")")" \
+          "$_to_brevo" "$(_json_escape "$subject")" "$(_json_escape "$body")")" \
         >/dev/null && log "alert sent via brevo to $_alert_email_to" \
         || log "WARNING: alert send via brevo FAILED (original failure above still stands)"
       ;;
@@ -85,10 +121,16 @@ send_alert() {
         log "ALERT SEND SKIPPED: RESEND_API_KEY/EMAIL_FROM not set"
         return 0
       fi
+      local _to_resend
+      _to_resend="$(_recipients_json "$_alert_email_to" resend)"
+      if [ "$_to_resend" = "[]" ]; then
+        log "ALERT SEND SKIPPED: ALERT_EMAIL_TO is empty"
+        return 0
+      fi
       curl -fsS -X POST "https://api.resend.com/emails" \
         -H "authorization: Bearer $_resend_api_key" -H "content-type: application/json" \
-        -d "$(printf '{"from":"%s","to":["%s"],"subject":"%s","text":"%s"}' \
-          "$(_json_escape "$_email_from")" "$(_json_escape "$_alert_email_to")" \
+        -d "$(printf '{"from":"%s","to":%s,"subject":"%s","text":"%s"}' \
+          "$(_json_escape "$_email_from")" "$_to_resend" \
           "$(_json_escape "$subject")" "$(_json_escape "$body")")" \
         >/dev/null && log "alert sent via resend to $_alert_email_to" \
         || log "WARNING: alert send via resend FAILED (original failure above still stands)"

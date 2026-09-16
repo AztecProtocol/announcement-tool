@@ -1,6 +1,7 @@
 import type { Sql } from 'postgres';
 import type { EmailSender } from '../adapters/esp.js';
 import { evaluateChannelHealth, type HealthIssue } from './health.js';
+import { parseRecipients } from './recipients.js';
 
 export function alertKey(issue: HealthIssue): string {
   return `${issue.kind}:${issue.channel}:${issue.target}:${issue.announcementId}:${issue.revision}`;
@@ -14,8 +15,8 @@ export function alertKey(issue: HealthIssue): string {
 export async function dispatchHealthAlerts(
   sql: Sql, sender: EmailSender, opts: { to?: string; sinceHours?: number } = {},
 ): Promise<HealthIssue[]> {
-  const to = opts.to ?? process.env.ALERT_EMAIL_TO;
-  if (!to) {
+  const recipients = parseRecipients(opts.to ?? process.env.ALERT_EMAIL_TO);
+  if (recipients.length === 0) {
     console.warn('ALERT_EMAIL_TO is not set — channel-health alerts are disabled');
     return [];
   }
@@ -51,7 +52,7 @@ export async function dispatchHealthAlerts(
 
     const lines = fresh.map(i => `- [${i.channel}] ${i.kind} on ${i.announcementId}: ${i.detail}`);
     await sender.send({
-      to,
+      to: recipients,
       subject: `Aztec announcements: channel health — ${fresh.length} new issue${fresh.length === 1 ? '' : 's'}`,
       text: `New channel-health issues detected by the announcement worker:\n\n${lines.join('\n')}\n\nEach issue is reported once. Check the delivery ledger for detail.\n`,
     });
