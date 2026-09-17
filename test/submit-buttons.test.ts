@@ -64,10 +64,9 @@ describe('submitting buttons show a pending state', () => {
   it('the publish control tracks which action is pending, not only that one is', () => {
     const src = readFileSync(join(APP, 'admin/review/[id]/publish-control.tsx'), 'utf8');
     expect(src).toContain('pendingKey');
-    // every run(...) call names its action
-    const calls = src.match(/\brun\(/g) ?? [];
-    const keyed = src.match(/\brun\('[a-z-]+',/g) ?? [];
-    expect(calls.length).toBeGreaterThan(0);
-    expect(keyed.length).toBe(calls.length - 1); // minus the function declaration itself
+    const callSites = (src.match(/\brun\(/g) ?? []).length - (src.match(/function run\(/g) ?? []).length;
+    const keyed = (src.match(/\brun\('[a-z-]+',/g) ?? []).length;
+    expect(callSites).toBeGreaterThan(0);
+    expect(keyed).toBe(callSites); // an unkeyed run(() => …) call fails here
   });
 });

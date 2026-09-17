@@ -261,9 +261,6 @@ button.secondary:hover:not(:disabled) { background: var(--line-soft); }
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; border-right-color: currentColor; opacity: 0.6; }
-}
 
 /* ── code ───────────────────────────────────────────────── */
 code { font-family: var(--mono); font-size: 0.88em; }
@@ -699,4 +696,6 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
    which invites a future addition to wrongly assume it's motion-scoped. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* The spinner stops rotating and becomes a full dimmed ring instead. */
+  .spinner { animation: none; border-right-color: currentColor; opacity: 0.6; }
 }
