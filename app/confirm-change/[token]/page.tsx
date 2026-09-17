@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getDb } from '../../../src/web/db.js';
 import { confirmFilterChange } from '../../../src/core/subscribe-flow.js';
 import { isValidToken } from '../../../src/web/unsubscribe-html.js';
+import SubmitButton from '../../submit-button.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,7 +55,7 @@ export default async function ConfirmChangePage(
       <h1>Confirm your preference change</h1>
       <p>Click below to apply the change to your Aztec release announcement preferences.</p>
       <form action={confirm}>
-        <button type="submit">Confirm change</button>
+        <SubmitButton pendingLabel="Confirming…">Confirm change</SubmitButton>
       </form>
     </>
   );
