@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getDb } from '../../../src/web/db.js';
 import { confirmSubscription } from '../../../src/core/subscribe-flow.js';
 import { isValidToken } from '../../../src/web/unsubscribe-html.js';
+import SubmitButton from '../../submit-button.js';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +54,7 @@ export default async function ConfirmPage(
       <h1>Confirm your subscription</h1>
       <p>Click below to start receiving Aztec release announcements matching your preferences.</p>
       <form action={confirm}>
-        <button type="submit">Confirm subscription</button>
+        <SubmitButton pendingLabel="Confirming…">Confirm subscription</SubmitButton>
       </form>
     </>
   );

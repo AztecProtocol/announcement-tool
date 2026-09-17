@@ -247,6 +247,21 @@ button:disabled { opacity: 0.55; cursor: default; }
 button.secondary { background: transparent; color: var(--ink); }
 button.secondary:hover:not(:disabled) { background: var(--line-soft); }
 
+/* Pending state for any button that submits to the server. A serverless cold
+   start can take a few seconds; without this a click looks like it did nothing. */
+.spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.5em;
+  vertical-align: -0.08em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ── code ───────────────────────────────────────────────── */
 code { font-family: var(--mono); font-size: 0.88em; }
 pre {
@@ -681,4 +696,6 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
    which invites a future addition to wrongly assume it's motion-scoped. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* The spinner stops rotating and becomes a full dimmed ring instead. */
+  .spinner { animation: none; border-right-color: currentColor; opacity: 0.6; }
 }

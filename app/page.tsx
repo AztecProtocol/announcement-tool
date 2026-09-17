@@ -1,5 +1,6 @@
 import { subscribeEmail } from './actions.js';
 import WebhookForm from './webhook-form.js';
+import SubmitButton from './submit-button.js';
 import { broadcastLinks } from '../src/web/broadcast-links.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../src/core/types.js';
 
@@ -46,7 +47,7 @@ export default async function SubscribePage({ searchParams }: { searchParams: Pr
           <fieldset><legend>Types</legend>{TYPES.map(v => box('types', v, isTypeChecked(v)))}</fieldset>
           <fieldset><legend>Severities</legend>{SEVERITIES.map(v => box('severities', v, isSeverityChecked(v)))}</fieldset>
           <fieldset><legend>Audience</legend>{AUDIENCES.map(v => box('audiences', v, isAudienceChecked(v)))}</fieldset>
-          <button type="submit">Subscribe by email</button>
+          <SubmitButton pendingLabel="Subscribing…">Subscribe by email</SubmitButton>
         </form>
       </div>
 

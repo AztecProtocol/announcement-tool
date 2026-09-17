@@ -29,7 +29,8 @@ function TestButton({ token }: { token: string }) {
   return (
     <form action={formAction}>
       <input type="hidden" name="token" value={token} />
-      <button type="submit" disabled={pending || result?.verified === true}>
+      <button type="submit" disabled={pending || result?.verified === true} aria-busy={pending}>
+        {pending && <span className="spinner" aria-hidden="true" />}
         {pending ? 'Sending…' : 'Send test event'}
       </button>
       {result?.verified && <p><strong>✅ Test passed. The webhook is active.</strong></p>}
@@ -53,7 +54,10 @@ export default function WebhookForm() {
         <fieldset><legend>Types</legend>{TYPES.map(v => box('types', v, v !== 'info'))}</fieldset>
         <fieldset><legend>Severities</legend>{SEVERITIES.map(v => box('severities', v, v !== 'info'))}</fieldset>
         <fieldset><legend>Audience</legend>{AUDIENCES.map(v => box('audiences', v, v === 'operators'))}</fieldset>
-        <button type="submit" disabled={pending}>{pending ? 'Registering…' : 'Register webhook'}</button>
+        <button type="submit" disabled={pending} aria-busy={pending}>
+          {pending && <span className="spinner" aria-hidden="true" />}
+          {pending ? 'Registering…' : 'Register webhook'}
+        </button>
       </form>
 
       {result && (
