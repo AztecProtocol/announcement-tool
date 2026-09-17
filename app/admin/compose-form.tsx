@@ -472,7 +472,8 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
           </fieldset>
 
           <div>
-            <button type="submit" disabled={pending}>
+            <button type="submit" disabled={pending} aria-busy={pending}>
+              {pending && <span className="spinner" aria-hidden="true" />}
               {pending ? 'Saving…' : editingId ? 'Save revision' : 'Save draft'}
             </button>
           </div>
@@ -492,8 +493,10 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
               type="button"
               className="secondary"
               disabled={saveTemplatePending || !templateName.trim()}
+              aria-busy={saveTemplatePending}
               onClick={handleSaveTemplate}
             >
+              {saveTemplatePending && <span className="spinner" aria-hidden="true" />}
               {saveTemplatePending ? 'Saving…' : 'Save template'}
             </button>
           </div>
@@ -505,7 +508,8 @@ export default function ComposeForm({ templates = [], recentAnnouncements = [], 
       <div className="compose-preview">
         <h2>Preview</h2>
         <div>
-          <button type="button" onClick={refreshPreview} disabled={previewPending}>
+          <button type="button" onClick={refreshPreview} disabled={previewPending} aria-busy={previewPending}>
+            {previewPending && <span className="spinner" aria-hidden="true" />}
             {previewPending ? 'Refreshing…' : 'Refresh preview'}
           </button>
         </div>

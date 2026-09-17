@@ -51,4 +51,23 @@ describe('submitting buttons show a pending state', () => {
     expect(css).toMatch(/@keyframes\s+spin/);
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*\.spinner/);
   });
+
+  it('every client component that calls a server action renders the spinner', () => {
+    const mustHave = [
+      'webhook-form.tsx', 'admin/compose-form.tsx', 'admin/review/[id]/publish-control.tsx',
+      'admin/discard-button.tsx', 'admin/withdraw-button.tsx', 'admin/cancel-schedule-button.tsx',
+    ];
+    const missing = mustHave.filter((f) => !readFileSync(join(APP, f), 'utf8').includes('className="spinner"'));
+    expect(missing).toEqual([]);
+  });
+
+  it('the publish control tracks which action is pending, not only that one is', () => {
+    const src = readFileSync(join(APP, 'admin/review/[id]/publish-control.tsx'), 'utf8');
+    expect(src).toContain('pendingKey');
+    // every run(...) call names its action
+    const calls = src.match(/\brun\(/g) ?? [];
+    const keyed = src.match(/\brun\('[a-z-]+',/g) ?? [];
+    expect(calls.length).toBeGreaterThan(0);
+    expect(keyed.length).toBe(calls.length - 1); // minus the function declaration itself
+  });
 });

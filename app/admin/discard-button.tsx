@@ -47,7 +47,8 @@ export default function DiscardButton({ id }: { id: string }) {
 
   return (
     <span className="draft-discard">
-      <button type="button" className="destructive" disabled={pending} onClick={handleClick}>
+      <button type="button" className="destructive" disabled={pending} aria-busy={pending} onClick={handleClick}>
+        {pending && <span className="spinner" aria-hidden="true" />}
         {pending ? 'Discarding…' : armed ? 'Confirm discard?' : 'Discard'}
       </button>
       {armed && !pending && (

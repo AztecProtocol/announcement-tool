@@ -36,7 +36,8 @@ export default function WithdrawButton({ id }: { id: string }) {
 
   return (
     <span className="pending-withdraw">
-      <button type="button" className="destructive" disabled={pending} onClick={handleClick}>
+      <button type="button" className="destructive" disabled={pending} aria-busy={pending} onClick={handleClick}>
+        {pending && <span className="spinner" aria-hidden="true" />}
         {pending ? 'Withdrawing…' : 'Withdraw'}
       </button>
       {error && <span className="pending-error">{error}</span>}

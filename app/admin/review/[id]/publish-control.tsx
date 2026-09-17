@@ -24,15 +24,20 @@ export type PublishControlProps = {
 
 export default function PublishControl({ announcement, viewerEmail }: PublishControlProps) {
   const router = useRouter();
-  const [pending, setPending] = useState(false);
+  // Which action is in flight. Every button is disabled while any action runs
+  // (two publishes must not race), but only the clicked one shows the spinner
+  // and its "…" label — three buttons all reading "Publishing…" / "Requesting…"
+  // / "Scheduling…" at once told the publisher nothing.
+  const [pendingKey, setPendingKey] = useState<string | undefined>(undefined);
+  const pending = pendingKey !== undefined;
   const [error, setError] = useState<string | undefined>(undefined);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [scheduleInput, setScheduleInput] = useState('');
   const [cancelArmed, setCancelArmed] = useState(false);
 
-  async function run(action: () => Promise<{ announcement?: Announcement; error?: string }>) {
-    setPending(true);
+  async function run(key: string, action: () => Promise<{ announcement?: Announcement; error?: string }>) {
+    setPendingKey(key);
     setError(undefined);
     try {
       const res = await action();
@@ -42,7 +47,7 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
       }
       router.refresh();
     } finally {
-      setPending(false);
+      setPendingKey(undefined);
     }
   }
 
@@ -103,14 +108,26 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
       )}
 
       {announcement.status === 'draft' && announcement.severity !== 'critical' && (
-        <button type="button" disabled={pending} onClick={() => run(() => requestPublishAction(announcement.id))}>
-          {pending ? 'Publishing…' : 'Publish now'}
+        <button
+          type="button"
+          disabled={pending}
+          aria-busy={pendingKey === 'publish'}
+          onClick={() => run('publish', () => requestPublishAction(announcement.id))}
+        >
+          {pendingKey === 'publish' && <span className="spinner" aria-hidden="true" />}
+          {pendingKey === 'publish' ? 'Publishing…' : 'Publish now'}
         </button>
       )}
 
       {announcement.status === 'draft' && announcement.severity === 'critical' && (
-        <button type="button" disabled={pending} onClick={() => run(() => requestPublishAction(announcement.id))}>
-          {pending ? 'Requesting…' : 'Request publication'}
+        <button
+          type="button"
+          disabled={pending}
+          aria-busy={pendingKey === 'request'}
+          onClick={() => run('request', () => requestPublishAction(announcement.id))}
+        >
+          {pendingKey === 'request' && <span className="spinner" aria-hidden="true" />}
+          {pendingKey === 'request' ? 'Requesting…' : 'Request publication'}
         </button>
       )}
 
@@ -129,16 +146,18 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
           <button
             type="button"
             disabled={pending || !scheduleInput}
+            aria-busy={pendingKey === 'schedule'}
             onClick={() => {
               const iso = utcInputToIso(scheduleInput);
               if (!iso) {
                 setError('scheduled time is not a valid date');
                 return;
               }
-              run(() => schedulePublishAction(announcement.id, iso));
+              run('schedule', () => schedulePublishAction(announcement.id, iso));
             }}
           >
-            {pending ? 'Scheduling…' : 'Schedule'}
+            {pendingKey === 'schedule' && <span className="spinner" aria-hidden="true" />}
+            {pendingKey === 'schedule' ? 'Scheduling…' : 'Schedule'}
           </button>
         </div>
       )}
@@ -151,9 +170,11 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             type="button"
             className="destructive"
             disabled={pending}
-            onClick={() => run(() => withdrawPublishAction(announcement.id))}
+            aria-busy={pendingKey === 'withdraw'}
+            onClick={() => run('withdraw', () => withdrawPublishAction(announcement.id))}
           >
-            {pending ? 'Withdrawing…' : 'Withdraw request'}
+            {pendingKey === 'withdraw' && <span className="spinner" aria-hidden="true" />}
+            {pendingKey === 'withdraw' ? 'Withdrawing…' : 'Withdraw request'}
           </button>
           <p className="muted">
             Waiting for a second publisher. You requested this
@@ -170,9 +191,11 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             type="button"
             className="destructive"
             disabled={pending}
-            onClick={() => run(() => withdrawPublishAction(announcement.id))}
+            aria-busy={pendingKey === 'withdraw'}
+            onClick={() => run('withdraw', () => withdrawPublishAction(announcement.id))}
           >
-            {pending ? 'Withdrawing…' : 'Withdraw request'}
+            {pendingKey === 'withdraw' && <span className="spinner" aria-hidden="true" />}
+            {pendingKey === 'withdraw' ? 'Withdrawing…' : 'Withdraw request'}
           </button>
           <p className="muted">
             Waiting for a second publisher to confirm this schedule. You requested it
@@ -188,8 +211,14 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             Requested by {announcement.publishRequestedBy ?? 'another publisher'}. Critical announcements
             require a second publisher to confirm.
           </p>
-          <button type="button" disabled={pending} onClick={() => run(() => confirmPublishAction(announcement.id))}>
-            {pending ? 'Confirming…' : 'Confirm and publish'}
+          <button
+            type="button"
+            disabled={pending}
+            aria-busy={pendingKey === 'confirm'}
+            onClick={() => run('confirm', () => confirmPublishAction(announcement.id))}
+          >
+            {pendingKey === 'confirm' && <span className="spinner" aria-hidden="true" />}
+            {pendingKey === 'confirm' ? 'Confirming…' : 'Confirm and publish'}
           </button>
           {' '}
           {!showRejectForm && (
@@ -217,9 +246,11 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
                   type="button"
                   className="destructive"
                   disabled={pending || rejectReason.trim().length === 0}
-                  onClick={() => run(() => rejectPublishAction(announcement.id, rejectReason.trim()))}
+                  aria-busy={pendingKey === 'reject'}
+                  onClick={() => run('reject', () => rejectPublishAction(announcement.id, rejectReason.trim()))}
                 >
-                  {pending ? 'Rejecting…' : 'Submit rejection'}
+                  {pendingKey === 'reject' && <span className="spinner" aria-hidden="true" />}
+                  {pendingKey === 'reject' ? 'Rejecting…' : 'Submit rejection'}
                 </button>
                 {' '}
                 <button
@@ -246,8 +277,14 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             {formatDeadline(announcement.scheduledFor)}. Critical announcements require a second publisher
             to confirm.
           </p>
-          <button type="button" disabled={pending} onClick={() => run(() => confirmScheduleAction(announcement.id))}>
-            {pending ? 'Confirming…' : 'Confirm schedule'}
+          <button
+            type="button"
+            disabled={pending}
+            aria-busy={pendingKey === 'confirm-schedule'}
+            onClick={() => run('confirm-schedule', () => confirmScheduleAction(announcement.id))}
+          >
+            {pendingKey === 'confirm-schedule' && <span className="spinner" aria-hidden="true" />}
+            {pendingKey === 'confirm-schedule' ? 'Confirming…' : 'Confirm schedule'}
           </button>
           {' '}
           {!showRejectForm && (
@@ -275,9 +312,11 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
                   type="button"
                   className="destructive"
                   disabled={pending || rejectReason.trim().length === 0}
-                  onClick={() => run(() => rejectPublishAction(announcement.id, rejectReason.trim()))}
+                  aria-busy={pendingKey === 'reject'}
+                  onClick={() => run('reject', () => rejectPublishAction(announcement.id, rejectReason.trim()))}
                 >
-                  {pending ? 'Rejecting…' : 'Submit rejection'}
+                  {pendingKey === 'reject' && <span className="spinner" aria-hidden="true" />}
+                  {pendingKey === 'reject' ? 'Rejecting…' : 'Submit rejection'}
                 </button>
                 {' '}
                 <button
@@ -306,15 +345,17 @@ export default function PublishControl({ announcement, viewerEmail }: PublishCon
             type="button"
             className="destructive"
             disabled={pending}
+            aria-busy={pendingKey === 'cancel-schedule'}
             onClick={() => {
               if (!cancelArmed) {
                 setCancelArmed(true);
                 return;
               }
-              run(() => cancelScheduleAction(announcement.id));
+              run('cancel-schedule', () => cancelScheduleAction(announcement.id));
             }}
           >
-            {pending ? 'Cancelling…' : cancelArmed ? 'Confirm cancel?' : 'Cancel'}
+            {pendingKey === 'cancel-schedule' && <span className="spinner" aria-hidden="true" />}
+            {pendingKey === 'cancel-schedule' ? 'Cancelling…' : cancelArmed ? 'Confirm cancel?' : 'Cancel'}
           </button>
           {cancelArmed && !pending && (
             <button
