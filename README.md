@@ -170,7 +170,7 @@ insert into channel_settings (key, channel, config) values
 
 A server owner opens one of our Announcement channels, clicks **Follow**, and picks a channel in their own server. From then on every published post appears there. This works only when our channel is of type Announcement (a Community server feature) and the post has been published — which this tool does by itself when `DISCORD_BOT_TOKEN` is set, and which anyone with Manage Messages can do by hand with the megaphone icon otherwise.
 
-The publish step runs after the delivery and cannot fail it. Its outcome is in `delivery_ledger.publish_note` (`published`, `skipped: …` or `failed: …`); a `failed:` note raises a channel-health alert. The bot needs View Channel, Send Messages and Manage Messages in the announcement channels, and nothing else: it makes two REST calls and opens no gateway connection.
+The publish step runs after the delivery and cannot fail it. Its outcome is in `delivery_ledger.publish_note` (`published`, `skipped: …` or `failed: …`); a `failed:` note raises a channel-health alert. The bot needs View Channel, Send Messages and Manage Messages in the announcement channels, and nothing else: it makes at most three REST calls (one channel lookup, and the publish call with one retry on a rate limit) and opens no gateway connection. Update and reminder posts are published too: each is a new message.
 
 ### Telegram
 

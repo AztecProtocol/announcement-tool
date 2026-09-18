@@ -238,14 +238,17 @@ on the consumer side.
 timestamps outside a window.
 
 **P43 — The Discord bot token goes only to Discord, and a publish failure cannot repeat a delivery.** The
-token is sent only in the `Authorization` header of requests to the constant `https://discord.com/api/v10`;
-the host is never derived from the configured webhook URL, and the channel and message ids taken from the
-webhook's response are used in a path only if they are all digits. The API base must be `https:` — loopback
-is excepted only so tests can point it at a local server — and a redirect from either Discord endpoint is
-refused rather than followed. The token is redacted from any caught error's message before that text can
-reach a delivery note. The publish phase runs after the webhook post has succeeded, never throws, and its
-outcome is a note on the delivery row, so the worker cannot retry and double-post because of it.
-*Enforced:* `src/adapters/discord-publish.ts`, `src/adapters/discord.ts`. *Tested:* `test/discord-publish.test.ts`.
+token is sent only in the `Authorization` header of requests to `https://discord.com/api/v10`; that base is
+a constant in every production code path (`buildAdapters` passes no override), and any injected base must be
+`https:` or loopback. The host is never derived from the configured webhook URL, and the channel and message
+ids taken from the webhook's response are used in a path only if they are all digits. A redirect from either
+Discord endpoint is refused rather than followed. The token is redacted from any caught error's message
+before that text can reach a delivery note. The publish phase runs after the webhook post has succeeded,
+never throws, and its outcome is a note on the delivery row, so the worker cannot retry and double-post
+because of it. The worker records a delivery without the note on a database that has not had migration 020
+applied, so the order of deploy and migration cannot cause a repeat delivery.
+*Enforced:* `src/adapters/discord-publish.ts`, `src/adapters/discord.ts`, `src/worker/fanout.ts`.
+*Tested:* `test/discord-publish.test.ts`, `test/fanout.test.ts`.
 
 ### 5.5 Content handling and injection (A2)
 
