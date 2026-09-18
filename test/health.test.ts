@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import type { Sql } from 'postgres';
-import { testSql, resetDb } from './helpers.js';
+import postgres, { type Sql } from 'postgres';
+import { testSql, resetDb, TEST_DB_URL } from './helpers.js';
 import { evaluateChannelHealth } from '../src/core/health.js';
 
 let sql: Sql;
@@ -81,5 +81,23 @@ describe('evaluateChannelHealth', () => {
     await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, delivered_at, publish_note)
       values ('ann_h', 1, 'publish', 'discord', 'd1', 'delivered', now() - interval '48 hours', 'failed: crosspost HTTP 403')`;
     expect((await evaluateChannelHealth(sql)).filter(i => i.kind === 'publish_failed')).toEqual([]);
+  });
+
+  it('does not throw on a database without migration 020, and still reports an exhausted row', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, attempts, last_error)
+      values ('ann_h', 1, 'publish', 'signal', 'signal:main', 'exhausted', 5, 'gone')`;
+    await sql`alter table delivery_ledger drop column publish_note`;
+    // A dedicated, non-prepared connection: postgres.js can cache a prepared
+    // plan from the shared `sql` fixture that predates this `alter table`, so
+    // open a fresh one afterward, the way a freshly-deployed process would.
+    const noPrepSql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const issues = await evaluateChannelHealth(noPrepSql);
+      expect(issues.some(i => i.kind === 'exhausted' && i.channel === 'signal')).toBe(true);
+      expect(issues.some(i => i.kind === 'publish_failed')).toBe(false);
+    } finally {
+      await noPrepSql.end();
+      await sql`alter table delivery_ledger add column publish_note text`;
+    }
   });
 });

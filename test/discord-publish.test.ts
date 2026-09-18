@@ -411,6 +411,29 @@ describe('discord adapter — publish to followers', () => {
     expect(hitsA[0].body).toBe(hitsB[0].body);
   });
 
+  it('20. publishTimeoutMs bounds the publish phase independently of the webhook timeout', async () => {
+    const hangingServer = createServer(() => { /* never responds */ });
+    await new Promise<void>(resolve => hangingServer.listen(0, '127.0.0.1', resolve));
+    const { port } = hangingServer.address() as { port: number };
+    const hangingBase = `http://127.0.0.1:${port}`;
+
+    const { base, hits, close } = await discordStub({});
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, {
+      botToken: 'BOT-TOKEN-XYZ', apiBase: `${hangingBase}/api`, sleep: async () => {}, publishTimeoutMs: 50,
+    });
+
+    const start = Date.now();
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    const elapsed = Date.now() - start;
+    close();
+    hangingServer.close();
+
+    expect(elapsed).toBeLessThan(1_000);
+    expect((result as { publishNote?: string })?.publishNote?.startsWith('failed: ')).toBe(true);
+    expect(hits.filter(h => h.url.startsWith('/webhook')).length).toBe(1);
+  });
+
   it('19. crosspost 429 with a fractional retry_after rounds up in the note', async () => {
     const { base, hits, close } = await discordStub({
       crosspost: (_n, res) => {

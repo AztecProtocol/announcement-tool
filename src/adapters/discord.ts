@@ -18,7 +18,12 @@ export function makeDiscordAdapter(
   sql: Sql,
   opts: {
     fetchImpl?: typeof fetch; timeoutMs?: number;
-    botToken?: string; apiBase?: string; sleep?: (ms: number) => Promise<void>;
+    // The publish calls run while the delivery row is locked (see fanout.ts).
+    // They are two small metadata calls, so a short timeout bounds the lock
+    // hold: worst case is roughly the webhook post (10s) plus the channel
+    // lookup (5s) plus the crosspost (5s) plus one rate-limit wait (<=10s)
+    // plus the retried crosspost (5s).
+    botToken?: string; apiBase?: string; sleep?: (ms: number) => Promise<void>; publishTimeoutMs?: number;
   } = {},
 ): ChannelAdapter {
   const doFetch = opts.fetchImpl ?? fetch;
@@ -80,7 +85,7 @@ export function makeDiscordAdapter(
       return {
         publishNote: await publishToFollowers({
           botToken, channelId: msg?.channel_id, messageId: msg?.id,
-          apiBase: opts.apiBase, fetchImpl: doFetch, timeoutMs, sleep: opts.sleep,
+          apiBase: opts.apiBase, fetchImpl: doFetch, timeoutMs: opts.publishTimeoutMs ?? 5_000, sleep: opts.sleep,
         }),
       };
     },

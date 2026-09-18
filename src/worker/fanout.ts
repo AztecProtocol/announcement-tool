@@ -19,6 +19,17 @@ export async function runFanoutOnce(
   const known = Object.keys(adapters);
   if (known.length === 0) return { delivered, failed };
 
+  // The publish note column arrives with migration 020. The deploy and the
+  // migration are separate steps, and this statement runs AFTER a message has
+  // gone out: if it failed on a missing column the whole batch would roll back
+  // and every channel would deliver again on the next tick. So check first, and
+  // record the delivery without the note on a database that does not have it
+  // yet. Checked fresh on every call — never cached — so a migration applied
+  // between ticks takes effect on the very next one.
+  const [{ has_note: hasPublishNote }] = await sql`
+    select exists (select 1 from information_schema.columns
+      where table_schema = current_schema() and table_name = 'delivery_ledger' and column_name = 'publish_note') as has_note`;
+
   await sql.begin(async tx => {
     const due = await tx`select * from delivery_ledger
       where status in ('pending','failed') and next_attempt_at <= now() and channel in ${tx(known)}
@@ -75,10 +86,16 @@ export async function runFanoutOnce(
         // mark it failed and the retry would post it twice.
         const rawNote = result && typeof result === 'object' ? (result as { publishNote?: unknown }).publishNote : undefined;
         const publishNote = typeof rawNote === 'string' && rawNote ? rawNote.slice(0, 200) : null;
-        await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now(),
-            publish_note = ${publishNote}
-          where announcement_id = ${row.announcement_id} and revision = ${row.revision}
-            and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
+        if (hasPublishNote) {
+          await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now(),
+              publish_note = ${publishNote}
+            where announcement_id = ${row.announcement_id} and revision = ${row.revision}
+              and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
+        } else {
+          await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now()
+            where announcement_id = ${row.announcement_id} and revision = ${row.revision}
+              and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
+        }
         delivered++;
       } catch (err) {
         const exhausted = attempts >= MAX_ATTEMPTS;
