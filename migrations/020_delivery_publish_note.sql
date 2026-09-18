@@ -1,0 +1,11 @@
+-- Outcome of the step that follows a successful delivery on channels that
+-- have one. Today that is Discord's crosspost ("Publish") of a message in an
+-- Announcement channel, which is a second API call that can fail while the
+-- post itself succeeded. The row stays 'delivered' — retrying the delivery
+-- would post a second copy — and this column says what happened next:
+-- 'published', 'skipped: …' or 'failed: …'. Null for every other channel and
+-- for rows written before this migration.
+--
+-- No grant needed: announce_app already holds select/insert/update on
+-- delivery_ledger (migration 014), and table-level grants cover new columns.
+alter table delivery_ledger add column publish_note text;

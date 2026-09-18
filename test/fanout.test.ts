@@ -88,6 +88,24 @@ describe('runFanoutOnce', () => {
     expect(row.attempts).toBe(0);
   });
 
+  it('stores the adapter\'s publish note on a delivered row, and null when the adapter returns nothing', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target)
+      values ('ann_w', 1, 'publish', 'webhook', 'sub_2')`;
+    const adapter: ChannelAdapter = {
+      channel: 'webhook',
+      deliver: async (_a, target) => {
+        if (target === 'sub_1') return { publishNote: 'failed: crosspost HTTP 403' };
+        return undefined;
+      },
+    };
+    await runFanoutOnce(sql, { webhook: adapter });
+    const rows = await sql`select target, status, publish_note from delivery_ledger order by target`;
+    expect(rows.map(r => [r.target, r.status, r.publish_note])).toEqual([
+      ['sub_1', 'delivered', 'failed: crosspost HTTP 403'],
+      ['sub_2', 'delivered', null],
+    ]);
+  });
+
   it('an orphaned ledger row (announcement deleted) is marked exhausted and does not block the batch', async () => {
     await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, next_attempt_at)
       values ('ann_missing', 1, 'publish', 'webhook', 'sub_orphan', now() - interval '2 days')`;

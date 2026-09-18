@@ -66,8 +66,13 @@ export async function runFanoutOnce(
       const a = rowToAnnouncement(annRows[0]);
       const attempts = (row.attempts as number) + 1;
       try {
-        await adapters[row.channel as string].deliver(a, row.target as string, row.kind as DeliveryKind);
-        await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now()
+        const result = await adapters[row.channel as string].deliver(a, row.target as string, row.kind as DeliveryKind);
+        // A channel may report what happened AFTER the delivery (Discord: publishing
+        // to following servers). It never changes the status: the message is out,
+        // and a retry would post it twice.
+        const publishNote = (result && result.publishNote) ? result.publishNote.slice(0, 200) : null;
+        await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now(),
+            publish_note = ${publishNote}
           where announcement_id = ${row.announcement_id} and revision = ${row.revision}
             and kind = ${row.kind} and channel = ${row.channel} and target = ${row.target}`;
         delivered++;
