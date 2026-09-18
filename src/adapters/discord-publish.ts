@@ -10,6 +10,16 @@
  * This runs AFTER the announcement has been delivered. Nothing here may throw:
  * a throw would make the worker retry the delivery and post a second copy. The
  * outcome is a short note for the delivery ledger.
+ *
+ * Token secrecy is structural, not incidental: the token appears only in the
+ * `Authorization` header we build ourselves. Every other string that reaches
+ * the ledger — an upstream response body, a caught error's message — is
+ * either discarded outright or redacted before it is used, so secrecy does
+ * not depend on undici's (or any fetch library's) error-formatting habits.
+ *
+ * Note strings this module can return, beyond the ones already documented
+ * inline: `failed: channel lookup returned no JSON`, `failed: insecure api
+ * base`.
  */
 export const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
@@ -30,6 +40,16 @@ export async function publishToFollowers(input: {
       return 'failed: no message id';
     }
     const base = (input.apiBase ?? DISCORD_API_BASE).replace(/\/+$/, '');
+
+    // The token is sent to whatever apiBase is given. Refuse anything that
+    // is not HTTPS or a local loopback (tests point apiBase at 127.0.0.1),
+    // before any request is made — a plaintext or otherwise untrusted host
+    // must never see the Authorization header.
+    let parsedBase: URL;
+    try { parsedBase = new URL(base); } catch { return 'failed: insecure api base'; }
+    const isLocal = parsedBase.hostname === '127.0.0.1' || parsedBase.hostname === 'localhost' || parsedBase.hostname === '[::1]' || parsedBase.hostname === '::1';
+    if (parsedBase.protocol !== 'https:' && !isLocal) return 'failed: insecure api base';
+
     const doFetch = input.fetchImpl ?? fetch;
     const timeoutMs = input.timeoutMs ?? 10_000;
     const sleep = input.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
@@ -40,14 +60,17 @@ export async function publishToFollowers(input: {
 
     // Only an Announcement channel can be published; on a text channel the
     // call fails. Look the type up rather than assume it.
-    const ch = await doFetch(`${base}/channels/${channelId}`, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    // redirect: 'error' — a redirect from either of these two endpoints is
+    // never legitimate, and following one could send the token elsewhere.
+    const ch = await doFetch(`${base}/channels/${channelId}`, { headers, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
     if (!ch.ok) return `failed: channel lookup HTTP ${ch.status}`;
-    const channel = await ch.json() as { type?: unknown };
+    const channel = await ch.json().catch(() => null) as { type?: unknown } | null;
+    if (!channel || typeof channel !== 'object') return 'failed: channel lookup returned no JSON';
     if (channel.type !== GUILD_ANNOUNCEMENT) return 'skipped: not an announcement channel';
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await doFetch(`${base}/channels/${channelId}/messages/${messageId}/crosspost`, {
-        method: 'POST', headers, signal: AbortSignal.timeout(timeoutMs),
+        method: 'POST', headers, signal: AbortSignal.timeout(timeoutMs), redirect: 'error',
       });
       if (res.ok) return 'published';
       if (res.status === 429) {
@@ -63,8 +86,12 @@ export async function publishToFollowers(input: {
     }
     return 'failed: rate limited (retry after ?s)';
   } catch (err) {
-    // A fetch error message names the host, never a header, so the token
-    // cannot appear here; the slice bounds what reaches the ledger.
-    return `failed: ${String(err instanceof Error ? err.message : err).slice(0, 120)}`;
+    // Secrecy here is by construction, not by the fetch library's habits: a
+    // foreign error message could in principle carry the token (e.g. a proxy
+    // echoing the request line back), so redact it before bounding the
+    // length, rather than trusting undici's error formatting to omit it.
+    const raw = String(err instanceof Error ? err.message : err);
+    const safe = input.botToken ? raw.split(input.botToken).join('***') : raw;
+    return `failed: ${safe.slice(0, 120)}`;
   }
 }
