@@ -106,6 +106,28 @@ describe('runFanoutOnce', () => {
     ]);
   });
 
+  it('a non-string publish note does not throw and does not turn a delivered row into a retry', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target)
+      values ('ann_w', 1, 'publish', 'webhook', 'sub_2')`;
+    const adapter: ChannelAdapter = {
+      channel: 'webhook',
+      deliver: async (_a, target) => {
+        if (target === 'sub_1') return { publishNote: 403 } as unknown as { publishNote: string };
+        return { publishNote: 'x'.repeat(500) };
+      },
+    };
+    await runFanoutOnce(sql, { webhook: adapter });
+    const [bySub1, bySub2] = await sql`select target, status, attempts, last_error, publish_note from delivery_ledger order by target`;
+    expect(bySub1.status).toBe('delivered');
+    expect(bySub1.attempts).toBe(1);
+    expect(bySub1.last_error).toBeNull();
+    expect(bySub1.publish_note).toBeNull();
+    expect(bySub2.status).toBe('delivered');
+    expect(bySub2.attempts).toBe(1);
+    expect(bySub2.last_error).toBeNull();
+    expect(bySub2.publish_note.length).toBe(200);
+  });
+
   it('an orphaned ledger row (announcement deleted) is marked exhausted and does not block the batch', async () => {
     await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, next_attempt_at)
       values ('ann_missing', 1, 'publish', 'webhook', 'sub_orphan', now() - interval '2 days')`;

@@ -70,7 +70,11 @@ export async function runFanoutOnce(
         // A channel may report what happened AFTER the delivery (Discord: publishing
         // to following servers). It never changes the status: the message is out,
         // and a retry would post it twice.
-        const publishNote = (result && result.publishNote) ? result.publishNote.slice(0, 200) : null;
+        // Runtime guard, not only the type: a note that is not a string must
+        // not throw here. This runs after the message is out; a throw would
+        // mark it failed and the retry would post it twice.
+        const rawNote = result && typeof result === 'object' ? (result as { publishNote?: unknown }).publishNote : undefined;
+        const publishNote = typeof rawNote === 'string' && rawNote ? rawNote.slice(0, 200) : null;
         await tx`update delivery_ledger set status = 'delivered', attempts = ${attempts}, delivered_at = now(),
             publish_note = ${publishNote}
           where announcement_id = ${row.announcement_id} and revision = ${row.revision}
