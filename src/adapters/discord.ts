@@ -1,8 +1,9 @@
 import type { Sql } from 'postgres';
-import type { ChannelAdapter } from './types.js';
+import type { ChannelAdapter, DeliveryResult } from './types.js';
 import type { Announcement, DeliveryKind } from '../core/types.js';
 import { renderMarkdown } from '../core/render.js';
 import { composeMentionLine, mentionedRoleIds, mentionsEveryone } from '../core/discord-mentions.js';
+import { publishToFollowers } from './discord-publish.js';
 
 async function loadSetting(sql: Sql, target: string): Promise<Record<string, unknown>> {
   const rows = await sql`select config from channel_settings where key = ${target}`;
@@ -10,14 +11,21 @@ async function loadSetting(sql: Sql, target: string): Promise<Record<string, unk
   return rows[0].config as Record<string, unknown>;
 }
 
+// Env vars: DISCORD_BOT_TOKEN (optional) — when set, and a channel's
+// auto_publish is not literally false, a delivered announcement is
+// crossposted so servers following the channel receive it.
 export function makeDiscordAdapter(
-  sql: Sql, opts: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  sql: Sql,
+  opts: {
+    fetchImpl?: typeof fetch; timeoutMs?: number;
+    botToken?: string; apiBase?: string; sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): ChannelAdapter {
   const doFetch = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 10_000;
   return {
     channel: 'discord',
-    async deliver(a: Announcement, target: string, kind: DeliveryKind): Promise<void> {
+    async deliver(a: Announcement, target: string, kind: DeliveryKind): Promise<void | DeliveryResult> {
       const cfg = await loadSetting(sql, target);
       const webhookUrl = cfg.webhook_url as string | undefined;
       if (!webhookUrl) throw new Error(`discord setting ${target} has no webhook_url`);
@@ -29,7 +37,21 @@ export function makeDiscordAdapter(
       // a trustworthy record of what goes on the wire.
       const content = prefix ? `${prefix}\n\n${renderMarkdown(a, kind)}` : renderMarkdown(a, kind);
 
-      const res = await doFetch(webhookUrl, {
+      // Publishing to following servers needs the created message's id, which
+      // Discord returns only with ?wait=true. Ask for it only when a publish will
+      // be attempted, so that without a bot token the request is byte-identical
+      // to what this adapter has always sent.
+      const botToken = opts.botToken ?? process.env.DISCORD_BOT_TOKEN;
+      const autoPublish = cfg.auto_publish !== false;
+      const willPublish = autoPublish && !!botToken;
+      let postUrl = webhookUrl;
+      if (willPublish) {
+        const u = new URL(webhookUrl);
+        u.searchParams.set('wait', 'true');
+        postUrl = u.toString();
+      }
+
+      const res = await doFetch(postUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -49,6 +71,18 @@ export function makeDiscordAdapter(
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) throw new Error(`discord delivery failed: HTTP ${res.status}`);
+
+      // Delivered. From here on nothing may throw — see discord-publish.ts.
+      if (!autoPublish) return { publishNote: 'skipped: auto_publish is off' };
+      if (!botToken) return { publishNote: 'skipped: no bot token' };
+      let msg: { id?: unknown; channel_id?: unknown } = {};
+      try { msg = await res.json() as typeof msg; } catch { /* 204 or not JSON: no id */ }
+      return {
+        publishNote: await publishToFollowers({
+          botToken, channelId: msg?.channel_id, messageId: msg?.id,
+          apiBase: opts.apiBase, fetchImpl: doFetch, timeoutMs, sleep: opts.sleep,
+        }),
+      };
     },
   };
 }
