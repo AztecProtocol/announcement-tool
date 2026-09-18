@@ -161,9 +161,16 @@ insert into channel_settings (key, channel, config) values
 - `roles` (optional) — named roles this destination can mention, as `{ name, id }` pairs. Set with `npm run setup:channel`, not by hand. See "Where mentions belong" below.
 - `prefix` (optional) — an emoji preamble prepended to the message body, on its own line. It is text only. Any mention typed into it — a pasted `<@&ROLE_ID>` / `<@ID>`, or a literal `@everyone` / `@here` — is stripped before sending. It is never posted. Use the role selection below for mentions. Prefix text is limited to 512 characters. `npm run setup:channel` refuses a longer prefix and prompts again. The reason: the mention-stripping pass is quadratic on nested input, so a large accidental paste would slow down every preview and delivery.
 - `username` (optional) — overrides the webhook's default display name.
+- `auto_publish` (optional, default on) — when the destination is a Discord Announcement channel and `DISCORD_BOT_TOKEN` is set, each post is also published ("crossposted"), which is what sends it to the servers that follow the channel. A webhook cannot do this: it is a second, bot-authenticated API call. Set `auto_publish` to `false` with `npm run setup:channel` to keep a destination local. A text channel is detected and skipped.
 - `networks` / `types` — used by the fan-out matcher to decide whether an announcement routes to this destination. The adapter itself does not read these fields.
-- **Env vars:** none. The webhook URL carries its own auth.
+- **Env vars:** `DISCORD_BOT_TOKEN` (optional). Posting needs none: the webhook URL carries its own auth. Publishing needs the bot.
 - **Failure mode:** any non-2xx response from Discord throws and is retried under the standard backoff. A missing `webhook_url` fails the same way. It retries through all five backoff steps, failing identically each time, before showing up as `exhausted` in channel health.
+
+#### Following the announcements from another server
+
+A server owner opens one of our Announcement channels, clicks **Follow**, and picks a channel in their own server. From then on every published post appears there. This works only when our channel is of type Announcement (a Community server feature) and the post has been published — which this tool does by itself when `DISCORD_BOT_TOKEN` is set, and which anyone with Manage Messages can do by hand with the megaphone icon otherwise.
+
+The publish step runs after the delivery and cannot fail it. Its outcome is in `delivery_ledger.publish_note` (`published`, `skipped: …` or `failed: …`); a `failed:` note raises a channel-health alert. The bot needs View Channel, Send Messages and Manage Messages in the announcement channels, and nothing else: it makes two REST calls and opens no gateway connection.
 
 ### Telegram
 
@@ -225,6 +232,7 @@ Copy `.env.example` to `.env` and fill in what each channel needs. All values be
 | `PUBLIC_SIGNAL_URL` | *(unset)* | Same, for the Signal group. The card disappears when none of the three is set. |
 | `PUBLIC_DISCORD_NOTE` | *(unset)* | Plain text shown after the Discord link, at most 200 characters, for example `Channels: #mainnet-updates, #testnet-updates, #governance-updates`. Ignored unless `PUBLIC_DISCORD_URL` is set. |
 | `TELEGRAM_BOT_TOKEN` | *(unset)* | Bot token from BotFather; required for any Telegram delivery. |
+| `DISCORD_BOT_TOKEN` | *(unset)* | Optional. Bot token used only to publish posts in Discord Announcement channels to following servers. Unset: posts are delivered and not published. |
 | `SIGNAL_API_BASE` | `http://127.0.0.1:8080` | Base URL of the `signal-cli-rest-api` sidecar. |
 | `SIGNAL_ACCOUNT` | *(unset)* | Registered Signal sender number; required for any Signal delivery. |
 | `SIGNAL_API_SECRET` | *(unset)* | Shared secret sent as the `x-announce-signal-secret` header to the `signal-cli-rest-api` sidecar. Unset sends no header at all, which is correct for the same-Docker-network VM deployment. Required on the split deployment, where a Caddy proxy in front of the publicly-reachable sidecar checks this header and rejects requests without it. This value must match the proxy's configured secret. |

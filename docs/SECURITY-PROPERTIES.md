@@ -41,6 +41,7 @@ scope for review**. The second shape was designed originally, then retired but s
 | A6 | **The app's outbound request capability** | Webhook delivery is a server-side fetch to an attacker-chosen URL: an SSRF primitive pointed at the VM, the tailnet, and cloud metadata. |
 | A7 | **Admin session / Auth0 credentials** | Path to A1. |
 | A8 | **The database** | Holds A3, A4, the audit log, and publisher list; direct write access is A1. |
+| A9 | **The Discord bot token** | With Manage Messages in the announcement channels it can publish, and also delete or pin, messages there. It cannot post as the webhook does, and it has no rights elsewhere if the role is scoped as deployed. |
 
 ## 3. Actors and threat model
 
@@ -235,6 +236,16 @@ on the consumer side.
 *Enforced:* `src/adapters/webhook.ts` `signPayload`; *tested:* `test/webhook.test.ts`.
 *Property the consumer must hold (document it on `/docs/webhooks`):* compare in constant time and reject
 timestamps outside a window.
+
+**P43 — The Discord bot token goes only to Discord, and a publish failure cannot repeat a delivery.** The
+token is sent only in the `Authorization` header of requests to the constant `https://discord.com/api/v10`;
+the host is never derived from the configured webhook URL, and the channel and message ids taken from the
+webhook's response are used in a path only if they are all digits. The API base must be `https:` — loopback
+is excepted only so tests can point it at a local server — and a redirect from either Discord endpoint is
+refused rather than followed. The token is redacted from any caught error's message before that text can
+reach a delivery note. The publish phase runs after the webhook post has succeeded, never throws, and its
+outcome is a note on the delivery row, so the worker cannot retry and double-post because of it.
+*Enforced:* `src/adapters/discord-publish.ts`, `src/adapters/discord.ts`. *Tested:* `test/discord-publish.test.ts`.
 
 ### 5.5 Content handling and injection (A2)
 
