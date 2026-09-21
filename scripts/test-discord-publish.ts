@@ -13,12 +13,29 @@
  * `publishToFollowers` itself refuses any `apiBase` that is not https and not
  * loopback — setting them does not weaken that check.
  */
+import { pathToFileURL } from 'node:url';
 import { publishToFollowers, DISCORD_API_BASE } from '../src/adapters/discord-publish.js';
 
 const SNOWFLAKE = /^\d{5,25}$/;
 
 function redact(text: string, token: string): string {
   return token ? text.split(token).join('***') : text;
+}
+
+// Accepts discord.com and discordapp.com, plus their client-build subdomains
+// (ptb., canary.) that real users copy webhook URLs from. `endsWith` alone
+// would also accept a suffix match like "evildiscord.com" ending in
+// "discord.com" with no dot — the leading `.` in the suffix check is what
+// keeps that refused. HTTPS is required for every accepted host; the
+// loopback stub is a separate, narrower exception used only by this script's
+// own test.
+export function isDiscordWebhookHost(url: URL, allowStub: boolean): boolean {
+  if (allowStub && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')) {
+    return true;
+  }
+  if (url.protocol !== 'https:') return false;
+  return url.hostname === 'discord.com' || url.hostname.endsWith('.discord.com')
+    || url.hostname === 'discordapp.com' || url.hostname.endsWith('.discordapp.com');
 }
 
 async function main(): Promise<number> {
@@ -38,9 +55,7 @@ async function main(): Promise<number> {
     console.error('WEBHOOK_URL must be a discord.com webhook');
     return 2;
   }
-  const isLoopback = parsedWebhook.hostname === '127.0.0.1' || parsedWebhook.hostname === 'localhost';
-  const isDiscordHost = parsedWebhook.hostname === 'discord.com' || parsedWebhook.hostname === 'discordapp.com';
-  if (!isDiscordHost && !(isTestStub && isLoopback)) {
+  if (!isDiscordWebhookHost(parsedWebhook, isTestStub)) {
     console.error('WEBHOOK_URL must be a discord.com webhook');
     return 2;
   }
@@ -93,6 +108,24 @@ async function main(): Promise<number> {
     && typeof channelId === 'string' && SNOWFLAKE.test(channelId)
     && typeof messageId === 'string' && SNOWFLAKE.test(messageId)) {
     const base = apiBase.replace(/\/+$/, '');
+
+    // The token must never depend on a check made forty lines away (the
+    // apiBase validation inside publishToFollowers). Re-check here, right
+    // before the Authorization header is built, so this fetch is safe even
+    // if that earlier guard is ever changed or bypassed.
+    let baseIsSecure = false;
+    try {
+      const parsedBase = new URL(base);
+      baseIsSecure = parsedBase.protocol === 'https:'
+        || parsedBase.hostname === '127.0.0.1' || parsedBase.hostname === 'localhost' || parsedBase.hostname === '[::1]';
+    } catch {
+      baseIsSecure = false;
+    }
+    if (!baseIsSecure) {
+      console.log('second publish: skipped (insecure api base)');
+      return note === 'published' ? 0 : 1;
+    }
+
     try {
       const res = await fetch(`${base}/channels/${channelId}/messages/${messageId}/crosspost`, {
         method: 'POST',
@@ -115,9 +148,11 @@ async function main(): Promise<number> {
   return note === 'published' ? 0 : 1;
 }
 
-const exitCode = await main().catch(err => {
-  const raw = String(err instanceof Error ? err.message : err);
-  console.error(`unexpected error: ${redact(raw, process.env.DISCORD_BOT_TOKEN ?? '')}`);
-  return 1;
-});
-process.exit(exitCode);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const exitCode = await main().catch(err => {
+    const raw = String(err instanceof Error ? err.message : err);
+    console.error(`unexpected error: ${redact(raw, process.env.DISCORD_BOT_TOKEN ?? '')}`);
+    return 1;
+  });
+  process.exit(exitCode);
+}

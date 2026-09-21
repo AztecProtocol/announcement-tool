@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
+import { isDiscordWebhookHost } from '../scripts/test-discord-publish.js';
 
 const SCRIPT = resolve(__dirname, '../scripts/test-discord-publish.ts');
 const REPO_ROOT = resolve(__dirname, '..');
@@ -114,4 +115,42 @@ describe('scripts/test-discord-publish.ts', () => {
     expect(code).toBe(2);
     expect(stderr).toContain('WEBHOOK_URL must be a discord.com webhook');
   }, 30_000);
+
+  it('a lookalike host is refused before any request', async () => {
+    const { code, stderr } = await run({
+      WEBHOOK_URL: 'https://evildiscord.com/api/webhooks/1/x',
+      DISCORD_BOT_TOKEN: 'BOT-TOKEN-XYZ',
+    });
+    expect(code).toBe(2);
+    expect(stderr).toContain('WEBHOOK_URL must be a discord.com webhook');
+  }, 30_000);
+
+  it('a plain-http discord.com webhook is refused before any request', async () => {
+    const { code, stderr } = await run({
+      WEBHOOK_URL: 'http://discord.com/api/webhooks/1/x',
+      DISCORD_BOT_TOKEN: 'BOT-TOKEN-XYZ',
+    });
+    expect(code).toBe(2);
+    expect(stderr).toContain('WEBHOOK_URL must be a discord.com webhook');
+  }, 30_000);
+});
+
+describe('isDiscordWebhookHost', () => {
+  it('accepts discord.com and its client-domain variants over https', () => {
+    expect(isDiscordWebhookHost(new URL('https://discord.com/api/webhooks/1/x'), false)).toBe(true);
+    expect(isDiscordWebhookHost(new URL('https://ptb.discord.com/api/webhooks/1/x'), false)).toBe(true);
+    expect(isDiscordWebhookHost(new URL('https://canary.discord.com/api/webhooks/1/x'), false)).toBe(true);
+    expect(isDiscordWebhookHost(new URL('https://discordapp.com/api/webhooks/1/x'), false)).toBe(true);
+  });
+
+  it('refuses lookalike or non-https hosts', () => {
+    expect(isDiscordWebhookHost(new URL('https://evildiscord.com/api/webhooks/1/x'), false)).toBe(false);
+    expect(isDiscordWebhookHost(new URL('http://discord.com/api/webhooks/1/x'), false)).toBe(false);
+    expect(isDiscordWebhookHost(new URL('https://discord.com.evil.org/api/webhooks/1/x'), false)).toBe(false);
+  });
+
+  it('accepts the loopback stub only when allowStub is true', () => {
+    expect(isDiscordWebhookHost(new URL('http://127.0.0.1:9/x'), false)).toBe(false);
+    expect(isDiscordWebhookHost(new URL('http://127.0.0.1:9/x'), true)).toBe(true);
+  });
 });
