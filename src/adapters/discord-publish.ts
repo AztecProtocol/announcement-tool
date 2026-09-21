@@ -5,7 +5,8 @@
  * A webhook cannot do this: Execute Webhook has no such parameter. It is a
  * separate, bot-authenticated call. And because a webhook's message is not
  * authored by the bot, the bot needs MANAGE_MESSAGES as well as SEND_MESSAGES
- * in the channel. (Discord API docs, checked 2026-09-17.)
+ * in the channel (Discord API docs, checked 2026-09-17) — and, in practice, one
+ * more permission the docs do not name: see the full list further down.
  *
  * This runs AFTER the announcement has been delivered. Nothing here may throw:
  * a throw would make the worker retry the delivery and post a second copy. The
