@@ -19,7 +19,14 @@
  *
  * Note strings this module can return, beyond the ones already documented
  * inline: `failed: channel lookup returned no JSON`, `failed: insecure api
- * base`.
+ * base`, `already published`, and a `failed: … HTTP <status> (<code>
+ * <message>)` suffix on a channel-lookup or crosspost failure whenever
+ * Discord's error body carried a numeric `code`.
+ *
+ * The bot needs VIEW_CHANNEL, SEND_MESSAGES, MANAGE_MESSAGES and
+ * READ_MESSAGE_HISTORY in the channel; the last is not in Discord's
+ * documentation for this route and was found by testing against the live
+ * API on 2026-09-21 (403, code 50001 without it).
  */
 export const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
@@ -28,6 +35,26 @@ const GUILD_ANNOUNCEMENT = 5;
 // snowflakes (digits); anything else is refused rather than interpolated.
 const SNOWFLAKE = /^\d{5,25}$/;
 const MAX_RATE_LIMIT_WAIT_SECONDS = 10;
+
+// Discord's JSON error body: { code: <int>, message: <string> }. The code is
+// what tells an operator what to fix (50001 Missing Access, 50013 Missing
+// Permissions, 60003 two-factor required), so it goes into the note. Only
+// the integer and a sanitised, bounded, token-redacted message are taken;
+// nothing else from the body can reach the ledger.
+const ALREADY_CROSSPOSTED = 40033;
+
+async function discordError(res: Response, botToken: string): Promise<{ code?: number; text: string }> {
+  try {
+    const body = await res.json() as { code?: unknown; message?: unknown };
+    if (typeof body?.code !== 'number' || !Number.isInteger(body.code)) return { text: '' };
+    const raw = typeof body.message === 'string' ? body.message : '';
+    const redacted = botToken ? raw.split(botToken).join('***') : raw;
+    const msg = redacted.replace(/[^\x20-\x7E]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return { code: body.code, text: ` (${body.code}${msg ? ` ${msg}` : ''})` };
+  } catch {
+    return { text: '' };
+  }
+}
 
 export async function publishToFollowers(input: {
   botToken: string; channelId: unknown; messageId: unknown;
@@ -63,7 +90,7 @@ export async function publishToFollowers(input: {
     // redirect: 'error' — a redirect from either of these two endpoints is
     // never legitimate, and following one could send the token elsewhere.
     const ch = await doFetch(`${base}/channels/${channelId}`, { headers, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
-    if (!ch.ok) return `failed: channel lookup HTTP ${ch.status}`;
+    if (!ch.ok) { const e = await discordError(ch, input.botToken); return `failed: channel lookup HTTP ${ch.status}${e.text}`; }
     const channel = await ch.json().catch(() => null) as { type?: unknown } | null;
     if (!channel || typeof channel !== 'object') return 'failed: channel lookup returned no JSON';
     if (channel.type !== GUILD_ANNOUNCEMENT) return 'skipped: not an announcement channel';
@@ -82,7 +109,9 @@ export async function publishToFollowers(input: {
         }
         return `failed: rate limited (retry after ${Number.isFinite(wait) ? Math.ceil(wait) : '?'}s)`;
       }
-      return `failed: crosspost HTTP ${res.status}`;
+      const e = await discordError(res, input.botToken);
+      if (res.status === 400 && e.code === ALREADY_CROSSPOSTED) return 'already published';
+      return `failed: crosspost HTTP ${res.status}${e.text}`;
     }
     return 'failed: rate limited (retry after ?s)';
   } catch (err) {

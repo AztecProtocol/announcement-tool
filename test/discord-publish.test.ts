@@ -434,6 +434,120 @@ describe('discord adapter — publish to followers', () => {
     expect(hits.filter(h => h.url.startsWith('/webhook')).length).toBe(1);
   });
 
+  it('21. crosspost 400 code 40033: already published, one hit, no retry', async () => {
+    const { base, hits, close } = await discordStub({
+      crosspost: (_n, res) => {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ code: 40033, message: 'This message has already been crossposted.' }));
+      },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    expect(result).toEqual({ publishNote: 'already published' });
+    expect(hits.filter(h => h.url.includes('crosspost')).length).toBe(1);
+  });
+
+  it('22. crosspost 403 with a code and message: note carries both', async () => {
+    const { base, hits, close } = await discordStub({
+      crosspost: (_n, res) => {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Missing Access', code: 50001 }));
+      },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    expect(result).toEqual({ publishNote: 'failed: crosspost HTTP 403 (50001 Missing Access)' });
+    expect(hits.filter(h => h.url.includes('crosspost')).length).toBe(1);
+  });
+
+  it('23. crosspost 403 with an HTML body: note unchanged', async () => {
+    const { base, close } = await discordStub({
+      crosspost: (_n, res) => { res.writeHead(403, { 'content-type': 'text/html' }); res.end('<html>nope</html>'); },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    expect(result).toEqual({ publishNote: 'failed: crosspost HTTP 403' });
+  });
+
+  it('24. crosspost 403 with a string code (not a number): note unchanged', async () => {
+    const { base, close } = await discordStub({
+      crosspost: (_n, res) => {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ code: '50001', message: 'x' }));
+      },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    expect(result).toEqual({ publishNote: 'failed: crosspost HTTP 403' });
+  });
+
+  it('25. crosspost 403 message is sanitised, redacted, and bounded to 80 chars', async () => {
+    const { base, close } = await discordStub({
+      crosspost: (_n, res) => {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ code: 50013, message: `${'A'.repeat(200)} \n\t☃ BOT-TOKEN-XYZ` }));
+      },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    const note = (result as { publishNote: string }).publishNote;
+    expect(note.startsWith('failed: crosspost HTTP 403 (50013 ')).toBe(true);
+    expect(note).not.toMatch(/[\n\t]/);
+    // eslint-disable-next-line no-control-regex
+    expect(note).toMatch(/^[\x20-\x7E]*$/);
+    expect(note).not.toContain('BOT-TOKEN-XYZ');
+    const paren = note.match(/^failed: crosspost HTTP 403 \((.*)\)$/);
+    expect(paren).not.toBeNull();
+    const afterCode = paren![1].replace(/^50013\s?/, '');
+    expect(afterCode.length).toBeLessThanOrEqual(80);
+  });
+
+  it('26. channel lookup 403 with a code and message: note carries both, no crosspost hit', async () => {
+    const { base, hits, close } = await discordStub({
+      channelRaw: (res) => {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ message: 'Missing Access', code: 50001 }));
+      },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    expect(result).toEqual({ publishNote: 'failed: channel lookup HTTP 403 (50001 Missing Access)' });
+    expect(hits.some(h => h.url.includes('crosspost'))).toBe(false);
+  });
+
+  it('27. crosspost 400 with a code other than 40033: failed, not "already published"', async () => {
+    const { base, close } = await discordStub({
+      crosspost: (_n, res) => {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ code: 50035, message: 'Invalid Form Body' }));
+      },
+    });
+    await seed(`${base}/webhook`);
+    const adapter = makeDiscordAdapter(sql, { botToken: 'BOT-TOKEN-XYZ', apiBase: `${base}/api`, sleep: async () => {} });
+    const result = await adapter.deliver(ann, 'discord:ann', 'publish');
+    close();
+
+    expect(result).toEqual({ publishNote: 'failed: crosspost HTTP 400 (50035 Invalid Form Body)' });
+  });
+
   it('19. crosspost 429 with a fractional retry_after rounds up in the note', async () => {
     const { base, hits, close } = await discordStub({
       crosspost: (_n, res) => {

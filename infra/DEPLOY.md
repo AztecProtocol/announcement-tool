@@ -410,7 +410,7 @@ repository.
 | `SIGNAL_API_BASE` | `https://db.announce.aztec.network` |
 | `SIGNAL_API_SECRET` | The same value as `ANNOUNCE_SIGNAL_SECRET` in step 3. |
 | `ENABLED_CHANNELS` | `webhook,discord,telegram,email` |
-| `DISCORD_BOT_TOKEN` | Optional. The token of the Foundation's "Aztec Announcements Publisher" Discord bot. Leave it out and posts are delivered but not published to following servers. |
+| `DISCORD_BOT_TOKEN` | Optional. The token of the Foundation's "Aztec Announcements Publisher" Discord bot. Leave it out and posts are delivered but not published to following servers. The bot needs View Channel, Send Messages, Manage Messages and Read Message History on each announcement channel; see the README. |
 | `DEPLOY_TARGET` | `netlify` |
 
 Four rules that cause silent failures if broken:

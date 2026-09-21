@@ -41,7 +41,7 @@ scope for review**. The second shape was designed originally, then retired but s
 | A6 | **The app's outbound request capability** | Webhook delivery is a server-side fetch to an attacker-chosen URL: an SSRF primitive pointed at the VM, the tailnet, and cloud metadata. |
 | A7 | **Admin session / Auth0 credentials** | Path to A1. |
 | A8 | **The database** | Holds A3, A4, the audit log, and publisher list; direct write access is A1. |
-| A9 | **The Discord bot token** | With Manage Messages in the announcement channels it can publish, and also delete or pin, messages there. It cannot post as the webhook does, and it has no rights elsewhere if the role is scoped as deployed. |
+| A9 | **The Discord bot token** | With Manage Messages and Read Message History in the announcement channels it can publish, and also read, delete or pin, messages there. It cannot post as the webhook does, and it has no rights elsewhere if the role is scoped as deployed. |
 
 ## 3. Actors and threat model
 
