@@ -77,6 +77,12 @@ describe('evaluateChannelHealth', () => {
     expect(pf[0].detail).toBe('delivered to d1 but not published to following servers: crosspost HTTP 403');
   });
 
+  it('a delivered row with publish_note "already published" raises no publish_failed issue', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, delivered_at, publish_note)
+      values ('ann_h', 1, 'publish', 'discord', 'd1', 'delivered', now(), 'already published')`;
+    expect((await evaluateChannelHealth(sql)).filter(i => i.kind === 'publish_failed')).toEqual([]);
+  });
+
   it('ignores a failed publish older than the window', async () => {
     await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, delivered_at, publish_note)
       values ('ann_h', 1, 'publish', 'discord', 'd1', 'delivered', now() - interval '48 hours', 'failed: crosspost HTTP 403')`;
