@@ -15,7 +15,8 @@
     "test:send": "tsx scripts/send-test-announcement.ts",
     "test:subscriber": "tsx scripts/add-email-subscriber.ts",
     "test:status": "tsx scripts/status.ts",
-    "test:reset": "tsx scripts/reset-test-data.ts"
+    "test:reset": "tsx scripts/reset-test-data.ts",
+    "test:discord-publish": "tsx scripts/test-discord-publish.ts"
   },
   "dependencies": {
     "jose": "^6.2.9",

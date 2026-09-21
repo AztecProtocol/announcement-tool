@@ -172,6 +172,8 @@ A server owner opens one of our Announcement channels, clicks **Follow**, and pi
 
 The publish step runs after the delivery and cannot fail it. Its outcome is in `delivery_ledger.publish_note` (`published`, `skipped: …` or `failed: …`); a `failed:` note raises a channel-health alert. The bot needs View Channel, Send Messages and Manage Messages in the announcement channels, and nothing else: it makes at most three REST calls (one channel lookup, and the publish call with one retry on a rate limit) and opens no gateway connection. Update and reminder posts are published too: each is a new message.
 
+To check a bot and a channel before the token goes into production, run `WEBHOOK_URL='…' DISCORD_BOT_TOKEN='…' npm run test:discord-publish` from a checkout. It posts one line through the webhook, publishes it with the same code the worker uses, and prints the outcome (`published`, `skipped: …` or `failed: …`). It needs no database and changes nothing else.
+
 ### Telegram
 
 Posts to the Telegram Bot API `sendMessage` endpoint, as plain text, not MarkdownV2. See the code comment in `src/adapters/telegram.ts` for why: MarkdownV2 requires escaping about 18 characters, and one missed escape rejects the whole message.
