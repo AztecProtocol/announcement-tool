@@ -1,7 +1,7 @@
 import type { Sql } from 'postgres';
 
 export interface HealthIssue {
-  kind: 'exhausted' | 'no_delivery';
+  kind: 'exhausted' | 'no_delivery' | 'publish_failed';
   channel: string;
   target: string;
   announcementId: string;
@@ -23,6 +23,28 @@ export async function evaluateChannelHealth(sql: Sql, sinceHours = 24): Promise<
       announcementId: r.announcement_id as string, revision: r.revision as number,
       detail: `target ${r.target} exhausted retries: ${r.last_error ?? 'unknown error'}`,
     });
+  }
+
+  // Delivered, but the channel's follow-up step failed. For Discord that means
+  // the message is in our server and did not reach the servers that follow the
+  // channel. One issue per row; alert_state dedupes it like the others.
+  // publish_note arrives with migration 020; on a database that does not have
+  // it yet, skip this query rather than let it throw and take down every
+  // other health check with it.
+  const [{ has_note: hasPublishNote }] = await sql`
+    select exists (select 1 from information_schema.columns
+      where table_schema = current_schema() and table_name = 'delivery_ledger' and column_name = 'publish_note') as has_note`;
+  if (hasPublishNote) {
+    const unpublished = await sql`select announcement_id, revision, channel, target, publish_note from delivery_ledger
+      where status = 'delivered' and publish_note like 'failed:%'
+        and delivered_at > now() - make_interval(hours => ${sinceHours})`;
+    for (const r of unpublished) {
+      issues.push({
+        kind: 'publish_failed', channel: r.channel as string, target: r.target as string,
+        announcementId: r.announcement_id as string, revision: r.revision as number,
+        detail: `delivered to ${r.target} but not published to following servers: ${String(r.publish_note).replace(/^failed:\s*/, '')}`,
+      });
+    }
   }
 
   // The grace period matters: a freshly published announcement has all-pending rows, which

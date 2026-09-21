@@ -131,6 +131,13 @@ async function main(): Promise<void> {
     if (prefix) config.prefix = prefix;
     const username = await ask('Bot display name in Discord', str('username') || 'Aztec Announcements');
     if (username) config.username = username;
+
+    // Announcement channels only reach following servers when a message is
+    // published, which needs DISCORD_BOT_TOKEN on the deployment. Default on;
+    // stored only when turned off, so existing rows need no rewrite.
+    const publishDefault = existing.auto_publish === false ? 'n' : 'y';
+    const publish = await ask('Publish each post to servers that follow this channel? (Y/n)', publishDefault);
+    if (/^n/i.test(publish)) config.auto_publish = false;
   } else if (channel === 'telegram') {
     for (;;) {
       config.chat_id = await ask('Telegram channel id (e.g. @MyTestChannel, or a -100... number)', str('chat_id'));

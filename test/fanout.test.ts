@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import type { Sql } from 'postgres';
-import { testSql, resetDb } from './helpers.js';
+import postgres, { type Sql } from 'postgres';
+import { testSql, resetDb, TEST_DB_URL } from './helpers.js';
 import { runFanoutOnce, MAX_ATTEMPTS } from '../src/worker/fanout.js';
 import type { ChannelAdapter } from '../src/adapters/types.js';
 
@@ -86,6 +86,102 @@ describe('runFanoutOnce', () => {
     const [row] = await sql`select status, attempts, next_attempt_at from delivery_ledger where target = 'sub_1'`;
     expect(row.status).toBe('pending');
     expect(row.attempts).toBe(0);
+  });
+
+  it('stores the adapter\'s publish note on a delivered row, and null when the adapter returns nothing', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target)
+      values ('ann_w', 1, 'publish', 'webhook', 'sub_2')`;
+    const adapter: ChannelAdapter = {
+      channel: 'webhook',
+      deliver: async (_a, target) => {
+        if (target === 'sub_1') return { publishNote: 'failed: crosspost HTTP 403' };
+        return undefined;
+      },
+    };
+    await runFanoutOnce(sql, { webhook: adapter });
+    const rows = await sql`select target, status, publish_note from delivery_ledger order by target`;
+    expect(rows.map(r => [r.target, r.status, r.publish_note])).toEqual([
+      ['sub_1', 'delivered', 'failed: crosspost HTTP 403'],
+      ['sub_2', 'delivered', null],
+    ]);
+  });
+
+  it('a non-string publish note does not throw and does not turn a delivered row into a retry', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target)
+      values ('ann_w', 1, 'publish', 'webhook', 'sub_2')`;
+    const adapter: ChannelAdapter = {
+      channel: 'webhook',
+      deliver: async (_a, target) => {
+        if (target === 'sub_1') return { publishNote: 403 } as unknown as { publishNote: string };
+        return { publishNote: 'x'.repeat(500) };
+      },
+    };
+    await runFanoutOnce(sql, { webhook: adapter });
+    const [bySub1, bySub2] = await sql`select target, status, attempts, last_error, publish_note from delivery_ledger order by target`;
+    expect(bySub1.status).toBe('delivered');
+    expect(bySub1.attempts).toBe(1);
+    expect(bySub1.last_error).toBeNull();
+    expect(bySub1.publish_note).toBeNull();
+    expect(bySub2.status).toBe('delivered');
+    expect(bySub2.attempts).toBe(1);
+    expect(bySub2.last_error).toBeNull();
+    expect(bySub2.publish_note.length).toBe(200);
+  });
+
+  it('delivers and records without the publish_note column when migration 020 has not been applied yet', async () => {
+    // A dedicated, non-prepared connection: postgres.js caches a prepared
+    // plan for `select *` on the shared `sql` fixture, and that cached plan
+    // survives the `alter table` below within the same session — this
+    // connection is opened fresh, after the drop, so every query on it sees
+    // the real (column-less) shape, the way a freshly-deployed worker would.
+    await sql`alter table delivery_ledger drop column publish_note`;
+    const noPrepSql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      let calls = 0;
+      const adapter: ChannelAdapter = {
+        channel: 'webhook',
+        deliver: async () => { calls++; return { publishNote: 'published' }; },
+      };
+      const res = await runFanoutOnce(noPrepSql, { webhook: adapter });
+      expect(res).toEqual({ delivered: 1, failed: 0 });
+      const [row] = await noPrepSql`select status, attempts from delivery_ledger where target = 'sub_1'`;
+      expect(row.status).toBe('delivered');
+      expect(row.attempts).toBe(1);
+
+      // A second pass must not re-deliver: the row is already 'delivered'.
+      const res2 = await runFanoutOnce(noPrepSql, { webhook: adapter });
+      expect(res2).toEqual({ delivered: 0, failed: 0 });
+      expect(calls).toBe(1);
+    } finally {
+      await noPrepSql.end();
+      await sql`alter table delivery_ledger add column publish_note text`;
+    }
+  });
+
+  it('delivers a second row for another channel in the same batch, also once, without the publish_note column', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target)
+      values ('ann_w', 1, 'publish', 'telegram', 'sub_2')`;
+    await sql`alter table delivery_ledger drop column publish_note`;
+    const noPrepSql = postgres(TEST_DB_URL, { max: 1, prepare: false });
+    try {
+      const calls: string[] = [];
+      const webhook: ChannelAdapter = {
+        channel: 'webhook',
+        deliver: async (_a, target) => { calls.push(`webhook:${target}`); return { publishNote: 'published' }; },
+      };
+      const telegram: ChannelAdapter = {
+        channel: 'telegram',
+        deliver: async (_a, target) => { calls.push(`telegram:${target}`); },
+      };
+      const res = await runFanoutOnce(noPrepSql, { webhook, telegram });
+      expect(res).toEqual({ delivered: 2, failed: 0 });
+      expect(calls.sort()).toEqual(['telegram:sub_2', 'webhook:sub_1']);
+      const rows = await noPrepSql`select target, status from delivery_ledger order by target`;
+      expect(rows.every(r => r.status === 'delivered')).toBe(true);
+    } finally {
+      await noPrepSql.end();
+      await sql`alter table delivery_ledger add column publish_note text`;
+    }
   });
 
   it('an orphaned ledger row (announcement deleted) is marked exhausted and does not block the batch', async () => {

@@ -112,6 +112,17 @@ describe('dispatchHealthAlerts', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('alerts on a failed publish step, naming the channel-health kind and the follow-up failure', async () => {
+    await sql`insert into delivery_ledger (announcement_id, revision, kind, channel, target, status, delivered_at, publish_note)
+      values ('ann_A', 1, 'publish', 'discord', 'd1', 'delivered', now(), 'failed: crosspost HTTP 403')`;
+    const { sender, sent } = recorder();
+    const issues = await dispatchHealthAlerts(sql, sender, { to: 'ops@aztec.foundation' });
+    expect(issues.some(i => i.kind === 'publish_failed')).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain('publish_failed');
+    expect(sent[0].text).toContain('not published to following servers');
+  });
+
   it('leaves the row un-notified after a failed send, so it is retried later', async () => {
     const failing: EmailSender = { name: 'boom', async send() { throw new Error('ESP down'); } };
     await expect(dispatchHealthAlerts(sql, failing, { to: 'ops@aztec.foundation' })).rejects.toThrow(/ESP down/);
