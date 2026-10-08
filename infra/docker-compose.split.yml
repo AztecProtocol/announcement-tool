@@ -102,8 +102,21 @@ services:
     # the unrelated announce-db-1 / announce-db-tls-1 containers this
     # repo's test suite already runs on this machine. A real deployment
     # should never set DB_HOST_PORT; Netlify's DATABASE_URL expects 5432.
+    #
+    # Bound to 0.0.0.0 (IPv4) ONLY, on purpose. A bare "5432:5432" (or
+    # "${DB_HOST_PORT:-5432}:5432") publishes on both families, and over
+    # IPv6 Docker's userland proxy (docker-proxy) rewrites the client's
+    # source address to the bridge gateway before Postgres sees it. Postgres
+    # then logs the gateway, which the fail2ban jail's `ignoreip` covers as a
+    # private range, and the packet travels a path the jail's forward-hook
+    # ban never sees. The result was an IPv6 attacker with no rate limit at
+    # all (found in review 2026-10-08). Over IPv4 the kernel's own DNAT
+    # preserves the real source address, so the jail both sees and can ban
+    # it. The terraform firewall still allows ::/0 to 5432 (infra/terraform/
+    # vm.tf), so the firewall rule is now WIDER than what listens; tightening
+    # it to IPv4 needs a terraform apply — see infra/README.md.
     ports:
-      - "${DB_HOST_PORT:-5432}:5432"
+      - "0.0.0.0:${DB_HOST_PORT:-5432}:5432"
     command:
       # Same rationale as docker-compose.dev.yml's `db-tls` service: the
       # cert/key arrive on a bind mount owned by the host user (or, here,
@@ -155,6 +168,19 @@ services:
       # end-of-line character surviving edits.
       - -c
       - "log_line_prefix=%m [%p] %h "
+      # Pin the log timestamp zone. The fail2ban mirror (roles/fail2ban/
+      # templates/pg-auth-log.sh.j2) keeps only lines whose start matches
+      # `^YYYY-MM-DD HH:MM:SS.sss UTC [pid] host FATAL:  ` — the literal
+      # "UTC" is part of that anchor. The postgres image defaults
+      # log_timezone to UTC, but that default is NOT guaranteed: setting the
+      # TZ environment variable moves it (confirmed: TZ=Europe/Berlin makes
+      # `show log_timezone` answer Europe/Berlin, and every log line then
+      # reads "... CEST ..." instead of "... UTC ...", so the mirror grep
+      # drops all of them and the jail silently sees nothing). Pinning it
+      # here makes the "UTC" literal in the mirror hold whatever TZ is, or
+      # is not, set. Keep this value and the mirror's anchor in step.
+      - -c
+      - log_timezone=UTC
     healthcheck:
       # `pg_isready` alone races a freshly-started
       # container that accepts TCP before it can actually serve. Nothing

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline check for the announce-postgres failregex.
+r"""Offline check for the announce-postgres failregex.
 
 This script APPROXIMATES what fail2ban 1.0 does with a log line — the version
 `apt` installs on Ubuntu 24.04, which is what roles/fail2ban/tasks/main.yml
@@ -24,6 +24,14 @@ Two things fail2ban does are modelled here:
    IPv6 addresses; the older single-group form matched only the first two,
    which would have made a Postgres line logging an IPv6 %h go uncounted.
 
+A newline inside a client-supplied value (a user name, found in review on
+2026-10-08) makes Postgres write a CONTINUATION line that begins with a TAB
+and repeats the message with a forged address. fail2ban finds no timestamp on
+that line. The filter's single leading space (not `^\s*`) refuses the TAB, and
+the mirror (pg-auth-log.sh.j2) drops the line before fail2ban sees it. Both
+layers are modelled: FAILREGEXES is the filter, MIRROR is the mirror grep, and
+the TAB cases below are checked against both.
+
 Every case in CASES was also run through the real `fail2ban-regex` of fail2ban
 1.0.2 with the same result (2026-10-08). If the two ever disagree, fail2ban is
 right and this file is wrong.
@@ -34,10 +42,19 @@ other line yields none.
 import re, sys
 
 # One pattern per line, exactly as the filter's `failregex` lists them.
+# EXACTLY ONE leading space, not `^\s*`: the space is what fail2ban leaves
+# after it strips the timestamp, and `\s*` would also swallow the leading
+# TAB of a continuation line a caller can forge with a newline in a value
+# (see the 'tab-continuation' case below).
 FAILREGEXES = [
-    r'^\s*\[\d+\] <HOST> FATAL:\s+password authentication failed for user',
-    r'^\s*\[\d+\] <HOST> FATAL:\s+no pg_hba\.conf entry for',
+    r'^ \[\d+\] <HOST> FATAL:  password authentication failed for user "',
+    r'^ \[\d+\] <HOST> FATAL:  no pg_hba\.conf entry for',
 ]
+# The mirror layer (pg-auth-log.sh.j2) runs BEFORE fail2ban and keeps only
+# lines that start as a real Postgres log line. A line the mirror drops
+# never reaches the filter at all. This is that same grep, so a case can be
+# checked against the mirror as well as the filter.
+MIRROR = re.compile(r'^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+ UTC \[[0-9]+\] [^ ]+ FATAL:  ')
 # Approximates fail2ban 1.0's <HOST>: IPv4/hostname first, then bare IPv6.
 # Two named groups because Python's re forbids reusing one name in an
 # alternation; whichever participates is the matched host.
@@ -121,6 +138,31 @@ CASES = {
     'compose-prefix': (
         f'db-1  | {TS} [76] {PUBLIC} FATAL:  password authentication failed for user "announce_app"',
         None),
+    # THE NEWLINE CASE (found in review 2026-10-08). A user name holding a
+    # newline makes Postgres write a CONTINUATION line that begins with a
+    # TAB and repeats the message with the forged address. fail2ban finds no
+    # timestamp on it. The old `^\s*` matched the leading TAB and banned the
+    # forged address; the single-space anchor does not. The mirror drops it
+    # too (no real timestamp at the start), so it is rejected by BOTH layers.
+    'tab-continuation': (
+        f'\t[1] {FORGED} FATAL:  no pg_hba.conf entry for"',
+        None),
+    # The same, carrying a FORGED FULL TIMESTAMP after the newline: the
+    # continuation line is `\t<forged ts> [1] <forged ip> FATAL:  ..`. The
+    # TAB is still first, so neither layer is fooled — the filter needs the
+    # line to START with one space then `[pid]`, and the mirror needs it to
+    # START with a real timestamp (this one starts with a TAB).
+    'tab-forged-timestamp': (
+        f'\t{TS} [1] {FORGED} FATAL:  password authentication failed for user "x',
+        None),
+    # A bare carriage return in the user name does NOT start a new log line
+    # (Postgres only breaks on a newline). The forged text stays inline,
+    # inside the quoted user name, AFTER the real host. The real peer is
+    # reported, never the forged address. Confirmed against real
+    # postgres:16-alpine + fail2ban-regex 1.0.2.
+    'cr-inline': (
+        f'{TS} [1] {REAL} FATAL:  password authentication failed for user "\r[1] {FORGED} FATAL:  password authentication failed for user x"',
+        REAL),
 }
 ok = True
 for name, (line, expect) in CASES.items():
@@ -129,6 +171,18 @@ for name, (line, expect) in CASES.items():
         good = host in (None, '[local]')
     else:
         good = host == expect
-    print(f'{name:17s} -> {host!r:20} {"ok" if good else "WRONG"}')
+    # The mirror is the first layer. A case that forges an address through a
+    # continuation line (TAB-led) must be dropped by the mirror too, not only
+    # by the filter: check the raw line against the mirror grep for those.
+    mirror_kept = bool(MIRROR.match(line))
+    mnote = ''
+    if name in ('tab-continuation', 'tab-forged-timestamp', 'compose-prefix'):
+        # These must be dropped by the mirror (MIRROR must not match).
+        if mirror_kept:
+            good = False
+            mnote = ' MIRROR-KEPT-WRONG'
+        else:
+            mnote = ' mirror-drops-ok'
+    print(f'{name:19s} -> {host!r:20} {"ok" if good else "WRONG"}{mnote}')
     ok = ok and good
 sys.exit(0 if ok else 1)

@@ -547,19 +547,30 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    superuser credential is a different, worse incident.
 3. **`fail2ban`** (`infra/ansible/roles/fail2ban`). This rate-limits
    repeated failed logins against 5432: five in ten minutes block the
-   address for one hour. It is the layer that stops brute-force and
+   address for ten minutes. It is the layer that stops brute-force and
    credential-stuffing attacks against the port itself, which TLS and the
-   role's grants do not address on their own. **It did nothing from the
-   first deployment until the repair of 2026-10-08** (see "not verified"
-   below for the four causes). It is a working control on a given VM only
-   after the Ansible run passes its three jail checks and the "Check that
-   fail2ban bans" section of [`DEPLOY.md`](DEPLOY.md) has been done there.
+   role's grants do not address on their own. The ban is ten minutes, not
+   an hour, because the application shares this port on a shared Netlify
+   egress pool and can fail logins itself after a wrong password; a short
+   ban still stops a brute-force run and heals before it can keep the site
+   off its own database. **It did nothing from the first deployment until
+   the repair of 2026-10-08** (see "not verified" below for the four
+   causes, and a fifth, forge-by-username path found the same day). It is
+   a working control on a given VM only after the Ansible run passes its
+   jail checks and the "Check that fail2ban bans" section of
+   [`DEPLOY.md`](DEPLOY.md) has been done there.
 4. **Operator access over the tailnet, not a public SSH port**
    (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
    closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which
    needs no inbound port of its own. This protects operator access only —
    it does nothing for 5432 or 443, which stay open to `0.0.0.0/0` and
-   `::/0` as described above. The `ssh_public_key` variable still exists,
+   `::/0` as described above. **Note:** since 2026-10-08 Postgres is
+   published on IPv4 only (`docker-compose.split.yml`), so the firewall
+   rule for 5432 (`0.0.0.0/0` and `::/0`, `infra/terraform/vm.tf`) is now
+   WIDER than what actually listens: nothing answers on IPv6. Tightening
+   the firewall rule to IPv4 only needs a `terraform apply`; it is left as
+   is here because the terraform resources are not part of this change. The
+   `ssh_public_key` variable still exists,
    but it is not an access path. If the tailnet join itself fails, recovery is
    Hetzner rescue mode, not this key.
 
@@ -638,20 +649,61 @@ relying on them:
   filter counted every `FATAL:` line, including `too many clients
   already` and `the database system is starting up`. A database restart
   or a connection spike could have blocked the application's own
-  addresses for an hour. The filter now counts failed logins only, and
+  addresses. The filter now counts failed logins only, and
   the jail ignores loopback and private ranges.
+
+  **A forge-by-username path, found in the same review (2026-10-08).**
+  Postgres logs a newline inside a logged value (a user name, for one) as
+  a CONTINUATION line that begins with a TAB and repeats the message. A
+  caller connecting three times with the user name
+  `"\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"` and no password
+  made the mirror (a plain `grep -F ' FATAL: '`) keep those TAB lines, and
+  the filter (`^\s*`) match the leading TAB and bind `<HOST>` to
+  203.0.113.77 — an address the caller chose. Proven against a real
+  `postgres:16-alpine` and real `fail2ban-regex` 1.0.2: the pre-fix filter
+  reported 203.0.113.77 as a failing IP. Both layers are fixed. The mirror
+  now keeps only lines that START as a real Postgres log line (timestamp,
+  `UTC` zone, `[pid]`, host, `FATAL:  `), so the TAB continuation line is
+  dropped; and the filter anchors on exactly one leading space, so even a
+  continuation line that reached it would not match. Variants tried against
+  the real database and the real filter, before and after: the newline via
+  the user name (truncated to 63 bytes by Postgres, still TAB-led, dropped);
+  the same via the database name, `application_name` and `options` (no FATAL
+  line produced at all); `\r\n` (dropped as a TAB line); a bare `\r` (stays
+  inline, the line keeps its real timestamp and real host, and the filter
+  binds the REAL peer, not the forged address); a forged full timestamp
+  after the newline (still TAB-led, dropped). In every case the forged
+  third-party address is not banned.
+
+  **An IPv6 gap, found in the same review.** Over IPv6 Docker's userland
+  proxy rewrote the client's source address to the bridge gateway before
+  Postgres saw it, so Postgres logged the gateway — which `ignoreip`
+  covers — and the ban's forward hook never saw the traffic. An attacker
+  using the VM's IPv6 address had no rate limit at all. The port is now
+  published on IPv4 only (`"0.0.0.0:${DB_HOST_PORT:-5432}:5432"`); over
+  IPv4 the kernel's DNAT preserves the real source address, which the jail
+  sees and can ban. Proven with real Docker on this host: with the IPv4
+  bind there is a `0.0.0.0` listener and no `[::]` listener, an IPv4 client
+  logs a real routable source address, and the port does not answer on
+  IPv6. The filter's `<HOST>` still matches a synthetic IPv6 line, so the
+  pattern is ready if IPv6 publishing is ever restored, but no live IPv6
+  line is written now.
 
   **Proven in `ubuntu:24.04` containers with the distribution's
   fail2ban 1.0.2 (not on the VM):** the four causes, each reproduced; the
-  jail reading the file; five failed logins banning the real address,
-  also with a forged username and over IPv6; the other `FATAL:` lines,
-  the private ranges and the old prefixed lines banning nobody; the ban
-  in its own chain on the `forward` hook, separate from the `sshd` jail's
-  `input` chain; and, with a real `postgres:16-alpine` behind a DNAT
-  rule in a router container, a sixth login that still reached Postgres
-  under an `input` ban and was refused under the `forward` ban. The
-  Ansible checks in `roles/fail2ban/tasks/verify.yml` were run there too
-  and fail on each of the old settings.
+  jail reading the file; five failed logins banning the real address;
+  a synthetic IPv6 line matching the filter; the forged TAB continuation
+  line NOT banning the chosen address, under both the mirror grep and the
+  filter; the other `FATAL:` lines, the private ranges and the old
+  prefixed lines banning nobody; the ban in its own chain on the `forward`
+  hook, separate from the `sshd` jail's `input` chain; and, with a real
+  `postgres:16-alpine` behind a DNAT rule in a router container, a sixth
+  login that still reached Postgres under an `input` ban and was refused
+  under the `forward` ban. The Ansible checks in
+  `roles/fail2ban/tasks/verify.yml` were run there too: they pass on the
+  fixed files and fail on each of the old settings, including the forged
+  TAB line against the 01042ea filter and the mirror-liveness check when
+  the `docker` command cannot read the log.
 
   **Not proven until it is done on the VM:** the whole chain with
   Docker's own published-port rules, from cron through the mirror to a
@@ -667,7 +719,7 @@ relying on them:
   appended while the jail runs as if it had just happened (seen in a
   container: lines stamped 20 minutes and 3 days old led to bans). Every
   public address with five failed logins anywhere in the retained log
-  would have been blocked for an hour at that moment, and an address of
+  would have been blocked at that moment, and an address of
   the application that once had a wrong password deployed is such an
   address. The script now copies one time window per run, from the end
   of the previous window to two seconds ago, and never more than the last

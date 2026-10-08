@@ -138,8 +138,16 @@
       #   - `password authentication failed for user "..."`: a wrong
       #     password, and also a role that does not exist (Postgres 16
       #     uses the same wording for both, on purpose).
-      #   - `no pg_hba.conf entry for host ...`: a connection that
-      #     pg_hba.conf refuses outright, for example one without TLS.
+      #   - `no pg_hba.conf entry for host ...`: a connection whose
+      #     (host, user, database, auth-method) tuple matches no line in
+      #     pg_hba.conf, so Postgres refuses it before any password is
+      #     checked. In this image pg_hba.conf is a single wide line
+      #     (`host all all all scram-sha-256`), so this message is produced
+      #     by the connection shapes that line does not cover: a
+      #     `replication` connection (a different database class, not
+      #     covered by `all`), and a client that negotiates no suitable
+      #     auth. It is NOT "a connection without TLS": this image accepts
+      #     both TLS and non-TLS on the same line.
       # A new alternative belongs here only if it is a refused login.
       #
       # WHAT THE REGEX SEES IS NOT THE WHOLE LINE. fail2ban finds the
@@ -162,20 +170,37 @@
       # CEST the zone would stay in front of `[pid]` and nothing would
       # match.
       #
-      # The regex is anchored at the start (`^`, then only the pid in
-      # brackets, then the host) instead of a leading `^.*`. Postgres
-      # echoes the client-supplied username verbatim into the FATAL
-      # message, so a client can connect with a username like
-      # `a [999] 198.51.100.77 FATAL: `. A greedy `^.*` re-anchors
-      # inside that forged text and reports 198.51.100.77 as the
-      # offending host, banning an address the attacker chose instead
-      # of their own. Anchoring on the fixed prefix shape closes that
-      # off: `<HOST>` can only bind to the field right after the real
-      # `[pid]`, and nothing a client controls comes before it.
-      # See files/failregex-check.py for a runnable check that proves
-      # this against a benign line, a forged-username line, and a
-      # Unix-socket line, and proves that the FATAL lines listed above
-      # do not match.
+      # The regex is anchored at the start (`^`, then EXACTLY ONE space,
+      # then only the pid in brackets, then the host) instead of a leading
+      # `^.*`. Postgres echoes the client-supplied username verbatim into
+      # the FATAL message, so a client can connect with a username like
+      # `a [999] 198.51.100.77 FATAL: `. A greedy `^.*` re-anchors inside
+      # that forged text and reports 198.51.100.77 as the offending host,
+      # banning an address the attacker chose instead of their own.
+      # Anchoring on the fixed prefix shape closes that off: `<HOST>` can
+      # only bind to the field right after the real `[pid]`, and nothing a
+      # client controls comes before it.
+      #
+      # THE ONE SPACE IS LOAD-BEARING, and `\s*` was wrong. fail2ban strips
+      # the timestamp and leaves exactly one space in front of `[pid]` (from
+      # the line `2026-.. UTC [4189249] 1.2.3.4 FATAL: ..` the regex gets
+      # ` [4189249] 1.2.3.4 FATAL: ..`). A username may itself contain a
+      # newline. Postgres logs a newline inside a value as a CONTINUATION
+      # line that begins with a TAB and repeats the message, so a caller
+      # connecting three times with the username
+      #   "\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"
+      # makes Postgres write TAB-led lines `\t[1] 203.0.113.77 FATAL:  ..`.
+      # The earlier pattern began `^\s*\[\d+\]`, and `\s*` matches that
+      # leading TAB, so fail2ban (which found no timestamp on the
+      # continuation line) applied the failregex to the whole line and bound
+      # <HOST> to 203.0.113.77 — an address the caller chose, with no
+      # password. Verified with real postgres:16-alpine + real
+      # fail2ban-regex 1.0.2 on 2026-10-08: the old filter reported
+      # 203.0.113.77 as a failing IP; this one does not match the TAB line
+      # at all. The mirror (pg-auth-log.sh.j2) is the first layer and drops
+      # the continuation line before it ever reaches here; this single-space
+      # anchor is the second, independent layer. See docs/
+      # SECURITY-PROPERTIES.md (P41) and files/failregex-check.py.
       #
       # The same anchor means a line must START with the Postgres
       # timestamp. A line with the compose prefix (`db-1  | `) in front
@@ -194,11 +219,15 @@
       # `<HOST>` is left unexpanded on purpose: fail2ban expands it itself,
       # and since 0.10 (Ubuntu 24.04 ships 1.0.x) that expansion is an
       # alternation covering IPv4, hostnames AND bare unbracketed IPv6 — the
-      # form Postgres writes into %h — so an IPv6 client is matched and banned
-      # by this same line with no extra pattern.
+      # form Postgres writes into %h — so a synthetic IPv6 line is matched by
+      # this same pattern with no extra work. In production, though, the port
+      # is published on IPv4 only (docker-compose.split.yml), so a real
+      # client cannot reach Postgres over IPv6 and no IPv6 %h line is written
+      # by a live connection. The IPv6 branch stays correct, and matters only
+      # if IPv6 publishing is ever restored.
       [Definition]
-      failregex = ^\s*\[\d+\] <HOST> FATAL:\s+password authentication failed for user
-                  ^\s*\[\d+\] <HOST> FATAL:\s+no pg_hba\.conf entry for
+      failregex = ^ \[\d+\] <HOST> FATAL:  password authentication failed for user "
+                  ^ \[\d+\] <HOST> FATAL:  no pg_hba\.conf entry for
       ignoreregex =
   register: announce_f2b_filter
 
@@ -208,13 +237,24 @@
     mode: "0644"
     content: |
       # Public Postgres port, no tailnet — see the note at the top of
-      # roles/fail2ban/tasks/main.yml. 5 failures in 10 minutes bans the
-      # source IP for 1 hour; deliberately more lenient than SSH-style
+      # roles/fail2ban/tasks/main.yml. 5 failures in 10 minutes ban the
+      # source IP for 10 minutes; deliberately more lenient than SSH-style
       # jails (findtime=10m, not 24h) because a legitimate client
       # (Netlify's shifting egress pool) can plausibly retry a handful of
-      # times during a deploy without being a real attack, and a 1-hour
-      # ban self-heals rather than requiring an operator to unban a
-      # innocent IP by hand.
+      # times during a deploy without being a real attack.
+      #
+      # bantime is 10 MINUTES, not an hour. The application shares this
+      # exact port, and it reaches a failed login by itself: a wrong
+      # DATABASE_URL password fails once per connection attempt, the
+      # scheduled function opens the pool every minute (pool 4) and the web
+      # pool is 5, so five failures from one Netlify egress address pile up
+      # within minutes of a bad deploy — and Netlify's egress pool is
+      # shared, so the banned address can be one the site needs. An hour-
+      # long ban would outlast the fix (change the variable, redeploy) and
+      # keep the site off its own database well after the cause was gone. A
+      # ten-minute ban still stops a brute-force run (an attacker gets five
+      # tries per ten minutes per address) and heals by itself. See I3 in
+      # the review and the password-rotation caution in infra/DEPLOY.md.
       [announce-postgres]
       enabled = true
       # Ubuntu's defaults-debian.conf sets backend = systemd for every jail.
@@ -258,7 +298,7 @@
       ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
       maxretry = 5
       findtime = 10m
-      bantime = 1h
+      bantime = 10m
   register: announce_f2b_jail
 
 - name: Ensure fail2ban is enabled and running

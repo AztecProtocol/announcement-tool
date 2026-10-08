@@ -38,10 +38,33 @@
 #     failed run leaves it alone and the next run covers the same time.
 #   - Two runs never overlap (flock).
 #
-# Only FATAL lines are kept: the jail's filter matches nothing else, and
-# the file would otherwise grow with every checkpoint line. `--no-color
-# --no-log-prefix` stay load-bearing: the filter is anchored at the start
-# of the line, and with the compose prefix (`db-1  | `) no line matches.
+# Only GENUINE FATAL log-line starts are kept. A plain `grep -F ' FATAL: '`
+# is not enough: Postgres logs a newline inside a value (a user name, for
+# one) as a CONTINUATION line that begins with a TAB and repeats the
+# message. A caller connecting with the user name
+#   "\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"
+# makes Postgres write a TAB-led line `\t[1] 203.0.113.77 FATAL:  ..` that
+# a substring grep keeps. fail2ban finds no timestamp on it and used to bind
+# <HOST> to 203.0.113.77 — an address the caller chose, with no password
+# (found in review 2026-10-08, before the jail was ever live). So the filter
+# here keeps only lines that START as a real Postgres log line: the %m
+# timestamp, the zone, the `[pid]`, the %h host, then `FATAL:  `. A
+# continuation line (leading TAB) and a line carrying a forged timestamp
+# somewhere after a newline both fail this anchor. The filter in the jail is
+# a second, independent layer with the same intent (see
+# roles/fail2ban/tasks/main.yml — one leading space only, no `\s*`).
+#
+# The zone literal `UTC` in the pattern depends on log_timezone being UTC.
+# docker-compose.split.yml PINS `-c log_timezone=UTC`, which holds whatever
+# the TZ environment variable is; without that pin, setting TZ would move
+# the zone (e.g. to CEST) and this grep would drop every line silently. Keep
+# the two in step.
+#
+# `-a` treats the stream as text: under a UTF-8 locale GNU grep would
+# otherwise drop a line that holds an invalid byte (a caller can put one in
+# a user name), and a dropped line is a missed failure. `--no-color
+# --no-log-prefix` stay load-bearing: with the compose prefix (`db-1  | `)
+# in front, no line matches the start anchor.
 #
 # What can still be lost: lines written between the last run and the
 # removal of a container (at most one minute), and lines from a gap longer
@@ -64,8 +87,13 @@ cd "$STACK_DIR"
 until_s=$(( $(date +%s) - SETTLE ))
 since_s=$(( until_s - MAX_WINDOW ))
 if [ -f "$STATE_FILE" ]; then
-  last="$(cat "$STATE_FILE")"
-  # Anything that is not a plain number counts as no state.
+  # `cat` of an existing file does not fail here, so no `set +e` bracket is
+  # needed for the capture itself (unlike the docker read below, which can
+  # fail or hang and must be handled, not just survived). Anything the file
+  # holds that is not a plain number counts as no state, so a truncated or
+  # garbage state file falls back to the ten-minute window rather than
+  # stopping the tick.
+  last="$(cat "$STATE_FILE" 2>/dev/null || true)"
   if [[ "$last" =~ ^[0-9]{1,12}$ ]] && [ "$last" -gt "$since_s" ]; then
     since_s="$last"
   fi
@@ -84,27 +112,50 @@ if [ "$since_s" -ge "$until_s" ]; then
   exit 0
 fi
 
-# `set -e` does not stop the script when a command substitution in an
-# assignment fails, and with `pipefail` a pipeline there can fail for a
-# stage that is not the last. So each capture is bracketed with `set +e`
-# and its exit status is read explicitly (same pattern as
-# cert-reload.sh.j2).
+# `set -e` DOES stop the script on a failed command substitution in an
+# assignment (`set -e; x=$(false)` stops). The bracket with `set +e` is
+# NOT there to keep `set -e` from killing the tick on a non-zero exit; it
+# is there so a Docker failure can be HANDLED — read the exit status, treat
+# it as "Docker unavailable", write no state and exit 0 — instead of the
+# whole tick dying with no state update. Reading the status explicitly is
+# the only way to tell "Docker is down" (leave the window for next time)
+# apart from a real fault. (Same pattern as cert-reload.sh.j2.)
+#
+# `timeout 50`: a `docker compose logs` call can HANG (a wedged Docker
+# daemon, a container mid-restart). Without a bound it would hold the flock
+# until the next cron tick's `flock -n` gives up, and then the tick after
+# that, for as long as the hang lasts — the mirror would stop with no sign.
+# 50 s leaves margin under the one-minute cron. A timeout exits non-zero and
+# is treated exactly like "Docker unavailable": no state is written, so the
+# next run covers the same window.
 set +e
-window="$(docker compose logs --no-color --no-log-prefix \
+window="$(timeout 50 docker compose logs --no-color --no-log-prefix \
   --since "$since_s" --until "$(( until_s - 1 )).999999999" db 2>/dev/null)"
 LOGS_EXIT=$?
 set -e
 
 if [ "$LOGS_EXIT" -ne 0 ]; then
-  # Docker or the compose project is not available right now. Not fatal
-  # and no state written: the next run reads the same time again.
+  # Docker is unavailable, or the read hung and timeout killed it. Not
+  # fatal and no state written: the next run reads the same time again.
   exit 0
 fi
 
-# grep exits 1 when no line matches, which is the normal case and not an
-# error. Only 2 and above is a failure.
+# Keep only GENUINE Postgres FATAL log-line starts. See the header: a bare
+# substring grep would keep a TAB-led continuation line a caller can forge
+# with a newline in a user name, and fail2ban would ban the address inside
+# it. This anchors on the real line shape: the %m timestamp, the UTC zone
+# (pinned in compose), the `[pid]`, the %h host (an address or `[local]`),
+# then `FATAL:  `. grep exits 1 when no line matches, the normal case and
+# not an error; only 2 and above is a failure. `-a` keeps a line that holds
+# an invalid byte rather than dropping it under a UTF-8 locale.
+#
+# The window is fed with a here-string, not a temp file. It stays this way
+# on purpose: the here-string is simple and every exit-path guarantee still
+# holds — the state is written only after a successful read and append, and
+# grep exiting 1 (no match) is not treated as an error. A temp file would
+# add a path to create and clean up with no gain.
 set +e
-fatal="$(grep -F ' FATAL: ' <<<"$window")"
+fatal="$(grep -a -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+ UTC \[[0-9]+\] [^ ]+ FATAL:  ' <<<"$window")"
 GREP_EXIT=$?
 set -e
 
