@@ -8,11 +8,12 @@
 #
 # Postgres logs failed auth to its own stderr, which Docker sends to the
 # json-file log driver by default, not to a host file fail2ban can tail
-# directly. `docker logs` reads that json-file log, so this role wires up
-# a small script that fail2ban's logpath calls through, rather than
-# expecting Postgres to write directly to a host path (postgres:16-alpine
-# has no such option without extra config, and duplicating Docker's
-# logging pipeline is more moving parts than necessary).
+# directly. `docker logs` reads that json-file log, so this role installs
+# a small script, run by cron, that copies the failed-login lines into a
+# host file, and the jail's logpath is that file. Postgres is not made to
+# write to a host path itself (postgres:16-alpine has no such option
+# without extra config, and duplicating Docker's logging pipeline is more
+# moving parts than necessary).
 #
 # Until 2026-10-08 this role installed a jail that had never banned
 # anyone, for four reasons that each were enough alone (the wrong
@@ -30,26 +31,28 @@
 # ships nftables.service disabled and this role does not enable it (its
 # default /etc/nftables.conf starts with `flush ruleset`, which would wipe
 # Docker's own rules).
+#
+# `logrotate` is on every Ubuntu server image already. It is named because
+# the rule below is useless without it.
 - name: Install fail2ban
   ansible.builtin.apt:
     name:
       - fail2ban
       - nftables
+      - logrotate
     state: present
     update_cache: true
 
-# `docker compose logs` needs a working directory; wrapping it in a script
-# invoked with an absolute path keeps the jail's `logpath` simple (fail2ban
-# does not expand shell variables in that field) and keeps stack_dir in one
-# place (this file) instead of also baked into the jail.local template.
+# The script's own header says how it reads the log (one time window per
+# run, never more than the last ten minutes) and why.
 - name: Install the postgres-auth-log helper script
   ansible.builtin.template:
     src: pg-auth-log.sh.j2
     dest: /usr/local/bin/pg-auth-log.sh
     mode: "0755"
 
-# Runs the helper once a minute via cron, appending new log lines to a real
-# host file fail2ban can tail with `tail -F` semantics (its usual mode).
+# Runs the helper once a minute via cron. Each run appends the failed-login
+# lines of the last minute to a real host file, which the jail reads.
 # fail2ban itself has no notion of "run a container log command on a
 # timer" — this is the standard bridge pattern for containerized services
 # whose logs otherwise only exist inside the Docker logging driver.
@@ -67,6 +70,27 @@
     mode: "0644"
     access_time: preserve
     modification_time: preserve
+
+# The mirrored file holds failed logins only, but a port open to the
+# internet gets those without end, so the file is rotated. No `postrotate`
+# is needed on either side: the helper opens the file again on every run,
+# and fail2ban's polling backend sees that the path is a new file and
+# reads it from the start (seen in a container with fail2ban 1.0.2: a
+# burst appended after `logrotate -f` led to a ban). `create` puts an empty
+# file back at once, so the jail never has a missing logpath.
+- name: Install logrotate rule for the mirrored postgres log
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/announce-postgres-auth
+    mode: "0644"
+    content: |
+      /var/log/announce-postgres-auth.log {
+        weekly
+        rotate 4
+        compress
+        missingok
+        notifempty
+        create 0644 root root
+      }
 
 - name: Install the postgres jail filter
   ansible.builtin.copy:
@@ -200,6 +224,10 @@
       # package, while `auto` picks pyinotify only if python3-pyinotify is
       # installed (the fail2ban package only recommends it). The file gets
       # new lines at most once a minute, so polling costs nothing.
+      #
+      # findtime below is also the longest stretch of log the mirror script
+      # ever copies in one run (MAX_WINDOW in pg-auth-log.sh.j2). Change
+      # the two together.
       backend = polling
       # The CONTAINER port, not the host port. The ban sits on the forward
       # hook (below), which a packet reaches after Docker's DNAT has

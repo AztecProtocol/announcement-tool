@@ -571,7 +571,11 @@ cannot maintain it safely. Treating any one of these four as something to
 
 ## What has not been verified — read before you rely on this
 
-Nobody has applied this Terraform or run this Ansible against a real VM.
+**This list was written before the first deployment, when nobody had
+applied this Terraform or run this Ansible against a real VM. The
+procedure in [`DEPLOY.md`](DEPLOY.md) then ran on the real VM on
+2026-09-04. The items below were not revised one by one after that run,
+except the `fail2ban` item, which is current.**
 Real Docker containers, real TLS handshakes, and real fault injection
 were used extensively during development. But several things can only get their first
 real exercise on an actual apply, and you should know which before
@@ -655,16 +659,63 @@ relying on them:
   [`DEPLOY.md`](DEPLOY.md). Do not call the jail a working control on a
   VM where that check has not passed.
 
-  **Known and not fixed:** when Docker rotates the database log (10 MB),
-  the mirror script copies the whole retained log again, with its old
-  timestamps. fail2ban 1.0 counts an old line that is appended while the
-  jail runs as if it had just happened (seen in a container: lines
-  stamped 20 minutes and 3 days old led to bans). At a rotation, every
-  public address with five or more failed logins anywhere in the retained
-  log is therefore blocked for an hour at once. An address of the
-  application that once had a wrong password deployed is such an address.
-  The mirrored file `/var/log/announce-postgres-auth.log` also has no log
-  rotation of its own and grows without limit.
+  **Old failures are not replayed (fixed 2026-10-08, the day the jail
+  became live).** The mirror script used to track its position by line
+  count. When the count went down (Docker rotates the database log at
+  10 MB, or the container is recreated) it copied the whole retained log
+  again, with its old timestamps. fail2ban 1.0 counts an old line that is
+  appended while the jail runs as if it had just happened (seen in a
+  container: lines stamped 20 minutes and 3 days old led to bans). Every
+  public address with five failed logins anywhere in the retained log
+  would have been blocked for an hour at that moment, and an address of
+  the application that once had a wrong password deployed is such an
+  address. The script now copies one time window per run, from the end
+  of the previous window to two seconds ago, and never more than the last
+  ten minutes (the jail's `findtime`). It keeps only `FATAL` lines, and
+  the mirrored file is rotated weekly (4 kept).
+
+  What proves it, none of it on the VM:
+  - *Real Docker (29.1.3, Compose 5.2.0) on a developer machine.*
+    `docker compose logs --since A --until B` compares against Docker's
+    own nanosecond stamp of each line, and both ends are inclusive (a
+    line stamped exactly `T` is returned for `--since T` and for
+    `--until T`, and for neither at 1 ns past it). The script therefore
+    reads `[since, until - 1 ns]` and the next run starts at `until`.
+    Times are passed as Unix seconds: a time without a zone is read as
+    local time. `--tail` must not be combined with `--until` (the tail is
+    cut first, and the result can be empty).
+  - *The rendered script, 52 runs 1.3 seconds apart against a real
+    `postgres:16-alpine`* (paths moved out of `/var`, nothing else
+    changed) while 5,122 failed logins were made, about 73 a second, so
+    lines fell on every window boundary. Docker rotated its log file 13
+    times during the run and the container had been recreated just
+    before it. The mirrored file was byte-identical to the `FATAL` lines
+    of `docker logs`: 5,122 lines, none twice, none missing.
+  - *`ubuntu:24.04` with fail2ban 1.0.2 running the jail of this role.*
+    For this part `docker` was a stand-in script that serves
+    `compose logs --since/--until` from a fixture file with the inclusive
+    behaviour seen above, not real Docker. Six failures stamped 20
+    minutes old, first run with no state: none copied, nobody banned.
+    State three days old (a long cron gap), six failures stamped 11
+    minutes old and two stamped 5 minutes old: only the two copied,
+    nobody banned. Five fresh failures: banned. A run in which `docker`
+    fails: exit 0, state unchanged, and the next run copies the lines.
+    As a control, the previous script under the same conditions copied
+    everything and the old addresses were banned at once.
+  - *Rotation of the mirrored file, same container.* `logrotate -f`, then
+    five fresh failures: fail2ban's polling backend read the new file and
+    banned the address, twice in a row. With `/var/log` owned
+    `root:syslog` mode 0775 as on Ubuntu, the rule works through
+    `/etc/logrotate.conf` (which sets `su root adm`, and is how the daily
+    timer runs it). Run alone, `logrotate /etc/logrotate.d/announce-postgres-auth`
+    skips the file with an "insecure permissions" error.
+
+  What it still does: on its first run, and whenever its state file
+  `/var/lib/announce-pg-auth-log.since` is missing or unreadable, it
+  copies the last ten minutes, including lines an earlier run may have
+  copied already. Lines written in the last minute before a container is
+  removed are lost. Not run on the VM: the script under the real cron
+  against the real compose project, and the weekly rotation.
 - **A full, non-syntax-check `ansible-playbook` run against a live
   host.** Only `--syntax-check` and `ansible-lint` (clean at the
   `production` profile) were run. There was no real inventory host to

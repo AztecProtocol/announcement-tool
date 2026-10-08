@@ -352,8 +352,15 @@ ignored. *Evidence:* the Ansible run fails unless the running jail reads the fil
 a canned failed login and nothing else, and the ban is on the `forward` hook
 (`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is proven by "Check that fail2ban bans"
 in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the jail there as unproven.
-*Open:* at a rotation of the database log the mirror re-copies old lines, and fail2ban counts them as new — see
-the "not verified" list in `infra/README.md`.
+*Old failures are not replayed.* The script that mirrors the database log for the jail tracked its position by
+line count and copied the whole retained log again at a log rotation or a container recreate; fail2ban counts
+old lines that arrive while it runs as new, so the application's own addresses could have been banned. It now
+copies one time window per run, never more than the last ten minutes (the jail's `findtime`), and only `FATAL`
+lines. *Evidence (containers and a developer machine, not the VM):* against real Docker, 52 consecutive runs
+during 5,122 failed logins and 13 log rotations mirrored every line exactly once; with fail2ban 1.0.2 running
+this jail (and a stand-in for the `docker` command), failures stamped older than ten minutes were not copied
+and banned nobody, a fresh burst was banned, also after `logrotate` rotated the mirrored file. Details in the
+"not verified" list in `infra/README.md`.
 
 **P42 — Test tooling cannot touch a deployed database.** `npm test` truncates every table in `DATABASE_URL`;
 the production guard and the documented warning are the controls.

@@ -145,7 +145,9 @@ services:
       # trailing space after %h, the client IP runs directly into
       # "FATAL:" with no separator at all (confirmed:
       # `172.22.0.1FATAL:  password authentication failed...`), which the
-      # fail2ban filter below (anchored on `<HOST>\s+FATAL:`) then fails
+      # fail2ban filter (infra/ansible/roles/fail2ban/tasks/main.yml,
+      # anchored at the start on `[pid] <HOST> FATAL:` with exactly one
+      # space before `FATAL:`) then fails
       # to match, silently — the same "jail never fires" failure mode
       # this whole log_line_prefix change exists to fix. The explicit
       # quoted value below keeps the trailing space unambiguous in the
@@ -167,23 +169,23 @@ services:
     logging:
       # Caps Docker's json-file log driver, which is uncapped by
       # default. This matters more for `db` than any other
-      # service here: two separate scripts scan its full log on a
+      # service here: two separate scripts read its log on a
       # recurring basis —
-      # infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2 does
-      # `docker compose logs db | wc -l` every minute, and
+      # infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2 reads
+      # the last minute of it every minute (`docker compose logs
+      # --since ... --until ...`), and
       # infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2 reads
-      # it after every SIGHUP. `--since` (used by the cert-reload script)
+      # it after every SIGHUP. `--since` (used by both scripts)
       # limits what is printed, not what Docker has to scan to get
       # there, so an uncapped log file means both of those get slower,
       # without bound, over the life of a long-running deployment.
       # 3 files x 10MB caps this service's log at ~30MB on disk while
-      # keeping enough history for the fail2ban mirror (which runs every
-      # minute) and cert-reload (which runs daily) to never miss a
-      # rotation boundary they can't already handle. Both scripts
-      # already have explicit rotation-handling logic (see
-      # pg-auth-log.sh.j2's comment on JSON-file log rotation), so this
-      # cap does not introduce a new failure mode, only bounds an
-      # existing unbounded one.
+      # keeping far more history than either script reads: the fail2ban
+      # mirror never looks back more than ten minutes, cert-reload only
+      # to its own SIGHUP. Both read by time, not by position, so a rotation of
+      # these files changes nothing for them (for the mirror this was
+      # run: 13 rotations during 5,122 failed logins, every line
+      # mirrored once; see infra/README.md).
       driver: json-file
       options:
         max-size: "10m"

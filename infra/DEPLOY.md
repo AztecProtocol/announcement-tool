@@ -778,11 +778,21 @@ step 3 is on the root disk and must be written again.
 
 ## What has not been tested
 
-This procedure has never run against a real VM. Several parts get their first
-real use on your deployment: the certificate request, the certificate renewal
-about 60 days later, the firewall, and the `fail2ban` rules (for those, run
-[Check that fail2ban bans](#check-that-fail2ban-bans)).
-[`README.md`](README.md) lists all of them, with what was tested and how.
+This procedure ran on the real VM on 2026-09-04. These parts are still
+unproven there:
+
+- **The certificate renewal.** It is due about 60 days after the certificate
+  was issued. Until one has happened, the renewal hook has only run against
+  a stand-in certificate.
+- **A `fail2ban` ban.** The jail installed on 2026-09-04 could not ban. It
+  was repaired on 2026-10-08 and proven in containers only. After the next
+  Ansible run, do [Check that fail2ban bans](#check-that-fail2ban-bans).
+- **The log mirror for `fail2ban` under the real cron, and the weekly
+  rotation of `/var/log/announce-postgres-auth.log`.** Both were proven
+  against real Docker on a developer machine and in containers.
+
+[`README.md`](README.md) has the details of what was tested and how. Most of
+its list was written before 2026-09-04 and was not revised after that run.
 
 The backup and restore procedures above were rehearsed on 2026-09-15 on a
 developer machine against Postgres 16 and a local S3-compatible server
