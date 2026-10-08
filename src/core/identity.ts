@@ -136,7 +136,15 @@ export async function assertPublishersConfigured(
   const query = (async () => (await sql`select count(*)::int as c from publishers`) as unknown as Array<{ c: number }>)();
   // If the budget wins the race, the query is still in flight; its eventual
   // rejection must not surface as an unhandled rejection.
-  query.catch(() => {});
+  // An error that arrives late is still worth seeing (it may be a
+  // misconfiguration, not a slow network), so it is logged. An error inside
+  // the budget is reported by the awaited race below, not here.
+  let budgetFired = false;
+  query.catch((err: unknown) => {
+    if (!budgetFired) return;
+    const code = (err as { code?: unknown } | null)?.code;
+    console.error(`start check: the database answered late with an error (${typeof code === 'string' ? code : 'no code'})`);
+  });
   const budget = new Promise<'budget'>(resolve => { timer = setTimeout(() => resolve('budget'), budgetMs); });
   let rows: Array<{ c: number }> | 'budget';
   try {
@@ -152,14 +160,18 @@ export async function assertPublishersConfigured(
     if (timer) clearTimeout(timer);
   }
   if (rows === 'budget') {
+    budgetFired = true;
     console.error(`start check: database unreachable (no answer in ${budgetMs} ms); starting anyway — publishers are checked on every request`);
     return 'unreachable';
   }
-  if (rows[0]?.c === 0) {
+  const c = rows[0]?.c;
+  if (c === 0) {
     throw new Error(
       'Refusing to start: the publishers table is empty, which would let anyone '
       + 'reaching the admin publish. Add the first publisher with: npm run seed:publisher -- you@example.com',
     );
   }
+  // A malformed answer must not count as "ok".
+  if (typeof c !== 'number' || !(c > 0)) throw new Error('start check: unexpected answer from the publishers count query');
   return 'ok';
 }

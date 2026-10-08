@@ -112,13 +112,28 @@ constant time and the `code_verifier` never leaving a cookie.
 an appended duplicate cannot override the real value.
 *Enforced:* `app/admin/callback/route.ts` `sessionCookie`, `parseCookies`.
 
-**P7 — Authorization is separate from authentication.** A verified identity still has to be in `publishers`.
-*Enforced:* `isPublisher` in `src/core/identity.ts`, called at every admin action entry point (`app/admin/actions.ts`).
-*Breaks if:* a new server action is added without the `resolveIdentity` + `isPublisher` pair.
+**P7 — Authorization is separate from authentication.** A verified identity still has to be in `publishers`,
+to write and to read.
+*Enforced (writes):* `isPublisher` in `src/core/identity.ts`, called at every admin action entry point (`app/admin/actions.ts`).
+*Enforced (reads):* `requirePublisher` in `src/web/admin-gate.ts`, called by each `page.tsx` under `app/admin`
+as its first awaited statement after it reads its parameters. A page that is refused returns `null` and runs no
+other query. `app/admin/layout.tsx` uses the same function, but only to show the refusal; it is not the check.
+*Tested:* `test/admin-gate.test.ts`; pinned by `test/admin-pages-gated.test.ts`. That test is a text check that
+catches the common mistakes; it is not a proof. It reads the source of each admin page, fails if the page does
+anything other than get the database handle and the headers before it calls the gate, and pins the set of page,
+layout and route handler files under `app/admin`.
+*Breaks if:* a new server action is added without the `resolveIdentity` + `isPublisher` pair; a new admin page
+does not call the gate first; a route handler reads the database before `requirePublisher`; a page starts a
+query in parallel with the gate; a `generateMetadata` reads data; a nested layout, template or default file
+reads data; a module-level statement reads data; a helper hides the database handle.
+Found on 2026-10-08: the check lived only in the layout. Next renders the page segment whether or not the layout
+returns `children`. Thus every GET of `/admin` and `/admin/review/<id>` returned the page data to a request with
+no session: in the inline flight data of an ordinary HTML response, in a full `RSC: 1` response, and in a
+partial-render response. Only the prefetch responses returned no data. No write was possible. Fixed by gating
+each page.
 
-**P8 — A deployed instance never runs with an empty publisher table.** An empty publishers table authorises
-nobody on a deployed instance; it means "anyone may publish" only in insecure local development
-(`ANNOUNCE_ALLOW_INSECURE_DEV=1`).
+**P8 — An empty publisher table authorises nobody on a deployed instance.** An empty publishers table means
+"anyone may publish" only in insecure local development (`ANNOUNCE_ALLOW_INSECURE_DEV=1`).
 *Enforced:* `isPublisher` in `src/core/identity.ts`, on every request. `assertPublishersConfigured` at start is
 an early signal and refuses to start when the table is reachable and empty. A database that is unreachable at
 start is logged and does not stop the instance (a stored start failure took the site down for about 50 minutes

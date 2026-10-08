@@ -339,7 +339,7 @@ Both the web app and the worker (or, on the Netlify shape, the `tick-background`
 - `DEPLOY_TARGET` is set to `vm` or `netlify`. This decides which identity source is trusted and which of the two checks below applies. An unset or unrecognized value fails closed: it does not skip the checks, it refuses to start.
 - `ADMIN_EMAIL` is unset. It is the dev-only identity fallback. Set in production, it would grant admin to any request lacking a Tailscale or verified Auth0 header.
 - `PUBLIC_BASE_URL` is set and starts with `https://`. Otherwise confirmation and unsubscribe links sent to real subscribers point at the wrong host.
-- At least one row exists in the `publishers` table. Seed one with `npm run seed:publisher -- you@example.com`.
+- At least one row exists in the `publishers` table. Seed one with `npm run seed:publisher -- you@example.com`. This check applies when the database is reachable at start. `isPublisher` refuses an empty table on every request regardless.
 
 The remaining check depends on `DEPLOY_TARGET`, since the two shapes trust different identity sources:
 
@@ -352,7 +352,7 @@ The checks do not use `NODE_ENV=production` as a trigger. The reason: `next star
 
 A start that fails these checks exits non-zero after printing the problems, for the worker. The Netlify `tick-background` function logs the problems and returns without doing any work. For the web app, the check runs inside Next's `register()` startup hook. Throwing there does not abort the process: Next logs the error and the server keeps running, returning 500 on every request. So if the web app is ever seen listening but every request returns a 500, check these first. A health check must send a real request, not just confirm the port is open, or it will report a misconfigured instance as healthy.
 
-Neither of the two public server actions (email subscribe, webhook registration) is rate-limited today. `netlify.toml` carried a rule at one point that attached a limit to the `/` path. A real deployment showed it also throttled every other request to `/`, including `/admin/login`. A second publisher trying to sign in got HTTP 429 and could not reach the login page. That rule was removed on 2026-08-23; `netlify.toml`'s comment explains why and what a working fix would need (a store that survives serverless cold starts, or a CAPTCHA on the form). Until one of those lands, this is a real and currently unmitigated risk. `subscribeEmail` sends a confirmation email to any address given, so the endpoint can be pointed at a third party's inbox. See `netlify.toml`'s rate-limiting comment for the full account.
+The public server actions in `app/actions.ts` are rate-limited in application code (`consumeRateLimit` in `src/core/rate-limit.ts`), per fixed clock hour: `subscribeEmail` allows 3 attempts per email address and 10 per caller IP, `subscribeWebhook` allows 5 registrations per caller IP, and `testWebhook` allows 10 test events per webhook and 20 per caller IP. `netlify.toml` carried a rule at one point that attached a limit to the `/` path. A real deployment showed it also throttled every other request to `/`, including `/admin/login`. A second publisher trying to sign in got HTTP 429 and could not reach the login page. That rule was removed on 2026-08-23, and the limit moved into the application code. The risk it bounds: `subscribeEmail` sends a confirmation email to any address given, so the endpoint can be pointed at a third party's inbox. See `netlify.toml`'s rate-limiting comment for the full account. Do not add a path rule there again.
 
 ### Which channels this deployment runs
 
@@ -366,12 +366,12 @@ Neither of the two public server actions (email subscribe, webhook registration)
 
 ### Publishers and the bootstrap rule
 
-`app/admin/layout.tsx` checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`) before rendering any admin page. A non-publisher tailnet identity cannot read drafts, requester emails, fan-out targets, or templates either. Each mutating server action in `app/admin/actions.ts` also runs its own `isPublisher` check independently. The layout is not the only enforcement point for writes.
+Every admin page calls `requirePublisher` (`src/web/admin-gate.ts`) before it reads anything. That function checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`). A page that is refused returns nothing and runs no other query, so an identity that is not a publisher cannot read drafts, requester emails, fan-out targets, or templates. `app/admin/layout.tsx` uses the same function to show the refusal. The layout alone is not the check: Next.js renders the page segment even when the layout does not return `children`, and the page data is then in the response. `test/admin-pages-gated.test.ts` is a text check that catches the common mistakes; it is not a proof. It fails if an admin page does anything other than get the database handle and the headers before it calls the gate, and it pins the set of page and layout files under `app/admin`. Each mutating server action in `app/admin/actions.ts` also runs its own `isPublisher` check independently.
 
 - **Bootstrap rule:** if the `publishers` table is empty, every identity is treated as a publisher, but only in insecure local development (`ANNOUNCE_ALLOW_INSECURE_DEV=1`). On a deployed instance an empty table authorises nobody, checked on every request by `isPublisher`. The start check refuses to start when the table is reachable and empty. A database that is unreachable at start is logged and does not stop the instance, because a stored start failure would answer 500 on every page until a redeploy.
 - In insecure local development, while the table is empty, the admin shell shows a standing warning: "No publishers configured — anyone reaching this page can publish. Add publishers before launch."
 - **Publishers must be added to the table before launch.** Once at least one row exists, only listed emails may compose, preview, or publish.
-- If the publisher lookup itself fails (for example, database unreachable), the layout fails closed. It shows an "Admin is unavailable" page, rather than falling through to open access.
+- If the publisher lookup itself fails (for example, database unreachable), the gate fails closed. Each page returns nothing, and the layout shows an "Admin is unavailable" page, rather than falling through to open access.
 
 ### Compose, preview, publish
 

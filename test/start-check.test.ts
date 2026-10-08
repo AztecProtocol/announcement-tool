@@ -60,6 +60,35 @@ describe('assertPublishersConfigured (start check)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it.each([[[]], [[{}]], [[{ c: '3' }]], [[{ c: null }]], [[{ c: -1 }]], [[{ c: NaN }]]])(
+    'refuses a malformed count answer %j instead of calling it ok', async (rows) => {
+      await expect(assertPublishersConfigured(stub(async () => rows), PROD))
+        .rejects.toThrow('start check: unexpected answer from the publishers count query');
+    });
+
+  it('logs an error that arrives after the budget fired, with its code', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const slow = stub(() => new Promise((_, rej) => setTimeout(() => rej(err('28P01')), 150)));
+    expect(await assertPublishersConfigured(slow, PROD, { budgetMs: 50 })).toBe('unreachable');
+    await new Promise(r => setTimeout(r, 300));
+    const msgs = spy.mock.calls.map(c => String(c[0]));
+    expect(msgs).toContain('start check: the database answered late with an error (28P01)');
+
+    spy.mockClear();
+    const slowNoCode = stub(() => new Promise((_, rej) => setTimeout(() => rej(new Error('boom')), 150)));
+    expect(await assertPublishersConfigured(slowNoCode, PROD, { budgetMs: 50 })).toBe('unreachable');
+    await new Promise(r => setTimeout(r, 300));
+    expect(spy.mock.calls.map(c => String(c[0]))).toContain('start check: the database answered late with an error (no code)');
+  });
+
+  it('an error inside the budget is reported once, by the awaited race only', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await assertPublishersConfigured(stub(async () => { throw err('ECONNREFUSED'); }), PROD)).toBe('unreachable');
+    await new Promise(r => setTimeout(r, 20));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(String(spy.mock.calls[0]![0])).not.toContain('answered late');
+  });
+
   it('a late rejection after the budget fired does not become an unhandled rejection', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const unhandled: unknown[] = [];
