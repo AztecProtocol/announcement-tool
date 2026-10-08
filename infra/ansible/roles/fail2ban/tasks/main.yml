@@ -272,7 +272,7 @@
       # The CONTAINER port, not the host port. The ban sits on the forward
       # hook (below), which a packet reaches after Docker's DNAT has
       # rewritten the destination to the container. The compose file maps
-      # ${DB_HOST_PORT:-5432}:5432, so this is always 5432 and must NOT
+      # 0.0.0.0:${DB_HOST_PORT:-5432}:5432, so this is always 5432 and must NOT
       # follow DB_HOST_PORT.
       port = 5432
       protocol = tcp
@@ -296,6 +296,10 @@
       # loopback: a ban there cannot stop an attacker and can only break the
       # stack itself.
       ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
+      # Never resolve a name from the log into an address to ban. Today %h is
+      # always an address (log_hostname is off). If it were ever a reverse-DNS
+      # name, the caller would control that name and so the banned address.
+      usedns = no
       maxretry = 5
       findtime = 10m
       bantime = 10m

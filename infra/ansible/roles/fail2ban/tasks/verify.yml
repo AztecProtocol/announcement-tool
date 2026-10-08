@@ -155,7 +155,9 @@
 #    that copies it is not running or cannot read Docker. This runs the
 #    script once and checks it left a fresh state stamp (a Unix time, under
 #    120 s old). The script writes that stamp only after it read the Docker
-#    log and appended, so a fresh stamp proves the whole copy path works.
+#    log and appended, so a fresh stamp proves the mirror runs and Docker
+#    answers. It does not prove that a line arrived: an empty window also
+#    writes the stamp.
 - name: Prove the log mirror runs and can read Docker
   block:
     - name: Run the postgres-auth-log mirror once

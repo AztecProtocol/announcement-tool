@@ -483,10 +483,15 @@ from an address the jail would block.
 
    The first command is a simulation (`-s`): read its summary and confirm it
    says it will install `nftables` and lists no package to remove or change.
-   The second must NOT answer `enabled`. `disabled`, `static`, or
-   `masked` are all fine; `enabled` means the service would flush the ruleset
-   on the next boot — stop and disable it (`sudo systemctl disable --now
-   nftables`) before you go on.
+   The second must NOT answer `enabled`. `disabled`, `static`, `masked`,
+   `not-found`, or an error that says the unit file does not exist (the
+   package is not installed yet) are all fine. `enabled` means the service
+   would flush the ruleset on the next boot. In that case run
+   `sudo systemctl disable nftables` before you go on.
+
+   **Do not stop the service, and do not add `--now` to that command.**
+   Stopping the `nftables` service runs `nft flush ruleset`, which removes
+   every firewall rule on the VM at once, Docker's included.
 
 2. Look for failed logins from your own services in the last 24 hours. If the
    application's database user (`announce_app`) is already failing logins from
@@ -494,21 +499,19 @@ from an address the jail would block.
    Find out why before you turn the jail on.
 
    ```sh
-   sudo awk -v cut="$(date -u -d '24 hours ago' '+%Y-%m-%d %H:%M:%S')" \
-     '$1" "$2 >= cut && $6=="FATAL:" {
-        ip=$5
-        for (i=1;i<=NF;i++) if ($i=="user") { u=$(i+1); gsub(/"/,"",u) }
-        print $1, $2, ip, u
-      }' /var/log/announce-postgres-auth.log
+   cd /opt/announce && sudo docker compose logs --no-color --no-log-prefix --since 24h db 2>&1 \
+     | grep -aE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+ UTC \[[0-9]+\] [^ ]+ FATAL:  (password authentication failed for user "|no pg_hba\.conf entry for)'
    ```
 
-   Each line it prints is a failed login in the last 24 hours: the date, the
-   time, the source address, and the user name. If `announce_app` appears
-   from an address that could be the application (a Netlify egress address,
-   not your own machine), **stop** and find the cause — a stale password in
-   Netlify, most likely — before the jail is live. If the file does not exist
-   yet, the mirror has not run; that is expected before the first Ansible run,
-   and there is nothing to check.
+   This reads the database's own log, not the mirrored file (before the first
+   run with the repaired role, the mirrored file holds lines in the old shape).
+   Each line it prints is a failed login in the last 24 hours: the date and
+   time, the process number, the source address, and the message with the user
+   name. Addresses of scanners that try names such as `postgres` are normal.
+   If `announce_app` appears from an address that could be the application (a
+   Netlify egress address, not your own machine), **stop** and find the cause —
+   a stale password in Netlify, most likely — before the jail is live. If the
+   command prints nothing, there were no failed logins.
 
 3. After the Ansible run, confirm the jail is healthy:
 
@@ -867,7 +870,7 @@ step 3 is on the root disk and must be written again.
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
 | The site cannot reach the database (connection refused or a timeout) right after a wrong `DATABASE_URL` or a wrong password was deployed | Five failed logins in ten minutes make `fail2ban` block the address for ten minutes, and a Netlify address is treated like any other. Correct the variable first. Then, on the VM, look at `sudo fail2ban-client status announce-postgres`: `Banned IP list:` shows the blocked addresses. Remove one with `sudo fail2ban-client set announce-postgres unbanip <address>`, or all of them with `sudo fail2ban-client unban --all` (this also clears the `sshd` jail, so an SSH address blocked for failed logins is unbanned at the same time). The same applies to your own machine after five mistyped passwords in `psql`. |
-| Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live. The message says which check failed and where to look. The port is not protected until the run passes. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The one task the stopped play skipped is the Caddy restart at the end: in `/opt/announce` run `sudo docker compose restart caddy`, then `sudo systemctl restart fail2ban`, then run the play again. |
+| Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live. The message says which check failed and where to look. The port is not protected until the run passes. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped two things: the pending Caddy restart, and the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. In `/opt/announce` run `sudo docker compose restart caddy`, then `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
 | Every page shows `Internal Server Error` and the Netlify function log says `Failed to prepare server` | Trigger a deploy in Netlify (Deploys → Trigger deploy). A function whose start failed keeps failing until it is replaced. Since the start-check change this should only happen for a real misconfiguration; the log line names it. |
