@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 // reasoning and the re-verification steps are in tsconfig.json's paths comment.
 import { headers } from 'next/dist/server/request/headers.js';
 import { resolveIdentity, listPublishers, isPublisher } from '../../src/core/identity.js';
+import { checksApply, guardEnvFromProcess } from '../../src/core/production-guard.js';
 import { getDb } from '../../src/web/db.js';
 
 export const metadata = {
@@ -71,7 +72,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       </div>
     );
   }
-  const bootstrapping = publishers.length === 0;
+  // isPublisher already denied an empty table on a deployed instance, so this
+  // notice can only be reached in insecure local development. Say so explicitly.
+  const bootstrapping = publishers.length === 0 && !checksApply(guardEnvFromProcess());
   const sourceLabel = { auth0: 'google', tailscale: 'tailnet', dev: 'dev' }[identity.source];
   // Only a browser session can be ended. A tailnet or dev identity comes with
   // every request, so a sign-out link there would do nothing.

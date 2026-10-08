@@ -368,8 +368,8 @@ Neither of the two public server actions (email subscribe, webhook registration)
 
 `app/admin/layout.tsx` checks the resolved identity against the `publishers` table (`isPublisher` in `src/core/identity.ts`) before rendering any admin page. A non-publisher tailnet identity cannot read drafts, requester emails, fan-out targets, or templates either. Each mutating server action in `app/admin/actions.ts` also runs its own `isPublisher` check independently. The layout is not the only enforcement point for writes.
 
-- **Bootstrap rule:** if the `publishers` table is empty, every identity is treated as a publisher. This exists so the first deployment is not locked out before anyone has been added.
-- While the table is empty, the admin shell shows a standing warning: "No publishers configured — anyone reaching this page can publish. Add publishers before launch."
+- **Bootstrap rule:** if the `publishers` table is empty, every identity is treated as a publisher, but only in insecure local development (`ANNOUNCE_ALLOW_INSECURE_DEV=1`). On a deployed instance an empty table authorises nobody, checked on every request by `isPublisher`. The start check refuses to start when the table is reachable and empty. A database that is unreachable at start is logged and does not stop the instance, because a stored start failure would answer 500 on every page until a redeploy.
+- In insecure local development, while the table is empty, the admin shell shows a standing warning: "No publishers configured — anyone reaching this page can publish. Add publishers before launch."
 - **Publishers must be added to the table before launch.** Once at least one row exists, only listed emails may compose, preview, or publish.
 - If the publisher lookup itself fails (for example, database unreachable), the layout fails closed. It shows an "Admin is unavailable" page, rather than falling through to open access.
 

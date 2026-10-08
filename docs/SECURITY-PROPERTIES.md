@@ -116,11 +116,15 @@ an appended duplicate cannot override the real value.
 *Enforced:* `isPublisher` in `src/core/identity.ts`, called at every admin action entry point (`app/admin/actions.ts`).
 *Breaks if:* a new server action is added without the `resolveIdentity` + `isPublisher` pair.
 
-**P8 — A deployed instance never runs with an empty publisher table.** An empty table means "anyone may
-publish" (deliberate, for local dev), so a startup assertion refuses to boot in production.
-*Enforced:* `src/core/production-guard.ts`; *tested:* `test/production-guard.test.ts`.
-*Breaks if:* the permissive branch is folded into `isPublisher` (per-request policy branch), or the guard is
-skipped on a new deploy target.
+**P8 — A deployed instance never runs with an empty publisher table.** An empty publishers table authorises
+nobody on a deployed instance; it means "anyone may publish" only in insecure local development
+(`ANNOUNCE_ALLOW_INSECURE_DEV=1`).
+*Enforced:* `isPublisher` in `src/core/identity.ts`, on every request. `assertPublishersConfigured` at start is
+an early signal and refuses to start when the table is reachable and empty. A database that is unreachable at
+start is logged and does not stop the instance (a stored start failure took the site down for about 50 minutes
+on 2026-10-08). *Tested:* `test/identity.test.ts`, `test/start-check.test.ts`, `test/production-guard.test.ts`.
+*Breaks if:* `isPublisher` is given an env that skips the production checks on a deployed instance, or a caller
+bypasses `isPublisher`.
 
 **P9 — Identity comparison is case- and whitespace-insensitive at exactly one place.** Everything downstream
 sees one canonical form of "this person".

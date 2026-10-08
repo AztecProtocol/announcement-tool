@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from
 import type { Sql } from 'postgres';
 import { testSql, resetDb } from './helpers.js';
 import { resolveIdentity, isPublisher, listPublishers, assertPublishersConfigured } from '../src/core/identity.js';
+import type { GuardEnv } from '../src/core/production-guard.js';
 import { AUTH0_IDENTITY_HEADER } from '../src/core/auth0-claims.js';
 
 let sql: Sql;
@@ -143,8 +144,28 @@ describe('resolveIdentity', () => {
 });
 
 describe('publishers', () => {
-  it('bootstraps: an empty table means any identity may publish', async () => {
-    expect(await isPublisher(sql, 'anyone@example.com')).toBe(true);
+  const PROD: GuardEnv = {
+    deployTarget: 'netlify', publicBaseUrl: 'https://announce.aztec.network',
+    auth0Issuer: 'https://x.example/', auth0Audience: 'a', auth0ClientSecret: 's',
+    sessionSecret: 'x'.repeat(32), enabledChannels: 'webhook',
+  };
+  const DEV: GuardEnv = { ...PROD, allowInsecureDev: '1' };
+
+  it('bootstraps in insecure local development: an empty table means any identity may publish', async () => {
+    expect(await isPublisher(sql, 'anyone@example.com', DEV)).toBe(true);
+  });
+
+  it('an empty publishers table authorises nobody when the production checks apply', async () => {
+    expect(await isPublisher(sql, 'anyone@example.com', PROD)).toBe(false);
+    // The default environment (process.env, no opt-out under vitest) must refuse too.
+    expect(await isPublisher(sql, 'anyone@example.com')).toBe(false);
+  });
+
+  it('with publishers present the environment makes no difference', async () => {
+    await sql`insert into publishers (email) values ('pub@example.com')`;
+    expect(await isPublisher(sql, 'PUB@example.com', PROD)).toBe(true);
+    expect(await isPublisher(sql, 'other@example.com', PROD)).toBe(false);
+    expect(await isPublisher(sql, 'other@example.com', DEV)).toBe(false);
   });
 
   it('once populated, only listed emails may publish', async () => {
@@ -166,7 +187,7 @@ describe('publishers', () => {
 describe('assertPublishersConfigured', () => {
   it('passes when a publisher exists', async () => {
     await sql`insert into publishers (email) values ('alice@example.com')`;
-    await expect(assertPublishersConfigured(sql, { nodeEnv: 'production' })).resolves.toBeUndefined();
+    await expect(assertPublishersConfigured(sql, { nodeEnv: 'production' })).resolves.toBe('ok');
   });
 
   it('throws when the table is empty', async () => {
@@ -187,8 +208,8 @@ describe('assertPublishersConfigured', () => {
 
   it('does nothing when ANNOUNCE_ALLOW_INSECURE_DEV=1 opts out, so local work is unaffected', async () => {
     await expect(assertPublishersConfigured(sql, { nodeEnv: 'development', allowInsecureDev: '1' }))
-      .resolves.toBeUndefined();
-    await expect(assertPublishersConfigured(sql, { allowInsecureDev: '1' })).resolves.toBeUndefined();
+      .resolves.toBe('ok');
+    await expect(assertPublishersConfigured(sql, { allowInsecureDev: '1' })).resolves.toBe('ok');
   });
 });
 

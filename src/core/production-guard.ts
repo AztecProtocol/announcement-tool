@@ -212,3 +212,26 @@ export function checkEnvironment(env: GuardEnv): string[] {
 
   return problems;
 }
+
+/**
+ * The guard environment, read from process.env. One place, so the start hook
+ * and the per-request publisher check cannot drift.
+ *
+ * DEPLOY_TARGET is read rather than inferred from which other vars are set, so
+ * a half-configured environment fails the "unrecognized shape" branch in
+ * checkEnvironment instead of silently picking one identity model.
+ */
+export function guardEnvFromProcess(): GuardEnv {
+  return {
+    deployTarget: process.env.DEPLOY_TARGET as 'vm' | 'netlify' | undefined,
+    adminEmail: process.env.ADMIN_EMAIL,
+    hostname: process.env.HOSTNAME,
+    publicBaseUrl: process.env.PUBLIC_BASE_URL,
+    allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
+    auth0Issuer: process.env.AUTH0_ISSUER ?? (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : undefined),
+    auth0Audience: process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID,
+    auth0ClientSecret: process.env.AUTH0_CLIENT_SECRET,
+    sessionSecret: process.env.SESSION_SECRET,
+    enabledChannels: process.env.ENABLED_CHANNELS,
+  };
+}

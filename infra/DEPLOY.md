@@ -709,6 +709,7 @@ step 3 is on the root disk and must be written again.
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
+| Every page shows `Internal Server Error` and the Netlify function log says `Failed to prepare server` | Trigger a deploy in Netlify (Deploys → Trigger deploy). A function whose start failed keeps failing until it is replaced. Since the start-check change this should only happen for a real misconfiguration; the log line names it. |
 | The rebuilt VM joined the tailnet as `<name>-1` | The old machine was not removed from the tailnet before the rebuild. Delete both entries in the Tailscale admin console and rebuild again, or address the `-1` name in `tailscale ssh` and in `ansible/inventory.yml` for this one deployment. |
 
 ## What has not been tested
