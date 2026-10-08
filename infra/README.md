@@ -546,9 +546,14 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    bounds the damage a leaked application credential can do. A leaked
    superuser credential is a different, worse incident.
 3. **`fail2ban`** (`infra/ansible/roles/fail2ban`). This rate-limits
-   repeated failed connection attempts against 5432. It is the layer that
-   stops brute-force and credential-stuffing attacks against the port
-   itself, which TLS and the role's grants do not address on their own.
+   repeated failed logins against 5432: five in ten minutes block the
+   address for one hour. It is the layer that stops brute-force and
+   credential-stuffing attacks against the port itself, which TLS and the
+   role's grants do not address on their own. **It did nothing from the
+   first deployment until the repair of 2026-10-08** (see "not verified"
+   below for the four causes). It is a working control on a given VM only
+   after the Ansible run passes its three jail checks and the "Check that
+   fail2ban bans" section of [`DEPLOY.md`](DEPLOY.md) has been done there.
 4. **Operator access over the tailnet, not a public SSH port**
    (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
    closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which
@@ -604,16 +609,62 @@ relying on them:
   scenario it exists to close needs a real reboot, or a rescue-mode
   rebuild of a real Hetzner volume, to observe directly. The development
   sandbox had no systemd and no real boot sequence.
-- **`fail2ban-client status <jail>` on a live jail.** The regex was
-  re-verified with `infra/ansible/roles/fail2ban/files/failregex-check.py`
-  against a benign line, a line with a hostile username, and a
-  Unix-socket line. The earlier six-login test used only benign
-  usernames and could not have caught the log-injection case where a
-  client-supplied username forges a fake `[pid] <IP> FATAL:` sequence
-  to make fail2ban ban an address the attacker chose. But `fail2ban`
-  itself could not be installed in the development sandbox (no root or
-  apt access), so the jail has never actually banned a real
-  repeated-failure source IP end to end.
+- **The `fail2ban` jail on the real VM.** Until 2026-10-08 this item said
+  the jail had never banned an address end to end because `fail2ban`
+  could not be installed in the development sandbox. That gap hid a jail
+  that could not ban at all. On 2026-10-08 a real failed login on the
+  deployed VM was looked for in the jail: 0 failed, 0 banned. Four causes
+  were found, each enough alone:
+  1. Ubuntu's `/etc/fail2ban/jail.d/defaults-debian.conf` sets
+     `backend = systemd` for every jail. The jail set `logpath` but no
+     backend, so it read the journal and never opened the mirrored file.
+  2. The mirror script copied `docker compose logs db`, which starts
+     every line with `db-1  | `. The filter is anchored at the start of
+     the line, so no mirrored line could match.
+  3. The filter began with `^\S+ \S+ \S+ ` for the date, the time and the
+     zone. fail2ban removes the timestamp from a line before it tries the
+     filter, so the pattern matched nothing in the real fail2ban even
+     without the prefix. `failregex-check.py` passed because it ran the
+     pattern over the whole line.
+  4. Ubuntu's default ban action puts the ban in a chain on the `input`
+     hook. Port 5432 is published by Docker: its packets are DNAT'ed and
+     pass the `forward` hook, never `input`. A ban there stops nothing.
+
+  A fifth problem would have appeared the moment the jail worked: the
+  filter counted every `FATAL:` line, including `too many clients
+  already` and `the database system is starting up`. A database restart
+  or a connection spike could have blocked the application's own
+  addresses for an hour. The filter now counts failed logins only, and
+  the jail ignores loopback and private ranges.
+
+  **Proven in `ubuntu:24.04` containers with the distribution's
+  fail2ban 1.0.2 (not on the VM):** the four causes, each reproduced; the
+  jail reading the file; five failed logins banning the real address,
+  also with a forged username and over IPv6; the other `FATAL:` lines,
+  the private ranges and the old prefixed lines banning nobody; the ban
+  in its own chain on the `forward` hook, separate from the `sshd` jail's
+  `input` chain; and, with a real `postgres:16-alpine` behind a DNAT
+  rule in a router container, a sixth login that still reached Postgres
+  under an `input` ban and was refused under the `forward` ban. The
+  Ansible checks in `roles/fail2ban/tasks/verify.yml` were run there too
+  and fail on each of the old settings.
+
+  **Not proven until it is done on the VM:** the whole chain with
+  Docker's own published-port rules, from cron through the mirror to a
+  refused connection. That is the "Check that fail2ban bans" section of
+  [`DEPLOY.md`](DEPLOY.md). Do not call the jail a working control on a
+  VM where that check has not passed.
+
+  **Known and not fixed:** when Docker rotates the database log (10 MB),
+  the mirror script copies the whole retained log again, with its old
+  timestamps. fail2ban 1.0 counts an old line that is appended while the
+  jail runs as if it had just happened (seen in a container: lines
+  stamped 20 minutes and 3 days old led to bans). At a rotation, every
+  public address with five or more failed logins anywhere in the retained
+  log is therefore blocked for an hour at once. An address of the
+  application that once had a wrong password deployed is such an address.
+  The mirrored file `/var/log/announce-postgres-auth.log` also has no log
+  rotation of its own and grows without limit.
 - **A full, non-syntax-check `ansible-playbook` run against a live
   host.** Only `--syntax-check` and `ansible-lint` (clean at the
   `production` profile) were run. There was no real inventory host to
@@ -647,6 +698,5 @@ against a seeded certificate, including its ambiguous-multi-issuer
 refusal, incomplete-pair detection, and rejected-SIGHUP detection (a
 deliberately mismatched key, confirmed via `openssl s_client` that
 Postgres kept serving the old certificate while the naive checks would
-have reported success); and the fail2ban filter regex against a benign
-line, a hostile-username line, and a Unix-socket line, with
-`failregex-check.py`.
+have reported success); and the fail2ban jail in `ubuntu:24.04`
+containers as listed under "The `fail2ban` jail on the real VM" above.

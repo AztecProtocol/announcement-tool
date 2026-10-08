@@ -341,6 +341,19 @@ the end of this section.
 **P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd;
 fail2ban filter anchored on the log prefix so a username cannot forge a banned address, covering IPv6.
 *Enforced:* `infra/`; documented in `infra/README.md` (which also states what has and has not been verified).
+*The fail2ban jail was not a control until 2026-10-08.* From the first deployment it banned nobody, for four
+causes that each were enough alone: the jail read the systemd journal (Ubuntu's default backend), not the
+mirrored log file; every mirrored line carried the compose prefix `db-1  | `, which the anchored filter cannot
+match; the filter expected the timestamp at the start of the line, which fail2ban removes before it tries the
+filter; and the ban sat on the `input` hook, which packets to a Docker-published port do not pass. All four are
+repaired. The filter now counts authentication failures only (it matched every `FATAL:` line, so a database
+restart or a connection spike could have banned the application's own addresses), and private ranges are
+ignored. *Evidence:* the Ansible run fails unless the running jail reads the file, the installed filter counts
+a canned failed login and nothing else, and the ban is on the `forward` hook
+(`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is proven by "Check that fail2ban bans"
+in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the jail there as unproven.
+*Open:* at a rotation of the database log the mirror re-copies old lines, and fail2ban counts them as new — see
+the "not verified" list in `infra/README.md`.
 
 **P42 — Test tooling cannot touch a deployed database.** `npm test` truncates every table in `DATABASE_URL`;
 the production guard and the documented warning are the controls.

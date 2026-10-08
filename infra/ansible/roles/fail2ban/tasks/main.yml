@@ -13,9 +13,28 @@
 # expecting Postgres to write directly to a host path (postgres:16-alpine
 # has no such option without extra config, and duplicating Docker's
 # logging pipeline is more moving parts than necessary).
+#
+# Until 2026-10-08 this role installed a jail that had never banned
+# anyone, for four reasons that each were enough alone (the wrong
+# backend, a line prefix the filter could not match, a filter that
+# expected a timestamp fail2ban has already removed, a ban on a hook the
+# packets do not pass). Each is fixed where it lived, with a comment
+# there. The last tasks of this file (tasks/verify.yml) make the play
+# FAIL when the running jail is not live, so it cannot be silently inert
+# again.
+#
+# `nftables` is named here because the jail's ban action calls the `nft`
+# binary, and the fail2ban package only RECOMMENDS `nftables | iptables`:
+# on a Docker host `iptables` already satisfies that, so nothing
+# guarantees `nft` is there. Without it every ban would fail. The package
+# ships nftables.service disabled and this role does not enable it (its
+# default /etc/nftables.conf starts with `flush ruleset`, which would wipe
+# Docker's own rules).
 - name: Install fail2ban
   ansible.builtin.apt:
-    name: fail2ban
+    name:
+      - fail2ban
+      - nftables
     state: present
     update_cache: true
 
@@ -74,30 +93,70 @@
       # <HOST> to. Verified directly against a real container running
       # that exact command: the client address appears in one fixed
       # position on every FATAL line — immediately after the `[pid]`
-      # field, before the `FATAL:` keyword itself — for
-      # password-authentication-failed, role-does-not-exist, and
-      # database-does-not-exist cases alike (Postgres 16 folds "no such
-      # role" into the same "password authentication failed" FATAL
-      # wording as a wrong password, so a single pattern covers both
-      # without needing a separate "role does not exist" alternative).
-      # This is why the regex anchors on that fixed prefix position
-      # rather than trying to match several different trailing message
-      # shapes.
+      # field, before the `FATAL:` keyword itself. This is why the regex
+      # anchors on that fixed prefix position.
       #
-      # The regex anchors on the three space-separated fields of
-      # log_line_prefix=%m [%p] %h  (date, time, zone), then the pid in
-      # brackets, then the host, instead of a leading `^.*`. Postgres
+      # ONLY AUTHENTICATION FAILURES COUNT. Until 2026-10-08 the pattern
+      # stopped at `FATAL:` and so matched every FATAL line. Postgres
+      # also logs, with the client address in the same position:
+      #   FATAL:  sorry, too many clients already
+      #   FATAL:  the database system is starting up
+      #   FATAL:  the database system is shutting down
+      #   FATAL:  terminating connection due to administrator command
+      # None of those is an attack. Five of them in ten minutes from one
+      # address is what a database restart or a connection spike looks
+      # like from the application's side, and the address would be one
+      # of the application's own (Netlify egress): the jail would have
+      # cut the site off from its database for an hour. (It never did,
+      # only because the jail was inert for other reasons.) The two
+      # alternatives below are the two messages a refused login
+      # produces:
+      #   - `password authentication failed for user "..."`: a wrong
+      #     password, and also a role that does not exist (Postgres 16
+      #     uses the same wording for both, on purpose).
+      #   - `no pg_hba.conf entry for host ...`: a connection that
+      #     pg_hba.conf refuses outright, for example one without TLS.
+      # A new alternative belongs here only if it is a refused login.
+      #
+      # WHAT THE REGEX SEES IS NOT THE WHOLE LINE. fail2ban finds the
+      # timestamp first and CUTS IT OUT before it tries the failregex.
+      # From the line
+      #   2026-10-08 10:56:59.038 UTC [4189249] 203.0.113.9 FATAL:  ...
+      # the regex gets
+      #   " [4189249] 203.0.113.9 FATAL:  ..."
+      # (seen with `fail2ban-regex -l heavydebug` on fail2ban 1.0.2). The
+      # pattern used until 2026-10-08 began with `^\S+ \S+ \S+ ` for the
+      # date, the time and the zone. Those three fields are gone by then,
+      # so it matched no line at all in the real fail2ban, with or
+      # without the compose prefix. The offline check passed only because
+      # it ran the regex over the whole line, which fail2ban never does.
+      # The pattern therefore starts at the `[pid]` field.
+      #
+      # This depends on the zone being one fail2ban recognises as part of
+      # the timestamp (UTC, GMT, Z or a numeric offset). The postgres
+      # image logs in UTC. With log_timezone set to a named zone such as
+      # CEST the zone would stay in front of `[pid]` and nothing would
+      # match.
+      #
+      # The regex is anchored at the start (`^`, then only the pid in
+      # brackets, then the host) instead of a leading `^.*`. Postgres
       # echoes the client-supplied username verbatim into the FATAL
       # message, so a client can connect with a username like
       # `a [999] 198.51.100.77 FATAL: `. A greedy `^.*` re-anchors
       # inside that forged text and reports 198.51.100.77 as the
       # offending host, banning an address the attacker chose instead
-      # of their own. Anchoring on the fixed prefix shape (fixed field
-      # count, not fixed field content) closes that off: `<HOST>` can
-      # only bind to the fourth field, right after the real `[pid]`.
+      # of their own. Anchoring on the fixed prefix shape closes that
+      # off: `<HOST>` can only bind to the field right after the real
+      # `[pid]`, and nothing a client controls comes before it.
       # See files/failregex-check.py for a runnable check that proves
       # this against a benign line, a forged-username line, and a
-      # Unix-socket line.
+      # Unix-socket line, and proves that the FATAL lines listed above
+      # do not match.
+      #
+      # The same anchor means a line must START with the Postgres
+      # timestamp. A line with the compose prefix (`db-1  | `) in front
+      # does not match (the prefix stays in front of `[pid]`), which is
+      # why pg-auth-log.sh mirrors with `--no-log-prefix`.
       #
       # Note: a connection over the Unix socket (used by tools running
       # on this host, e.g. `docker compose exec db psql`) logs `[local]`
@@ -114,8 +173,10 @@
       # form Postgres writes into %h — so an IPv6 client is matched and banned
       # by this same line with no extra pattern.
       [Definition]
-      failregex = ^\S+ \S+ \S+ \[\d+\] <HOST> FATAL:\s
+      failregex = ^\s*\[\d+\] <HOST> FATAL:\s+password authentication failed for user
+                  ^\s*\[\d+\] <HOST> FATAL:\s+no pg_hba\.conf entry for
       ignoreregex =
+  register: announce_f2b_filter
 
 - name: Install the postgres jail
   ansible.builtin.copy:
@@ -132,17 +193,67 @@
       # innocent IP by hand.
       [announce-postgres]
       enabled = true
+      # Ubuntu's defaults-debian.conf sets backend = systemd for every jail.
+      # With that, logpath is ignored and the jail reads the journal: it
+      # never saw one line of the mirrored file (found 2026-10-08). This
+      # jail reads a file. `polling` and not `auto`: polling needs no extra
+      # package, while `auto` picks pyinotify only if python3-pyinotify is
+      # installed (the fail2ban package only recommends it). The file gets
+      # new lines at most once a minute, so polling costs nothing.
+      backend = polling
+      # The CONTAINER port, not the host port. The ban sits on the forward
+      # hook (below), which a packet reaches after Docker's DNAT has
+      # rewritten the destination to the container. The compose file maps
+      # ${DB_HOST_PORT:-5432}:5432, so this is always 5432 and must NOT
+      # follow DB_HOST_PORT.
       port = 5432
       protocol = tcp
       filter = announce-postgres
       logpath = /var/log/announce-postgres-auth.log
+      # Port 5432 is published by Docker: packets are DNAT'ed and travel the
+      # FORWARD hook to the container, never INPUT. The default action bans
+      # in an input chain, which these packets do not pass.
+      banaction = nftables[type=multiport, chain_hook=forward]
+      # The forward chain needs its own name, and the name must be set HERE,
+      # as the jail's `chain`, not inside the brackets above. jail.conf
+      # builds the action as `%(banaction)s[..., chain="%(chain)s"]`, so a
+      # `chain=` inside banaction is overridden and the action falls back to
+      # its default chain `f2b-chain`, the one the sshd jail uses with
+      # `hook input`. nft does not refuse a second `add chain` with another
+      # hook: whichever jail bans first decides the hook for both, with no
+      # error anywhere (seen in a container: this jail's rule landed in the
+      # input chain).
+      chain = f2b-announce-fwd
+      # Never ban the Docker bridge, the tailnet, a private range or
+      # loopback: a ban there cannot stop an attacker and can only break the
+      # stack itself.
+      ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7 fe80::/10
       maxretry = 5
       findtime = 10m
       bantime = 1h
-  notify: Restart fail2ban
+  register: announce_f2b_jail
 
 - name: Ensure fail2ban is enabled and running
   ansible.builtin.systemd:
     name: fail2ban
     state: started
     enabled: true
+
+# The restart must have happened before the jail is questioned: without
+# it, the checks below would read the configuration of the process that
+# was running BEFORE this play changed the files.
+#
+# A task, not a handler with `meta: flush_handlers`: a flush runs EVERY
+# pending handler of the play at this point, which would move
+# compose_up's "Restart caddy" from the end of the play to before the
+# cert_reload role. This restart must not change when anything else
+# happens. Bans survive it: fail2ban keeps them in its database and puts
+# them back at start.
+- name: Restart fail2ban now if the filter or the jail changed
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted
+  when: announce_f2b_filter is changed or announce_f2b_jail is changed
+
+- name: Prove the postgres jail is live
+  ansible.builtin.import_tasks: verify.yml

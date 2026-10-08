@@ -1,0 +1,124 @@
+# Fails the play when the announce-postgres jail is not live.
+#
+# The jail was installed, "running" and inert from the first deployment
+# until 2026-10-08: `systemctl status fail2ban` was green the whole time.
+# A green service says nothing about whether a jail reads the right file,
+# matches the right lines, or bans on a hook the packets pass. These three
+# checks question the RUNNING server and the INSTALLED filter about exactly
+# those three things. Each was seen to pass on this role's configuration
+# and to fail on the configuration it replaced, in an ubuntu:24.04
+# container with the distribution's fail2ban package.
+#
+# They change nothing on the host: all three are read-only queries.
+#
+# The two queries to the server retry for up to 30 seconds. fail2ban's unit
+# is Type=simple, so systemd reports "started" before the server has loaded
+# its jails; a query in that window fails for a reason that is not a fault.
+
+# 1. The jail reads the mirrored file. With Ubuntu's default
+#    `backend = systemd` this command answers "No file is currently
+#    monitored" and the jail never sees a line.
+- name: Check that the postgres jail reads the mirrored log file
+  block:
+    - name: Ask fail2ban which file the postgres jail reads
+      ansible.builtin.command: fail2ban-client get announce-postgres logpath
+      register: announce_f2b_logpath
+      changed_when: false
+      retries: 15
+      delay: 2
+      until:
+        - announce_f2b_logpath.rc == 0
+        - "'/var/log/announce-postgres-auth.log' in announce_f2b_logpath.stdout"
+  rescue:
+    - name: Stop, the postgres jail does not read the log file
+      ansible.builtin.fail:
+        msg: >-
+          The fail2ban jail announce-postgres is NOT reading
+          /var/log/announce-postgres-auth.log, so it cannot see a failed
+          login and is NOT protecting port 5432. fail2ban answered:
+          "{{ announce_f2b_logpath.stdout | default('') }}
+          {{ announce_f2b_logpath.stderr | default('') }}".
+          The usual cause is a missing `backend = polling` in
+          /etc/fail2ban/jail.d/announce-postgres.conf (Ubuntu's default
+          backend reads the systemd journal, not a file).
+
+# 2. The installed filter counts a failed login and nothing else. Two
+#    canned lines in the exact shape Postgres writes them, with a
+#    documentation address (203.0.113.0/24 is reserved, it is nobody's).
+#    fail2ban-regex only reads the filter file and prints a count: it does
+#    not talk to the server and cannot ban anything.
+- name: Run the installed filter against a canned failed login
+  ansible.builtin.command:
+    argv:
+      - fail2ban-regex
+      - '2026-10-08 10:56:59.038 UTC [4189249] 203.0.113.9 FATAL:  password authentication failed for user "announce_app"'
+      - /etc/fail2ban/filter.d/announce-postgres.conf
+  register: announce_f2b_regex_hit
+  changed_when: false
+  failed_when: false
+
+- name: Run the installed filter against a canned line that is not a login failure
+  ansible.builtin.command:
+    argv:
+      - fail2ban-regex
+      - '2026-10-08 10:56:59.038 UTC [4189249] 203.0.113.9 FATAL:  sorry, too many clients already'
+      - /etc/fail2ban/filter.d/announce-postgres.conf
+  register: announce_f2b_regex_miss
+  changed_when: false
+  failed_when: false
+
+# One assertion over both lines: exactly the failed login is counted. The
+# filter this replaced matched every FATAL line, so it passed the first
+# condition and failed the second.
+- name: Stop unless the filter counts the failed login and only the failed login
+  ansible.builtin.assert:
+    that:
+      - announce_f2b_regex_hit.rc == 0
+      - "'Lines: 1 lines, 0 ignored, 1 matched, 0 missed' in announce_f2b_regex_hit.stdout"
+      - announce_f2b_regex_miss.rc == 0
+      - "'Lines: 1 lines, 0 ignored, 0 matched, 1 missed' in announce_f2b_regex_miss.stdout"
+    fail_msg: >-
+      The fail2ban filter announce-postgres is wrong, so the jail is NOT
+      protecting port 5432 correctly. It must match a failed Postgres login
+      ("1 matched" expected, the filter said:
+      "{{ announce_f2b_regex_hit.stdout_lines | default([]) | select('match', '^Lines:') | join(' ') }}")
+      and must NOT match "too many clients already" ("0 matched" expected,
+      the filter said:
+      "{{ announce_f2b_regex_miss.stdout_lines | default([]) | select('match', '^Lines:') | join(' ') }}").
+      If the first is wrong the jail counts nothing. If the second is wrong
+      a database restart or a connection spike can BAN THE APPLICATION'S
+      OWN ADDRESSES for an hour. Check
+      /etc/fail2ban/filter.d/announce-postgres.conf against
+      roles/fail2ban/files/failregex-check.py.
+    quiet: true
+
+# 3. The ban sits on the forward hook, in this jail's own chain. fail2ban
+#    creates the nftables chain at the first ban, not when the jail starts,
+#    so on a host with no ban yet there is no chain to look at; the
+#    commands the server WILL run are what can be read. With Ubuntu's
+#    default action they say `f2b-chain ... hook input`.
+- name: Check that the postgres jail bans on the forward hook
+  block:
+    - name: Ask fail2ban how the postgres jail sets up its ban
+      ansible.builtin.command: fail2ban-client get announce-postgres action nftables actionstart
+      register: announce_f2b_actionstart
+      changed_when: false
+      retries: 15
+      delay: 2
+      until:
+        - announce_f2b_actionstart.rc == 0
+        - "'add chain inet f2b-table f2b-announce-fwd ' in announce_f2b_actionstart.stdout"
+        - "'hook forward' in announce_f2b_actionstart.stdout"
+        - "'hook input' not in announce_f2b_actionstart.stdout"
+  rescue:
+    - name: Stop, the postgres jail does not ban on the forward hook
+      ansible.builtin.fail:
+        msg: >-
+          The fail2ban jail announce-postgres does NOT put its ban on the
+          forward hook in its own chain (f2b-announce-fwd), so a ban does
+          not stop traffic to the Docker-published port and the jail is NOT
+          protecting port 5432. fail2ban answered:
+          "{{ announce_f2b_actionstart.stdout | default('') }}
+          {{ announce_f2b_actionstart.stderr | default('') }}".
+          Check `banaction` and `chain` in
+          /etc/fail2ban/jail.d/announce-postgres.conf.
