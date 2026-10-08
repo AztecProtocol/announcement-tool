@@ -264,8 +264,9 @@ job.
 
 The run stops with an error if the `fail2ban` jail for the database port is
 not live: if it does not read the log file, if its filter does not count a
-failed login (or counts something that is not one), or if its ban is not
-placed where traffic to the database passes. The error says which. A stopped
+failed login (or counts something that is not one), if its ban is not
+placed where traffic to the database passes, or if the script that copies
+the database log for it does not run. The error says which. A stopped
 run here means the port is not protected; do not go on until it passes.
 [Check that fail2ban bans](#check-that-fail2ban-bans) proves a real ban once
 the database is set up.
@@ -465,8 +466,8 @@ that the admin page signs you in rather than showing "Admin is unavailable".
 
 ## Before the first run with the live jail
 
-Do these four steps once, on the VM, before the first Ansible run that
-installs the working jail. They make sure the ban cannot take out Docker's
+Do steps 1 and 2 once, on the VM, before the first Ansible run that
+installs the working jail, and steps 3 and 4 after it. They make sure the ban cannot take out Docker's
 own network rules, and that the application is not already failing logins
 from an address the jail would block.
 

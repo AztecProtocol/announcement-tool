@@ -348,7 +348,7 @@ with a leading TAB when a logged value contains a newline — never reaches fail
 `\s*`), so even a continuation line that reached it would not match and `<HOST>` can only bind to the field
 after the real `[pid]`. *The newline variant was found in review on 2026-10-08, before the jail was ever
 live:* a caller connecting three times with the user name `"\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry
-for"` and no password made the pre-fix filter (`^\s*`) report and ban 203.0.113.77. The pre-fix filter was
+for"` and any wrong password made the pre-fix filter (`^\s*`) report and ban 203.0.113.77. The pre-fix filter was
 proven to ban that address against real postgres:16-alpine and real fail2ban-regex 1.0.2; the fixed filter
 and mirror do not. *IPv6:* the filter's `<HOST>` still matches a synthetic IPv6 line, but the port is now
 published on IPv4 only (`infra/docker-compose.split.yml`), so a real client cannot reach Postgres over IPv6

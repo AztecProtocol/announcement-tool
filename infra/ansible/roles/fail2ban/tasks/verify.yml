@@ -5,7 +5,7 @@
 # A green service says nothing about whether a jail reads the right file,
 # matches the right lines, or bans on a hook the packets pass. These three
 # checks question the RUNNING server and the INSTALLED filter about exactly
-# those three things. Each was seen to pass on this role's configuration
+# those things, and that the log mirror runs. Each was seen to pass on this role's configuration
 # and to fail on the configuration it replaced, in an ubuntu:24.04
 # container with the distribution's fail2ban package.
 #
@@ -72,7 +72,7 @@
 # Postgres writes a line that begins with a TAB and carries an address the
 # caller chose (203.0.113.77 here). fail2ban finds no timestamp on it. The
 # filter that shipped until 2026-10-08 began `^\s*`, matched the TAB, and
-# banned 203.0.113.77 — an address picked by the attacker, with no password.
+# banned 203.0.113.77 — an address picked by the attacker, with any wrong password.
 # The single-leading-space filter must NOT match this line. The literal
 # below starts with a real TAB character.
 - name: Run the installed filter against a forged TAB continuation line
@@ -169,9 +169,14 @@
       ansible.builtin.slurp:
         src: /var/lib/announce-pg-auth-log.since
       register: announce_f2b_mirror_since
+      # On a first run the cron tick can hold the script's lock at this
+      # moment, so our own run exits without a stamp. The tick writes it.
+      retries: 6
+      delay: 10
+      until: announce_f2b_mirror_since is succeeded
 
     # `date +%s`, not ansible_date_time, so this holds whether or not the
-    # play gathered facts (the standalone verify-play.yml does not).
+    # play gathered facts (a play that imports only this file may not).
     - name: Read the current time for the freshness check
       ansible.builtin.command: date +%s
       register: announce_f2b_now

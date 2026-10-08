@@ -45,7 +45,7 @@
 #   "\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"
 # makes Postgres write a TAB-led line `\t[1] 203.0.113.77 FATAL:  ..` that
 # a substring grep keeps. fail2ban finds no timestamp on it and used to bind
-# <HOST> to 203.0.113.77 — an address the caller chose, with no password
+# <HOST> to 203.0.113.77 — an address the caller chose, with any wrong password
 # (found in review 2026-10-08, before the jail was ever live). So the filter
 # here keeps only lines that START as a real Postgres log line: the %m
 # timestamp, the zone, the `[pid]`, the %h host, then `FATAL:  `. A

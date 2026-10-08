@@ -145,8 +145,7 @@
       #     (`host all all all scram-sha-256`), so this message is produced
       #     by the connection shapes that line does not cover: a
       #     `replication` connection (a different database class, not
-      #     covered by `all`), and a client that negotiates no suitable
-      #     auth. It is NOT "a connection without TLS": this image accepts
+      #     covered by `all`). It is NOT "a connection without TLS": this image accepts
       #     both TLS and non-TLS on the same line.
       # A new alternative belongs here only if it is a refused login.
       #

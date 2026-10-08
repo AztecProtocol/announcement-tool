@@ -656,7 +656,7 @@ relying on them:
   Postgres logs a newline inside a logged value (a user name, for one) as
   a CONTINUATION line that begins with a TAB and repeats the message. A
   caller connecting three times with the user name
-  `"\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"` and no password
+  `"\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"` and any wrong password
   made the mirror (a plain `grep -F ' FATAL: '`) keep those TAB lines, and
   the filter (`^\s*`) match the leading TAB and bind `<HOST>` to
   203.0.113.77 — an address the caller chose. Proven against a real
@@ -668,8 +668,8 @@ relying on them:
   continuation line that reached it would not match. Variants tried against
   the real database and the real filter, before and after: the newline via
   the user name (truncated to 63 bytes by Postgres, still TAB-led, dropped);
-  the same via the database name, `application_name` and `options` (no FATAL
-  line produced at all); `\r\n` (dropped as a TAB line); a bare `\r` (stays
+  the same via the database name, `application_name` and `options` (the injected
+  value appears in no log line); `\r\n` (dropped as a TAB line); a bare `\r` (stays
   inline, the line keeps its real timestamp and real host, and the filter
   binds the REAL peer, not the forged address); a forged full timestamp
   after the newline (still TAB-led, dropped). In every case the forged
