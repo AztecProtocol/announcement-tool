@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 // for that specifier).
 import { headers } from 'next/dist/server/request/headers.js';
 import { getDb } from '../../../../src/web/db.js';
-import { resolveIdentity } from '../../../../src/core/identity.js';
+import { requirePublisher } from '../../../../src/web/admin-gate.js';
 import { getLatest } from '../../../../src/core/announcements.js';
 import { countFanoutTargets } from '../../../../src/core/outbox.js';
 import { renderBodyHtml, formatDeadline } from '../../../../src/core/render.js';
@@ -45,7 +45,10 @@ function fanoutSummary(targets: { channel: string; target: string }[]): string[]
 export default async function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
-  const identity = resolveIdentity(await headers());
+  // The layout shows the refusal. This page must not rely on it: see admin-gate.ts.
+  const gate = await requirePublisher(db, await headers());
+  if (!gate.ok) return null;
+  const identity = gate.identity;
   const a = await getLatest(db, id);
   if (!a) notFound();
 
@@ -129,7 +132,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
 
       <div className="card">
         <h2>Publish</h2>
-        <PublishControl announcement={a} viewerEmail={identity?.email} />
+        <PublishControl announcement={a} viewerEmail={identity.email} />
       </div>
     </article>
   );

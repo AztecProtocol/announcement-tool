@@ -37,7 +37,7 @@
  *
  * Everything here fails CLOSED: any missing env var, missing token, verification
  * error, network failure, or unverified claim results in NO header being set, so
- * `resolveIdentity` returns undefined and app/admin/layout.tsx denies access.
+ * `resolveIdentity` returns undefined and `requirePublisher` (src/web/admin-gate.ts) refuses.
  */
 // Deep imports, not `next/server`. The public specifier does not type-check under
 // TS7/NodeNext (next@16.2.12 ships no "exports" map), and mapping it in tsconfig

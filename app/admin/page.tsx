@@ -8,9 +8,9 @@ import PendingQueue from './pending-queue.js';
 import DraftsList from './drafts-list.js';
 import ScheduledList from './scheduled-list.js';
 import { getDb } from '../../src/web/db.js';
+import { requirePublisher } from '../../src/web/admin-gate.js';
 import { listTemplates, templateFromAnnouncement } from '../../src/core/templates.js';
 import { getLatest } from '../../src/core/announcements.js';
-import { resolveIdentity } from '../../src/core/identity.js';
 import { listPublished, listAwaitingConfirmation, listDrafts, listScheduled } from '../../src/core/queries.js';
 import { rowToSetting } from '../../src/core/outbox.js';
 import { parseDiscordRoles } from '../../src/core/discord-mentions.js';
@@ -48,7 +48,10 @@ export default async function AdminComposePage({
 }) {
   const { from } = await searchParams;
   const db = getDb();
-  const identity = resolveIdentity(await headers());
+  // The layout shows the refusal. This page must not rely on it: see admin-gate.ts.
+  const gate = await requirePublisher(db, await headers());
+  if (!gate.ok) return null;
+  const identity = gate.identity;
 
   const [templates, recentAnnouncements, pending, drafts, scheduled, channelSettingRows] = await Promise.all([
     listTemplates(db),
@@ -88,7 +91,7 @@ export default async function AdminComposePage({
     <>
       <PendingQueue
         items={pending.map(a => ({ id: a.id, title: a.title, severity: a.severity, requestedBy: a.publishRequestedBy }))}
-        viewer={identity?.email ?? ''}
+        viewer={identity.email}
       />
       <DraftsList
         items={drafts.map(a => ({

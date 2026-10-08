@@ -1,5 +1,5 @@
 import type { Sql } from 'postgres';
-import { checksApply, type GuardEnv } from './production-guard.js';
+import { checksApply, guardEnvFromProcess, type GuardEnv } from './production-guard.js';
 import { AUTH0_IDENTITY_HEADER } from './auth0-claims.js';
 
 export interface Identity { email: string; name?: string; source: 'auth0' | 'tailscale' | 'dev' }
@@ -93,31 +93,85 @@ export async function listPublishers(sql: Sql): Promise<string[]> {
   return rows.map(r => r.email as string);
 }
 
-/** Empty table = fresh install; allow anyone so the first admin isn't locked out. */
-export async function isPublisher(sql: Sql, email: string): Promise<boolean> {
+/**
+ * Whether this email may publish.
+ *
+ * An empty table is a fresh install. In insecure local development that
+ * means "allow anyone", so the first admin is not locked out. On a deployed
+ * instance it means "allow nobody": the table can become empty long after
+ * the start check ran, and a function instance lives for hours.
+ */
+export async function isPublisher(sql: Sql, email: string, env: GuardEnv = guardEnvFromProcess()): Promise<boolean> {
   const [{ c }] = await sql`select count(*)::int as c from publishers`;
-  if (c === 0) return true;
+  if (c === 0) return !checksApply(env);
   const rows = await sql`select 1 from publishers where lower(email) = lower(${email})`;
   return rows.length > 0;
 }
 
+const UNREACHABLE = new Set(['CONNECT_TIMEOUT', 'CONNECTION_CLOSED', 'CONNECTION_ENDED', 'CONNECTION_DESTROYED',
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', '57P03', '53300']);
+
+export type StartCheckResult = 'ok' | 'unreachable';
+
 /**
- * Refuses to start with no publishers configured.
+ * The start check: refuse to start a deployed instance whose publishers table
+ * is empty.
  *
- * isPublisher's bootstrap rule (empty table = anyone may publish) keeps a fresh
- * local install usable. In production that same rule means one truncated table
- * is an open publish endpoint on five channels, so this assertion runs at
- * startup instead. Deliberately not folded into isPublisher: that runs per
- * request, and a policy branch there would put the permissive path one bug away
- * from being reachable on a deployed instance.
+ * It is an early, loud signal, not the guarantee. The guarantee is
+ * isPublisher above, which refuses an empty table on every request. That is
+ * why a database that cannot be reached here is NOT fatal: Next stores a
+ * failed start for the life of the function instance, so one connect timeout
+ * during a cold start answered 500 on every page until a redeploy
+ * (2026-10-08, about 50 minutes). An unreachable database is logged and the
+ * instance starts; requests then succeed or fail on their own merits. A
+ * reachable-and-empty table, and any misconfiguration (bad password,
+ * certificate, missing table), still throw.
  */
-export async function assertPublishersConfigured(sql: Sql, env: GuardEnv): Promise<void> {
-  if (!checksApply(env)) return;
-  const [{ c }] = await sql`select count(*)::int as c from publishers`;
+export async function assertPublishersConfigured(
+  sql: Sql, env: GuardEnv, opts: { budgetMs?: number } = {},
+): Promise<StartCheckResult> {
+  if (!checksApply(env)) return 'ok';
+  const budgetMs = opts.budgetMs ?? 5000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const query = (async () => (await sql`select count(*)::int as c from publishers`) as unknown as Array<{ c: number }>)();
+  // If the budget wins the race, the query is still in flight; its eventual
+  // rejection must not surface as an unhandled rejection.
+  // An error that arrives late is still worth seeing (it may be a
+  // misconfiguration, not a slow network), so it is logged. An error inside
+  // the budget is reported by the awaited race below, not here.
+  let budgetFired = false;
+  query.catch((err: unknown) => {
+    if (!budgetFired) return;
+    const code = (err as { code?: unknown } | null)?.code;
+    console.error(`start check: the database answered late with an error (${typeof code === 'string' ? code : 'no code'})`);
+  });
+  const budget = new Promise<'budget'>(resolve => { timer = setTimeout(() => resolve('budget'), budgetMs); });
+  let rows: Array<{ c: number }> | 'budget';
+  try {
+    rows = await Promise.race([query, budget]);
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    if (typeof code === 'string' && UNREACHABLE.has(code)) {
+      console.error(`start check: database unreachable (${code}); starting anyway — publishers are checked on every request`);
+      return 'unreachable';
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (rows === 'budget') {
+    budgetFired = true;
+    console.error(`start check: database unreachable (no answer in ${budgetMs} ms); starting anyway — publishers are checked on every request`);
+    return 'unreachable';
+  }
+  const c = rows[0]?.c;
   if (c === 0) {
     throw new Error(
       'Refusing to start: the publishers table is empty, which would let anyone '
       + 'reaching the admin publish. Add the first publisher with: npm run seed:publisher -- you@example.com',
     );
   }
+  // A malformed answer must not count as "ok".
+  if (typeof c !== 'number' || !(c > 0)) throw new Error('start check: unexpected answer from the publishers count query');
+  return 'ok';
 }
