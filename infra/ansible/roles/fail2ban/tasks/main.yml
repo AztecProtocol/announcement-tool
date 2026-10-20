@@ -24,6 +24,18 @@
 # FAIL when the running jail is not live, so it cannot be silently inert
 # again.
 #
+# WATCH MODE FIRST. `announce_fail2ban_mode` (defaults/main.yml) is `watch`
+# unless set to `ban`. In watch mode the jail is the same in every setting
+# but its action, which is fail2ban's `dummy`: each would-be ban is recorded
+# (jail status, /var/log/fail2ban.log) and no firewall rule changes. The
+# application shares this port from Netlify's shared egress addresses, so
+# the owner reads the would-be bans of real traffic before any ban can cut
+# the site off its own database. The checks in tasks/verify.yml run in both
+# modes; the one about the ban's hook is mode-specific.
+#
+# `nftables` is installed in both modes, so that a switch to `ban` needs no
+# package change.
+#
 # `nftables` is named here because the jail's ban action calls the `nft`
 # binary, and the fail2ban package only RECOMMENDS `nftables | iptables`:
 # on a Docker host `iptables` already satisfies that, so nothing
@@ -34,6 +46,18 @@
 #
 # `logrotate` is on every Ubuntu server image already. It is named because
 # the rule below is useless without it.
+- name: Stop unless announce_fail2ban_mode is watch or ban
+  ansible.builtin.assert:
+    that:
+      - announce_fail2ban_mode is string
+      - announce_fail2ban_mode in ['watch', 'ban']
+    fail_msg: >-
+      announce_fail2ban_mode must be exactly `watch` or `ban`, and it is
+      "{{ announce_fail2ban_mode }}". `watch` records who the Postgres jail
+      would ban and changes no firewall rule; `ban` blocks them. See
+      roles/fail2ban/defaults/main.yml. Nothing was changed on the host.
+    quiet: true
+
 - name: Install fail2ban
   ansible.builtin.apt:
     name:
@@ -230,6 +254,23 @@
       ignoreregex =
   register: announce_f2b_filter
 
+# Before the jail file changes: the server must be running the jail that is
+# on disk now, so that a switch from watch to ban (below) can clear the
+# watched addresses through the server. A first install starts it here with
+# no announce-postgres jail yet; the restart further down loads it.
+- name: Ensure fail2ban is enabled and running
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: started
+    enabled: true
+
+# Was the jail on disk in watch mode before this run? Read-only.
+- name: Check whether the installed postgres jail is in watch mode
+  ansible.builtin.command: grep -qx 'banaction = dummy' /etc/fail2ban/jail.d/announce-postgres.conf
+  register: announce_f2b_was_watch
+  changed_when: false
+  failed_when: announce_f2b_was_watch.rc > 2
+
 - name: Install the postgres jail
   ansible.builtin.copy:
     dest: /etc/fail2ban/jail.d/announce-postgres.conf
@@ -277,10 +318,24 @@
       protocol = tcp
       filter = announce-postgres
       logpath = /var/log/announce-postgres-auth.log
+      {% if announce_fail2ban_mode == 'watch' %}
+      # WATCH MODE (announce_fail2ban_mode = watch, the role's default). The
+      # jail counts and "bans" exactly as in ban mode, but `dummy` is
+      # fail2ban's own no-op action: it runs no nft or iptables command. It
+      # only appends `+<ip>` / `-<ip>` lines to /run/fail2ban/fail2ban.dummy
+      # (tmpfs, removed when the jail stops). The record to read is
+      # fail2ban's own: `fail2ban-client status announce-postgres` and the
+      # `NOTICE [announce-postgres] Ban <ip>` lines in /var/log/fail2ban.log.
+      # THE PORT IS NOT PROTECTED IN THIS MODE. Everything else in this file
+      # is the same in both modes, so what is watched is what would ban.
+      banaction = dummy
+      {% else %}
+      # BAN MODE (announce_fail2ban_mode = ban).
       # Port 5432 is published by Docker: packets are DNAT'ed and travel the
       # FORWARD hook to the container, never INPUT. The default action bans
       # in an input chain, which these packets do not pass.
       banaction = nftables[type=multiport, chain_hook=forward]
+      {% endif %}
       # The forward chain needs its own name, and the name must be set HERE,
       # as the jail's `chain`, not inside the brackets above. jail.conf
       # builds the action as `%(banaction)s[..., chain="%(chain)s"]`, so a
@@ -289,7 +344,8 @@
       # `hook input`. nft does not refuse a second `add chain` with another
       # hook: whichever jail bans first decides the hook for both, with no
       # error anywhere (seen in a container: this jail's rule landed in the
-      # input chain).
+      # input chain). In watch mode `dummy` ignores the chain; it stays set
+      # so the two modes differ in `banaction` only.
       chain = f2b-announce-fwd
       # Never ban the Docker bridge, the tailnet, a private range or
       # loopback: a ban there cannot stop an attacker and can only break the
@@ -304,11 +360,26 @@
       bantime = 10m
   register: announce_f2b_jail
 
-- name: Ensure fail2ban is enabled and running
-  ansible.builtin.systemd:
-    name: fail2ban
-    state: started
-    enabled: true
+# THE SWITCH FROM WATCH TO BAN MUST NOT BAN WHAT WAS ONLY WATCHED. fail2ban
+# keeps every ban, also a `dummy` one, in its database
+# (/var/lib/fail2ban/fail2ban.sqlite3) and puts back each one whose bantime
+# has not run out when the jail starts. Seen in an ubuntu:24.04 container
+# with fail2ban 1.0.2: an address "banned" in watch mode, then the jail file
+# switched to ban mode and fail2ban restarted, gave `Restore Ban <ip>` and a
+# real nftables rule for that address. With this task first, nothing was
+# restored and nothing was blocked. `reload --restart --unban` stops this
+# one jail, unbanning its addresses through the action that "banned" them
+# (dummy: no firewall change) and deleting them from the database, then
+# starts it again from the new file. Other jails (sshd) are not touched.
+# The other direction needs nothing: in ban mode a stop removes the nftables
+# chain, and a ban put back in watch mode is a `dummy` one.
+- name: Clear the watched addresses before the postgres jail starts to ban
+  ansible.builtin.command: fail2ban-client reload --restart --unban announce-postgres
+  when:
+    - announce_fail2ban_mode == 'ban'
+    - announce_f2b_was_watch.rc == 0
+    - announce_f2b_jail is changed
+  changed_when: true
 
 # The restart must have happened before the jail is questioned: without
 # it, the checks below would read the configuration of the process that
@@ -319,7 +390,8 @@
 # compose_up's "Restart caddy" from the end of the play to before the
 # cert_reload role. This restart must not change when anything else
 # happens. Bans survive it: fail2ban keeps them in its database and puts
-# them back at start.
+# them back at start (which is why the switch from watch mode clears them
+# first, above).
 - name: Restart fail2ban now if the filter or the jail changed
   ansible.builtin.systemd:
     name: fail2ban
@@ -328,3 +400,16 @@
 
 - name: Prove the postgres jail is live
   ansible.builtin.import_tasks: verify.yml
+
+- name: Say which mode the postgres jail is in
+  ansible.builtin.debug:
+    msg: >-
+      {% if announce_fail2ban_mode == 'watch' %}fail2ban jail announce-postgres
+      is in WATCH mode. It records would-be bans and blocks NOTHING: port 5432
+      is NOT protected by fail2ban. Read the would-be bans as described in
+      infra/DEPLOY.md, "Before the first run with the live jail", and switch
+      to ban mode (announce_fail2ban_mode: ban) only when none of them is the
+      application's.{% else %}fail2ban jail announce-postgres is in BAN mode.
+      Five failed logins in ten minutes block the address from port 5432 for
+      ten minutes. Prove it once with "Check that fail2ban bans" in
+      infra/DEPLOY.md.{% endif %}

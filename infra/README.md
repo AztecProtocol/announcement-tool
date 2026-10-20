@@ -546,8 +546,8 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    bounds the damage a leaked application credential can do. A leaked
    superuser credential is a different, worse incident.
 3. **`fail2ban`** (`infra/ansible/roles/fail2ban`). This rate-limits
-   repeated failed logins against 5432: five in ten minutes block the
-   address for ten minutes. It is the layer that stops brute-force and
+   repeated failed logins against 5432: in ban mode, five in ten minutes
+   block the address for ten minutes. It is the layer that stops brute-force and
    credential-stuffing attacks against the port itself, which TLS and the
    role's grants do not address on their own. The ban is ten minutes, not
    an hour, because the application shares this port on a shared Netlify
@@ -558,7 +558,16 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    causes, and a fifth, forge-by-username path found the same day). It is
    a working control on a given VM only after the Ansible run passes its
    jail checks and the "Check that fail2ban bans" section of
-   [`DEPLOY.md`](DEPLOY.md) has been done there.
+   [`DEPLOY.md`](DEPLOY.md) has been done there in ban mode. **The first
+   deployment runs it in watch mode** (`announce_fail2ban_mode: watch`, the
+   role's default): the jail records each would-be ban in its status and in
+   `/var/log/fail2ban.log` but blocks nothing, so **it does not protect the
+   port until it is switched to `ban`**. Watch mode exists so that real
+   traffic can show, before any ban, that the application's own Netlify
+   addresses are never among the would-be bans. The switch is one variable
+   and one play run ("Before the first run with the live jail" in
+   [`DEPLOY.md`](DEPLOY.md)); it clears the addresses recorded in watch mode
+   first, so they do not become real blocks.
 4. **Operator access over the tailnet, not a public SSH port**
    (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
    closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which
@@ -704,6 +713,18 @@ relying on them:
   fixed files and fail on each of the old settings, including the forged
   TAB line against the 01042ea filter and the mirror-liveness check when
   the `docker` command cannot read the log.
+
+  **Watch mode (added 2026-10-20), proven in an `ubuntu:24.04` container
+  with fail2ban 1.0.2 (not on the VM):** with `banaction = dummy`, five
+  failed logins gave `NOTICE [announce-postgres] Ban <ip>` in
+  `/var/log/fail2ban.log` and the address in `Banned IP list:`, and
+  `nft list ruleset` stayed empty. Without the role's switch task, a
+  would-be ban followed by a switch to ban mode and a restart gave
+  `Restore Ban <ip>` and a real nftables block of that address; with it,
+  nothing was restored or blocked, and a new burst in ban mode was blocked.
+  Back from ban to watch, the chain was removed at once. The watch-mode
+  check in `verify.yml` passed on the watch jail and failed on a jail with
+  the nftables action, and on one with both actions.
 
   **Not proven until it is done on the VM:** the whole chain with
   Docker's own published-port rules, from cron through the mirror to a

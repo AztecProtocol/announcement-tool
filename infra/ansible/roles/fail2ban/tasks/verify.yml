@@ -3,13 +3,19 @@
 # The jail was installed, "running" and inert from the first deployment
 # until 2026-10-08: `systemctl status fail2ban` was green the whole time.
 # A green service says nothing about whether a jail reads the right file,
-# matches the right lines, or bans on a hook the packets pass. These three
+# matches the right lines, or bans on a hook the packets pass. These
 # checks question the RUNNING server and the INSTALLED filter about exactly
 # those things, and that the log mirror runs. Each was seen to pass on this role's configuration
 # and to fail on the configuration it replaced, in an ubuntu:24.04
 # container with the distribution's fail2ban package.
 #
-# They change nothing on the host: all three are read-only queries.
+# Checks 1, 2 and 4 are the same in both modes (announce_fail2ban_mode).
+# Check 3 depends on the mode: in `ban` mode the ban must sit on the forward
+# hook in this jail's own chain; in `watch` mode the only action must be
+# fail2ban's no-op `dummy`, so that a would-be ban changes no firewall rule.
+#
+# Checks 1 to 3 change nothing on the host: they are read-only queries.
+# Check 4 runs the log mirror once, as cron does every minute.
 #
 # The two queries to the server retry for up to 30 seconds. fail2ban's unit
 # is Type=simple, so systemd reports "started" before the server has loaded
@@ -117,7 +123,7 @@
       run `sudo systemctl restart fail2ban`, then run the play again.
     quiet: true
 
-# 3. The ban sits on the forward hook, in this jail's own chain. fail2ban
+# 3 (ban mode). The ban sits on the forward hook, in this jail's own chain. fail2ban
 #    creates the nftables chain at the first ban, not when the jail starts,
 #    so on a host with no ban yet there is no chain to look at; the
 #    commands the server WILL run are what can be read. With Ubuntu's
@@ -148,6 +154,54 @@
           Check `banaction` and `chain` in
           /etc/fail2ban/jail.d/announce-postgres.conf.
           Run `sudo systemctl restart fail2ban`, then run the play again.
+  when: announce_fail2ban_mode == 'ban'
+
+# 3 (watch mode). The jail's one action is `dummy`, and that action sets up
+#    no firewall chain. `get <jail> actions` names every action the RUNNING
+#    jail has; its last line must be exactly `dummy` (one action, no
+#    `nftables` beside it). The start commands of `dummy` must create no
+#    chain on the input or forward hook: a jail left with the nftables
+#    action, or with any action that puts a hook in place, fails here.
+- name: Check that the postgres jail in watch mode changes no firewall rule
+  block:
+    - name: Ask fail2ban which actions the postgres jail has
+      ansible.builtin.command: fail2ban-client get announce-postgres actions
+      register: announce_f2b_actions
+      changed_when: false
+      retries: 15
+      delay: 2
+      until:
+        - announce_f2b_actions.rc == 0
+        - (announce_f2b_actions.stdout_lines | last | trim) == 'dummy'
+
+    - name: Ask fail2ban how the no-op action of the postgres jail starts
+      ansible.builtin.command: fail2ban-client get announce-postgres action dummy actionstart
+      register: announce_f2b_watch_actionstart
+      changed_when: false
+      failed_when: >-
+        announce_f2b_watch_actionstart.rc != 0
+        or 'hook input' in announce_f2b_watch_actionstart.stdout
+        or 'hook forward' in announce_f2b_watch_actionstart.stdout
+        or 'nft ' in announce_f2b_watch_actionstart.stdout
+        or 'iptables' in announce_f2b_watch_actionstart.stdout
+  rescue:
+    - name: Stop, the postgres jail in watch mode can change the firewall
+      ansible.builtin.fail:
+        msg: >-
+          announce_fail2ban_mode is `watch`, but the running fail2ban jail
+          announce-postgres does not have fail2ban's no-op action `dummy` as
+          its only action, or that action sets up a firewall chain. A
+          would-be ban could then BLOCK an address, the application's own
+          among them, which watch mode exists to prevent. fail2ban answered:
+          "{{ announce_f2b_actions.stdout | default('') }}
+          {{ announce_f2b_actions.stderr | default('') }}
+          {{ announce_f2b_watch_actionstart.stdout | default('') }}
+          {{ announce_f2b_watch_actionstart.stderr | default('') }}".
+          Check `banaction` in /etc/fail2ban/jail.d/announce-postgres.conf
+          (it must be `banaction = dummy`). Run
+          `sudo fail2ban-client unban --all` if an address is blocked, then
+          `sudo systemctl restart fail2ban`, then run the play again.
+  when: announce_fail2ban_mode == 'watch'
 
 # 4. The mirror actually runs. A dead mirror is silent: the jail reads the
 #    file, the filter is right, the ban is on the right hook, and still no

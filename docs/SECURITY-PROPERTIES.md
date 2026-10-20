@@ -355,7 +355,7 @@ published on IPv4 only (`infra/docker-compose.split.yml`), so a real client cann
 and no live IPv6 line is written — before this, an IPv6 caller had no rate limit at all, because Docker's
 userland proxy logged the bridge gateway (which `ignoreip` covers) instead of the caller's address.
 *Enforced:* `infra/`; documented in `infra/README.md` (which also states what has and has not been verified).
-*The fail2ban jail was not a control until 2026-10-08.* From the first deployment it banned nobody, for four
+*The fail2ban jail was not a control until 2026-10-08, and it is not one in watch mode (below).* From the first deployment it banned nobody, for four
 causes that each were enough alone: the jail read the systemd journal (Ubuntu's default backend), not the
 mirrored log file; every mirrored line carried the compose prefix `db-1  | `, which the anchored filter cannot
 match; the filter expected the timestamp at the start of the line, which fail2ban removes before it tries the
@@ -370,6 +370,16 @@ and nothing else AND rejects a forged TAB continuation line, the ban is on the `
 mirror leaves a fresh state stamp (`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is
 proven by "Check that fail2ban bans" in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the
 jail there as unproven.
+*The first deployment runs the jail in watch mode, and watch mode does not protect the port.* The role variable
+`announce_fail2ban_mode` defaults to `watch`: the jail counts and decides exactly as in ban mode, but its action is
+fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status, `/var/log/fail2ban.log`) and no
+firewall rule changes. The port has no rate limit from fail2ban until the variable is set to `ban`. Watch mode
+exists so that real traffic shows, before any ban, that the application's Netlify addresses never appear among
+the would-be bans. The switch to `ban` clears the addresses recorded in watch mode first; without that,
+fail2ban restores each unexpired ban from its database at start and a watched address would be blocked at once
+(seen in a container). *Evidence:* the Ansible run checks the mode-specific action (`verify.yml`: `dummy` only
+in watch mode, the `forward` hook in ban mode) and prints which mode is active; the watch, switch and restore
+behaviour was proven in `ubuntu:24.04` containers with fail2ban 1.0.2, not on the VM.
 *Old failures are not replayed.* The script that mirrors the database log for the jail tracked its position by
 line count and copied the whole retained log again at a log rotation or a container recreate; fail2ban counts
 old lines that arrive while it runs as new, so the application's own addresses could have been banned. It now
