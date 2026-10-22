@@ -8,8 +8,17 @@
 # Same reasoning as Dockerfile.backup — a dedicated, real Dockerfile (not a
 # compose `dockerfile_inline`) always builds the right image, with or
 # without the buildx plugin.
+FROM debian:trixie-slim AS trust
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20250419+deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
 FROM alpine:3
-RUN apk add --no-cache bash curl
+RUN apk add --no-cache bash curl \
+    && rm -rf /etc/ssl/certs && mkdir -p /etc/ssl/certs
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 COPY scripts/signal-receive.sh /usr/local/bin/signal-receive.sh
 RUN chmod +x /usr/local/bin/signal-receive.sh
 ENTRYPOINT ["/usr/local/bin/signal-receive.sh"]

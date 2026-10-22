@@ -14,8 +14,18 @@
 # built the main app image instead of this one, with no error). A file that
 # always resolves correctly beats a feature that only works when a specific
 # plugin happens to be present.
+FROM debian:trixie-slim AS trust
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge 20250419+deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
 FROM postgres:16-alpine
-RUN apk add --no-cache bash gnupg curl aws-cli
+RUN apk add --no-cache bash gnupg curl aws-cli \
+    && rm -rf /etc/ssl/certs && mkdir -p /etc/ssl/certs
+COPY --from=trust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 # send-alert.sh is copied alongside backup.sh, into the SAME directory,
 # because backup.sh sources it by a path relative to its own location
 # (`dirname "${BASH_SOURCE[0]}"`) — see the comment in backup.sh. Both
