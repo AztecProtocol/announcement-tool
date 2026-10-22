@@ -38,6 +38,7 @@
   package = "@netlify/plugin-nextjs"
 
 [build.environment]
+  NODE_VERSION = "24.22.1"
   # Non-secret. Read by the app to distinguish "running on Netlify" (functions,
   # no long-lived worker process) from the VM deployment (persistent worker).
   DEPLOY_TARGET = "netlify"

@@ -12,7 +12,15 @@ This README's Admin section covers the application. To deploy the VM, follow [`i
 
 ## Development Setup
 
-**Prerequisites:** Docker, Node 22+, npm.
+**Prerequisites:** Docker, Node 24.22.1 (see `.nvmrc`), npm.
+
+Run `nvm install && nvm use` before installing dependencies or running local
+migration/seed tools. `netlify.toml` pins the build Node version; Netlify manages
+SSR and function runtimes separately. Verify their actual Node patch version
+with the provider and redeploy on a corrected runtime before relying on the
+build pin for production TLS protection. Keep `DATABASE_SSL_ROOT_CERT` scoped
+to the intended database CA; the Node version pin does not replace that custom
+file or environment value.
 
 ```bash
 # Start the dev Postgres database (runs on :5499)

@@ -209,18 +209,16 @@
         - { path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.crt", mode: "0644" }
         - { path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.key", mode: "0600" }
 
-# Unconditional: compose up is idempotent, and gating it on whether the
-# repo sync reported a change would leave a manually-stopped stack down
-# forever while the playbook reports green (same reasoning as
-# aztec-observability's ansible/site.yml). `--build` picks up any change
-# to Dockerfile.backup / Dockerfile.signal-receive / scripts/*.sh from
-# this run's repo sync; compose only rebuilds an image whose inputs
-# actually changed, so this is not a wasted rebuild on every run. Runs
-# before handlers flush, so if `docker compose up` created the caddy
-# container for the first time, the "Restart caddy" handler (if
-# triggered) still finds a real container to restart.
+# Rebuild custom images from fresh package indexes before starting the stack.
+# Run before handlers flush so the caddy handler can find its container.
+- name: Build custom images with refreshed bases and CA bundles
+  ansible.builtin.command:
+    cmd: docker compose build --pull --no-cache
+    chdir: "{{ stack_dir }}"
+  changed_when: true
+
 - name: Start / converge the stack
   ansible.builtin.command:
-    cmd: docker compose up -d --remove-orphans --build
+    cmd: docker compose up -d --remove-orphans --no-build
     chdir: "{{ stack_dir }}"
   changed_when: true
