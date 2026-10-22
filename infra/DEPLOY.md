@@ -254,6 +254,29 @@ This installs Docker, mounts the data volume, starts Postgres, the Signal
 sidecar and Caddy, configures `fail2ban`, and installs the certificate-renewal
 job.
 
+> **Note — the first run after 2026-10-08 restarts Postgres once.** The
+> database port mapping changed to IPv4-only
+> (`"0.0.0.0:${DB_HOST_PORT:-5432}:5432"`, to close an IPv6 ban-evasion
+> gap). A changed `ports:` line makes `docker compose up` RECREATE the `db`
+> container on this play — a restart of Postgres of a few seconds, once. The
+> data volume is kept, so no data is lost; the site may see a brief
+> connection error during the restart. Later runs do not recreate it again.
+
+The first run installs the `fail2ban` jail for the database port in watch
+mode: it records who it would ban and blocks nobody. See
+[Before the first run with the live jail](#before-the-first-run-with-the-live-jail)
+for what that means, how to read it, and how to switch to ban mode.
+
+The run stops with an error if the `fail2ban` jail for the database port is
+not live: if it does not read the log file, if its filter does not count a
+failed login (or counts something that is not one), if its ban is not
+placed where traffic to the database passes (ban mode) or its action is not
+the no-op one (watch mode), or if the script that copies
+the database log for it does not run. The error says which. A stopped
+run here means the jail is not working; do not go on until it passes.
+[Check that fail2ban bans](#check-that-fail2ban-bans) proves a real ban once
+the database is set up and the jail is in ban mode.
+
 **Check:**
 
 ```sh
@@ -373,6 +396,22 @@ the printed output above. Copy it into Netlify's environment variables (step
 If you lose it anyway, re-run the `alter role` command with a new password —
 nothing else in this system depends on the old value.
 
+> **Caution — do this before anything else uses the new password.** The
+> `announce_app` password is also set in Netlify (`DATABASE_URL`, step 8).
+> While the two differ, the running site logs in with the old password and
+> fails every attempt. In ban mode, five failures in ten minutes from one Netlify egress
+> address make `fail2ban` block that address, and the egress pool is shared,
+> so the site can lock itself out of its own database. When you rotate this
+> password: change the Netlify variable and redeploy immediately, then on the
+> VM run `sudo fail2ban-client status announce-postgres` and, if a Netlify
+> address is in `Banned IP list:`, unban it with
+> `sudo fail2ban-client set announce-postgres unbanip <address>` (or
+> `sudo fail2ban-client unban --all`). The ban is ten minutes, so it also
+> clears by itself once the site stops failing logins. In watch mode nothing
+> is blocked, but the failures still show as would-be bans; a Netlify
+> address among them is a stop sign for the switch to ban mode (see
+> [Before the first run with the live jail](#before-the-first-run-with-the-live-jail)).
+
 ---
 
 ## Step 7 — Add the first publisher
@@ -431,6 +470,245 @@ Netlify also needs the Auth0 and session variables. The root
 
 **Check:** deploy, then confirm the Netlify logs show no startup failure, and
 that the admin page signs you in rather than showing "Admin is unavailable".
+
+---
+
+## Before the first run with the live jail
+
+The `fail2ban` role starts the jail for the database port in **watch mode**
+(`announce_fail2ban_mode: watch`, the default in
+`infra/ansible/roles/fail2ban/defaults/main.yml`). In watch mode the jail
+reads the same log, counts the same failed logins and decides exactly as in
+ban mode, but it blocks nothing: its action is `fail2ban`'s own `dummy`, which
+changes no firewall rule. Each would-be ban is recorded, nothing more. **In
+watch mode `fail2ban` does not protect port 5432.** The end of the Ansible
+run says which mode is active (`fail2ban jail announce-postgres is in WATCH
+mode` or `... BAN mode`).
+
+Why: the site connects to this port from Netlify's shared egress addresses.
+A ban of one of those addresses cuts the site off its own database. Watch
+mode shows, from real traffic, whether the jail would ever do that before it
+can.
+
+Do steps 1 and 2 once, on the VM, before the first Ansible run that
+installs the working jail, and steps 3 to 5 after it. They make sure the ban cannot take out Docker's
+own network rules, and that the application is not already failing logins
+from an address the jail would block.
+
+1. Check that installing `nftables` changes nothing else. The jail bans with
+   `nft` in ban mode, so the role installs `nftables` in both modes. Confirm the install would not
+   remove or change another package, and that the `nftables` service is not
+   enabled (its default config begins with `flush ruleset`, which would wipe
+   Docker's own firewall rules):
+
+   ```sh
+   sudo apt-get install -s nftables
+   systemctl is-enabled nftables
+   ```
+
+   The first command is a simulation (`-s`): read its summary and confirm it
+   says it will install `nftables` and lists no package to remove or change.
+   The second must NOT answer `enabled`. `disabled`, `static`, `masked`,
+   `not-found`, or an error that says the unit file does not exist (the
+   package is not installed yet) are all fine. `enabled` means the service
+   would flush the ruleset on the next boot. In that case run
+   `sudo systemctl disable nftables` before you go on.
+
+   **Do not stop the service, and do not add `--now` to that command.**
+   Stopping the `nftables` service runs `nft flush ruleset`, which removes
+   every firewall rule on the VM at once, Docker's included.
+
+2. Look for failed logins from your own services in the last 24 hours. If the
+   application's database user (`announce_app`) is already failing logins from
+   an address that can be the application, a live jail will ban that address.
+   Find out why before you turn the jail on.
+
+   ```sh
+   cd /opt/announce && sudo docker compose logs --no-color --no-log-prefix --since 24h db 2>&1 \
+     | grep -aE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+ UTC \[[0-9]+\] [^ ]+ FATAL:  (password authentication failed for user "|no pg_hba\.conf entry for)'
+   ```
+
+   This reads the database's own log, not the mirrored file (before the first
+   run with the repaired role, the mirrored file holds lines in the old shape).
+   Each line it prints is a failed login in the last 24 hours: the date and
+   time, the process number, the source address, and the message with the user
+   name. Addresses of scanners that try names such as `postgres` are normal.
+   If `announce_app` appears from an address that could be the application (a
+   Netlify egress address, not your own machine), **stop** and find the cause —
+   a stale password in Netlify, most likely — before the jail is live. If the
+   command prints nothing, there were no failed logins.
+
+3. After the Ansible run, confirm the jail is healthy:
+
+   ```sh
+   sudo fail2ban-client status announce-postgres
+   sudo fail2ban-client get announce-postgres actions
+   cat /var/lib/announce-pg-auth-log.since
+   ```
+
+   The jail status must show `File list: /var/log/announce-postgres-auth.log`.
+   In watch mode the second command must end with the one line `dummy`.
+   Run `cat` on the state file twice, about a minute apart: the number must
+   change (it is the time of the last mirror run, in Unix seconds). Then open
+   `https://announce.aztec.network/archive` in a browser — it must load.
+
+4. **Watch for two weeks.** Read the would-be bans every few days, and once
+   at the end:
+
+   ```sh
+   # Addresses the jail has "banned" now (watch mode: listed, not blocked):
+   sudo fail2ban-client status announce-postgres
+   # Every would-be ban, from the current and the rotated logs, then a count per address:
+   sudo zgrep -h '\[announce-postgres\] Ban ' /var/log/fail2ban.log*
+   sudo zgrep -h '\[announce-postgres\] Ban ' /var/log/fail2ban.log* | awk '{print $NF}' | sort | uniq -c | sort -rn
+   # Every address that failed a login as the application's user, with a count:
+   sudo zgrep -h -F 'for user "announce_app"' /var/log/announce-postgres-auth.log* | awk '{print $5}' | sort | uniq -c | sort -rn
+   # All failed logins of one address, with the user name it tried:
+   sudo zgrep -h -F ' <address> FATAL:' /var/log/announce-postgres-auth.log*
+   ```
+
+   Each would-be ban is a line `NOTICE  [announce-postgres] Ban <address>` in
+   `/var/log/fail2ban.log`. The `fail2ban` package rotates that log weekly and
+   keeps four old logs (`/etc/logrotate.d/fail2ban`: `weekly`, `rotate 4`;
+   `fail2ban.log.1` is plain text, older ones are `.gz`), so about five weeks
+   are on disk. The mirrored log of failed logins is rotated the same way
+   (weekly, four kept, all compressed). `zgrep` reads both kinds of file.
+   `Banned IP list:` in the status shows only the last ten minutes; the log
+   is the record.
+
+   How to tell the application from a scanner:
+
+   - **A scanner** fails logins with user names such as `postgres`, `admin`
+     or `root`, often many in a burst, from addresses with no relation to
+     this system. These would-be bans are what the jail is for.
+   - **The application** logs in only as `announce_app`. Netlify's egress
+     addresses are AWS addresses. For each address that failed a login as
+     `announce_app`, look up its owner (on the VM, or on your own machine;
+     install `whois` with `sudo apt-get install whois` if the command is
+     missing):
+
+     ```sh
+     whois <address> | grep -i -E 'orgname|netname'
+     ```
+
+     An AWS address shows a line such as `OrgName: Amazon Technologies Inc.`
+     or a `NetName` that starts with `AMAZON` or `AMAZO`.
+
+   **Any AWS address with `announce_app` failures is a stop sign**, with or
+   without a would-be ban: it is most likely the site itself, logging in
+   with a wrong password. Do not switch to ban mode. Find the cause first (a
+   stale `DATABASE_URL` in Netlify, most likely), fix it, and watch for two
+   more weeks. Your own address, with failures you made yourself, is not a
+   stop sign.
+
+   Switch to ban mode only when two weeks have passed with no
+   `announce_app` failure from an AWS address.
+
+5. **Switch to ban mode.**
+
+   1. In `infra/ansible/group_vars/all.yml`, set (remove the `#` from the
+      line that is there):
+
+      ```yaml
+      announce_fail2ban_mode: ban
+      ```
+
+   2. Run the play again, from `infra/ansible`:
+
+      ```sh
+      ansible-playbook -i inventory.yml site.yml
+      ```
+
+      The run must end the `fail2ban` role with `fail2ban jail
+      announce-postgres is in BAN mode`. On the switch the role first clears
+      the addresses recorded in watch mode (`fail2ban-client reload --restart
+      --unban announce-postgres`). Without that, `fail2ban` would restore
+      each recent would-be ban from its database as a real block. No
+      address recorded during watch mode is blocked by the switch.
+
+   3. Do [Check that fail2ban bans](#check-that-fail2ban-bans) from a second
+      machine. Until it passes, treat the port as not protected.
+
+6. If you must undo the jail, fastest first:
+
+   ```sh
+   # 1. Clear every current ban (also clears the sshd jail):
+   sudo fail2ban-client unban --all
+   # 2. Stop this one jail until the next Ansible run reinstalls it:
+   sudo fail2ban-client stop announce-postgres
+   # 3. Permanent: remove the jail file and restart, so it does not come back:
+   sudo rm /etc/fail2ban/jail.d/announce-postgres.conf
+   sudo systemctl restart fail2ban
+   ```
+
+   Step 3 is permanent only until the next Ansible run, which reinstalls the
+   jail. To keep it off, also stop running the `fail2ban` role. To go back
+   from ban mode to watch mode instead, set `announce_fail2ban_mode: watch`
+   (or put the `#` back) and run the play: the jail's firewall chain is
+   removed at once, and every address it had blocked is free again.
+
+---
+
+## Check that fail2ban bans
+
+In ban mode, `fail2ban` blocks an address for ten minutes after five failed database logins
+in ten minutes. Step 4 proves the parts; this proves the whole, once, with a
+real failed login. Do it after the switch to ban mode and after any change to
+`infra/ansible/roles/fail2ban`.
+
+**In watch mode this check gives a different result, and that is not a
+failure.** Steps 1 to 3 are the same: the address of the second machine
+appears in `Banned IP list:`. But in step 4 the seventh login is NOT
+refused: it answers `password authentication failed` again, because watch
+mode blocks nothing. In watch mode this check proves only that the jail
+sees and counts the failures. Run it in ban mode to prove the block.
+
+You need a second machine with `psql` whose address may be blocked from the
+database for a short time. **Do not use the Netlify site, and do not use a
+machine or a network that needs the database.** A cloud shell or a phone
+hotspot is fine. Only port 5432 is blocked for that address, nothing else.
+
+1. On the VM, confirm the jail reads the log file:
+
+   ```sh
+   sudo fail2ban-client status announce-postgres
+   ```
+
+   The line `File list:` must show `/var/log/announce-postgres-auth.log`. If
+   it shows `Journal matches:` instead, the jail is not live. Run step 4
+   again.
+
+2. On the second machine, fail six logins. Each must answer
+   `password authentication failed`:
+
+   ```sh
+   for i in 1 2 3 4 5 6; do
+     PGPASSWORD=wrong PGCONNECT_TIMEOUT=5 psql \
+       "host=db.announce.aztec.network user=announce_app dbname=announce sslmode=require" \
+       -c 'select 1'
+   done
+   ```
+
+3. Wait up to two minutes. The database log is copied for `fail2ban` once a
+   minute. Then, on the VM, run the command from 1 again. `Banned IP list:`
+   must show the address of the second machine.
+
+4. On the second machine, run one more attempt (the same `psql` command,
+   once). In ban mode it must now answer `Connection refused` or time out. It must not
+   answer `password authentication failed`: in ban mode that answer means the attempt
+   still reached the database and the ban does not work. (In watch mode
+   `password authentication failed` is the expected answer, see above.)
+
+5. On the VM, remove the ban, then confirm the site still loads
+   (`https://announce.aztec.network/archive`):
+
+   ```sh
+   sudo fail2ban-client set announce-postgres unbanip <address of the second machine>
+   ```
+
+If 3 fails, the jail does not count failed logins, in either mode. If 4
+fails in ban mode, the port is not protected. Do not treat `fail2ban` as a
+working control until this check passes in ban mode.
 
 ---
 
@@ -707,6 +985,8 @@ step 3 is on the root disk and must be written again.
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
+| The site cannot reach the database (connection refused or a timeout) right after a wrong `DATABASE_URL` or a wrong password was deployed | In ban mode, five failed logins in ten minutes make `fail2ban` block the address for ten minutes, and a Netlify address is treated like any other (in watch mode nothing is blocked, so the cause is the password alone). Correct the variable first. Then, on the VM, look at `sudo fail2ban-client status announce-postgres`: `Banned IP list:` shows the blocked addresses. Remove one with `sudo fail2ban-client set announce-postgres unbanip <address>`, or all of them with `sudo fail2ban-client unban --all` (this also clears the `sshd` jail, so an SSH address blocked for failed logins is unbanned at the same time). The same applies to your own machine after five mistyped passwords in `psql`. |
+| Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "does NOT put its ban ..." or "announce_fail2ban_mode is `watch`, but ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live, or (watch mode) its action could change the firewall. The message says which check failed and where to look. The port is not protected by `fail2ban` until the run passes, and in watch mode not after it either. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped two things: the pending Caddy restart, and the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. In `/opt/announce` run `sudo docker compose restart caddy`, then `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
 | Every page shows `Internal Server Error` and the Netlify function log says `Failed to prepare server` | Trigger a deploy in Netlify (Deploys → Trigger deploy). A function whose start failed keeps failing until it is replaced. Since the start-check change this should only happen for a real misconfiguration; the log line names it. |
@@ -714,10 +994,22 @@ step 3 is on the root disk and must be written again.
 
 ## What has not been tested
 
-This procedure has never run against a real VM. Several parts get their first
-real use on your deployment: the certificate request, the certificate renewal
-about 60 days later, the firewall, and the `fail2ban` rules.
-[`README.md`](README.md) lists all of them, with what was tested and how.
+This procedure ran on the real VM on 2026-09-04. These parts are still
+unproven there:
+
+- **The certificate renewal.** It is due about 60 days after the certificate
+  was issued. Until one has happened, the renewal hook has only run against
+  a stand-in certificate.
+- **A `fail2ban` ban.** The jail installed on 2026-09-04 could not ban. It
+  was repaired on 2026-10-08 and proven in containers only. The next
+  Ansible run installs it in watch mode, which blocks nothing. After the
+  switch to ban mode, do [Check that fail2ban bans](#check-that-fail2ban-bans).
+- **The log mirror for `fail2ban` under the real cron, and the weekly
+  rotation of `/var/log/announce-postgres-auth.log`.** Both were proven
+  against real Docker on a developer machine and in containers.
+
+[`README.md`](README.md) has the details of what was tested and how. Most of
+its list was written before 2026-09-04 and was not revised after that run.
 
 The backup and restore procedures above were rehearsed on 2026-09-15 on a
 developer machine against Postgres 16 and a local S3-compatible server

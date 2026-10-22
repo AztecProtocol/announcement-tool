@@ -339,8 +339,56 @@ default, so the browser reports and blocks nothing. It becomes a control when `C
 the end of this section.
 
 **P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd;
-fail2ban filter anchored on the log prefix so a username cannot forge a banned address, covering IPv6.
+a username cannot forge a banned address. *What holds now, and what enforces it:* a client-supplied value
+cannot make fail2ban ban an address the caller chose. Two independent layers hold this. First, the mirror
+(`infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2`) keeps only lines that START as a real Postgres
+log line (timestamp, `UTC` zone, `[pid]`, host, `FATAL:  `), so a continuation line — which Postgres writes
+with a leading TAB when a logged value contains a newline — never reaches fail2ban. Second, the filter
+(`infra/ansible/roles/fail2ban/tasks/main.yml`) anchors on exactly one leading space before `[pid]` (not
+`\s*`), so even a continuation line that reached it would not match and `<HOST>` can only bind to the field
+after the real `[pid]`. *The newline variant was found in review on 2026-10-08, before the jail was ever
+live:* a caller connecting three times with the user name `"\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry
+for"` and any wrong password made the pre-fix filter (`^\s*`) report and ban 203.0.113.77. The pre-fix filter was
+proven to ban that address against real postgres:16-alpine and real fail2ban-regex 1.0.2; the fixed filter
+and mirror do not. *IPv6:* the filter's `<HOST>` still matches a synthetic IPv6 line, but the port is now
+published on IPv4 only (`infra/docker-compose.split.yml`), so a real client cannot reach Postgres over IPv6
+and no live IPv6 line is written — before this, an IPv6 caller had no rate limit at all, because Docker's
+userland proxy logged the bridge gateway (which `ignoreip` covers) instead of the caller's address.
 *Enforced:* `infra/`; documented in `infra/README.md` (which also states what has and has not been verified).
+*The fail2ban jail was not a control until 2026-10-08, and it is not one in watch mode (below).* From the first deployment it banned nobody, for four
+causes that each were enough alone: the jail read the systemd journal (Ubuntu's default backend), not the
+mirrored log file; every mirrored line carried the compose prefix `db-1  | `, which the anchored filter cannot
+match; the filter expected the timestamp at the start of the line, which fail2ban removes before it tries the
+filter; and the ban sat on the `input` hook, which packets to a Docker-published port do not pass. All four are
+repaired. The filter now counts authentication failures only (it matched every `FATAL:` line, so a database
+restart or a connection spike could have banned the application's own addresses), and private ranges are
+ignored. A ban now lasts ten minutes, not an hour, because the application shares the port and its egress
+addresses and can fail logins itself after a wrong password — a short ban still stops a brute-force run and
+heals before it can keep the site off its own database (see I3 in the 2026-10-08 review). *Evidence:* the
+Ansible run fails unless the running jail reads the file, the installed filter counts a canned failed login
+and nothing else AND rejects a forged TAB continuation line, the ban is on the `forward` hook, and the log
+mirror leaves a fresh state stamp (`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is
+proven by "Check that fail2ban bans" in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the
+jail there as unproven.
+*The first deployment runs the jail in watch mode, and watch mode does not protect the port.* The role variable
+`announce_fail2ban_mode` defaults to `watch`: the jail counts and decides exactly as in ban mode, but its action is
+fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status, `/var/log/fail2ban.log`) and no
+firewall rule changes. The port has no rate limit from fail2ban until the variable is set to `ban`. Watch mode
+exists so that real traffic shows, before any ban, that the application's Netlify addresses never appear among
+the would-be bans. The switch to `ban` clears the addresses recorded in watch mode first; without that,
+fail2ban restores each unexpired ban from its database at start and a watched address would be blocked at once
+(seen in a container). *Evidence:* the Ansible run checks the mode-specific action (`verify.yml`: `dummy` only
+in watch mode, the `forward` hook in ban mode) and prints which mode is active; the watch, switch and restore
+behaviour was proven in `ubuntu:24.04` containers with fail2ban 1.0.2, not on the VM.
+*Old failures are not replayed.* The script that mirrors the database log for the jail tracked its position by
+line count and copied the whole retained log again at a log rotation or a container recreate; fail2ban counts
+old lines that arrive while it runs as new, so the application's own addresses could have been banned. It now
+copies one time window per run, never more than the last ten minutes (the jail's `findtime`), and only `FATAL`
+lines. *Evidence (containers and a developer machine, not the VM):* against real Docker, 52 consecutive runs
+during 5,122 failed logins and 13 log rotations mirrored every line exactly once; with fail2ban 1.0.2 running
+this jail (and a stand-in for the `docker` command), failures stamped older than ten minutes were not copied
+and banned nobody, a fresh burst was banned, also after `logrotate` rotated the mirrored file. Details in the
+"not verified" list in `infra/README.md`.
 
 **P42 — Test tooling cannot touch a deployed database.** `npm test` truncates every table in `DATABASE_URL`;
 the production guard and the documented warning are the controls.

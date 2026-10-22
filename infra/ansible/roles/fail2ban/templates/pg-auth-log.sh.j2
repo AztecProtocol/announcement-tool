@@ -1,113 +1,173 @@
 #!/usr/bin/env bash
-# Mirrors new lines from the `db` container's Docker-managed log into a
-# real host file, so fail2ban (which tails host files, not Docker's own
-# log driver) can see them. Run every minute by cron
-# (roles/fail2ban/tasks/main.yml), not a long-running `docker compose
-# logs -f`, so a stuck or crashed instance of this script cannot silently
-# stop feeding fail2ban without cron's next tick trying again.
+# Copies the failed-login lines of the `db` container into a host file,
+# /var/log/announce-postgres-auth.log, which the fail2ban jail
+# announce-postgres reads. Postgres logs to the container's stderr, so the
+# lines exist only in Docker's json-file log, which fail2ban cannot read.
+# Cron runs this once a minute (roles/fail2ban/tasks/main.yml).
 #
-# `--since` is tracked via a small state file (the last line count seen)
-# rather than a bare timestamp: `docker compose logs --since` accepts
-# timestamps but not "since I last checked" in a way that survives
-# cron's own minute-granularity drift as cleanly as a line count does.
+# Each run copies one time window: from the end of the previous run's
+# window to two seconds ago. The end of the window is the only state
+# (STATE_FILE, a Unix time in whole seconds, under /var/lib so it survives
+# a reboot). A window never starts more than ten minutes back, the jail's
+# findtime: with no state, or a state older than that, the run copies the
+# last ten minutes and nothing before them.
 #
-# Two real bugs found in the original version:
+# Why time and not a line count: until 2026-10-08 the state was the number
+# of lines already copied. When that number went down (Docker rotates the
+# log at 10 MB, or the container is recreated) the script copied the whole
+# retained log again. fail2ban counts an old line that arrives while it
+# runs as a new one, so every address with five failed logins anywhere in
+# that log would have been banned at that moment, the application's own
+# included. A window bounded by time cannot copy an old line, whatever
+# happens to the log. (An earlier version kept the count on tmpfs and did
+# the same after every reboot.)
 #
-# (a) Events lost on JSON-file log rotation. Docker's json-file log
-# driver rotates at 10MB by default. After a rotation, `docker compose
-# logs db | wc -l` legitimately returns fewer total lines than the
-# previous run counted (the old log file's lines are gone). The
-# original script's guard (`if total_lines > last_seen`) then silently
-# skipped the append entirely on that run and reset state to the
-# smaller count. Every failed-auth line that existed between the
-# rotation and this tick was dropped permanently: never mirrored,
-# never seen by fail2ban. This is exactly backwards: a sustained
-# brute-force (the traffic pattern this whole jail exists to catch) is
-# the traffic most likely to trigger a 10MB rotation, so the jail goes
-# blind precisely when it matters most. Fixed below by detecting the
-# rotation case (total < last_seen) explicitly and re-mirroring
-# everything available rather than silently skipping.
+# What makes consecutive windows meet exactly, with no line in two of them
+# and none between them (Docker 29 / Compose 5, observed, see
+# infra/README.md):
+#   - Docker stamps every line itself, to the nanosecond. `--since` and
+#     `--until` compare against that stamp and are BOTH inclusive. So the
+#     window is [since, until - 1 ns]: the next run starts at `until`.
+#   - The times are passed as Unix seconds. A time without a zone is read
+#     as local time, and this must not depend on the host's zone.
+#   - The window ends two seconds in the past, so a line Docker has stamped
+#     but not yet written is in the next window, not lost.
+#   - No `--tail`: with it, Docker cuts to the last lines first and applies
+#     the window after, which returns too little.
+#   - The state is written only after the read and the append succeeded. A
+#     failed run leaves it alone and the next run covers the same time.
+#   - Two runs never overlap (flock).
 #
-# (b) State file on tmpfs. /var/run is tmpfs, wiped on every reboot.
-# The first tick after any reboot would previously find no state file,
-# default last_seen to 0, and re-append the container's entire
-# lifetime log as if every historical failure had just happened.
-# fail2ban would then ban every IP that ever failed a login across the
-# container's whole history in one findtime window: a real,
-# self-inflicted denial of service against this tool's own legitimate
-# traffic (Netlify's egress pool, plausibly included). Fixed by moving
-# the state file to /var/lib, which persists across reboots.
+# Only GENUINE FATAL log-line starts are kept. A plain `grep -F ' FATAL: '`
+# is not enough: Postgres logs a newline inside a value (a user name, for
+# one) as a CONTINUATION line that begins with a TAB and repeats the
+# message. A caller connecting with the user name
+#   "\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"
+# makes Postgres write a TAB-led line `\t[1] 203.0.113.77 FATAL:  ..` that
+# a substring grep keeps. fail2ban finds no timestamp on it and used to bind
+# <HOST> to 203.0.113.77 — an address the caller chose, with any wrong password
+# (found in review 2026-10-08, before the jail was ever live). So the filter
+# here keeps only lines that START as a real Postgres log line: the %m
+# timestamp, the zone, the `[pid]`, the %h host, then `FATAL:  `. A
+# continuation line (leading TAB) and a line carrying a forged timestamp
+# somewhere after a newline both fail this anchor. The filter in the jail is
+# a second, independent layer with the same intent (see
+# roles/fail2ban/tasks/main.yml — one leading space only, no `\s*`).
+#
+# The zone literal `UTC` in the pattern depends on log_timezone being UTC.
+# docker-compose.split.yml PINS `-c log_timezone=UTC`, which holds whatever
+# the TZ environment variable is; without that pin, setting TZ would move
+# the zone (e.g. to CEST) and this grep would drop every line silently. Keep
+# the two in step.
+#
+# `-a` treats the stream as text: under a UTF-8 locale GNU grep would
+# otherwise drop a line that holds an invalid byte (a caller can put one in
+# a user name), and a dropped line is a missed failure. `--no-color
+# --no-log-prefix` stay load-bearing: with the compose prefix (`db-1  | `)
+# in front, no line matches the start anchor.
+#
+# What can still be lost: lines written between the last run and the
+# removal of a container (at most one minute), and lines from a gap longer
+# than ten minutes, which are outside findtime anyway.
 set -euo pipefail
 
 STACK_DIR="{{ stack_dir }}"
-STATE_FILE="/var/lib/announce-pg-auth-log.lines"
+STATE_FILE="/var/lib/announce-pg-auth-log.since"
 DEST="/var/log/announce-postgres-auth.log"
+LOCK_FILE="/run/lock/announce-pg-auth-log.lock"
+# The jail's findtime, in seconds. Keep the two equal.
+MAX_WINDOW=600
+SETTLE=2
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
 
 cd "$STACK_DIR"
 
-# Note: `total_lines="$(docker compose logs db | wc -l)"` looks safe
-# under `set -e` because `wc -l` itself always exits 0. But `pipefail`
-# (set above) makes the assignment's exit status the rightmost non-zero
-# exit code across every stage of the pipe, not just the last stage's
-# own code. Confirmed directly (same bug class found and fixed in
-# cert-reload.sh.j2's equivalent check, reproduced here rather than
-# assumed to apply): `OUT="$(false | wc -l)"` under `set -euo pipefail`
-# kills the script at that line, silently, before reaching anything
-# below it. If `docker compose logs db` ever fails (container recreated
-# mid-tick, compose project temporarily unavailable), this script would
-# previously die with no output at all. A cron job dying silently once
-# a minute is a much smaller blast radius than cert-reload's once-a-day
-# miss, but it is the same class of bug, so it gets the same `set +e` /
-# capture / `set -e` bracket rather than being left as a latent copy of
-# a bug already proven real elsewhere in this codebase.
+until_s=$(( $(date +%s) - SETTLE ))
+since_s=$(( until_s - MAX_WINDOW ))
+if [ -f "$STATE_FILE" ]; then
+  # `cat` of an existing file does not fail here, so no `set +e` bracket is
+  # needed for the capture itself (unlike the docker read below, which can
+  # fail or hang and must be handled, not just survived). Anything the file
+  # holds that is not a plain number counts as no state, so a truncated or
+  # garbage state file falls back to the ten-minute window rather than
+  # stopping the tick.
+  last="$(cat "$STATE_FILE" 2>/dev/null || true)"
+  if [[ "$last" =~ ^[0-9]{1,12}$ ]] && [ "$last" -gt "$since_s" ]; then
+    since_s="$last"
+  fi
+fi
+
+write_state() {
+  printf '%s\n' "$until_s" >"$STATE_FILE.tmp"
+  mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+}
+
+# Nothing to read: a second run in the same second, or a state in the
+# future because the clock was set back. Start again from here; a window
+# backwards could only copy lines a second time.
+if [ "$since_s" -ge "$until_s" ]; then
+  write_state
+  exit 0
+fi
+
+# `set -e` DOES stop the script on a failed command substitution in an
+# assignment (`set -e; x=$(false)` stops). The bracket with `set +e` is
+# NOT there to keep `set -e` from killing the tick on a non-zero exit; it
+# is there so a Docker failure can be HANDLED — read the exit status, treat
+# it as "Docker unavailable", write no state and exit 0 — instead of the
+# whole tick dying with no state update. Reading the status explicitly is
+# the only way to tell "Docker is down" (leave the window for next time)
+# apart from a real fault. (Same pattern as cert-reload.sh.j2.)
+#
+# `timeout 50`: a `docker compose logs` call can HANG (a wedged Docker
+# daemon, a container mid-restart). Without a bound it would hold the flock
+# until the next cron tick's `flock -n` gives up, and then the tick after
+# that, for as long as the hang lasts — the mirror would stop with no sign.
+# 50 s leaves margin under the one-minute cron. A timeout exits non-zero and
+# is treated exactly like "Docker unavailable": no state is written, so the
+# next run covers the same window.
 set +e
-total_lines="$(docker compose logs db 2>/dev/null | wc -l)"
+window="$(timeout 50 docker compose logs --no-color --no-log-prefix \
+  --since "$since_s" --until "$(( until_s - 1 )).999999999" db 2>/dev/null)"
 LOGS_EXIT=$?
 set -e
 
 if [ "$LOGS_EXIT" -ne 0 ]; then
-  # Not fatal: cron runs this again in a minute. Exiting 0 rather than
-  # failing loudly here is deliberate — a single missed tick is not
-  # itself the fail2ban-relevant failure (a sustained gap over many
-  # ticks would be, but that is outside a single run's ability to
-  # detect, and this script has no alert path of its own the way
-  # cert-reload.sh.j2 does).
+  # Docker is unavailable, or the read hung and timeout killed it. Not
+  # fatal and no state written: the next run reads the same time again.
   exit 0
 fi
 
-last_seen="0"
-if [ -f "$STATE_FILE" ]; then
-  last_seen="$(cat "$STATE_FILE")"
+# Keep only GENUINE Postgres FATAL log-line starts. See the header: a bare
+# substring grep would keep a TAB-led continuation line a caller can forge
+# with a newline in a user name, and fail2ban would ban the address inside
+# it. This anchors on the real line shape: the %m timestamp, the UTC zone
+# (pinned in compose), the `[pid]`, the %h host (an address or `[local]`),
+# then `FATAL:  `. grep exits 1 when no line matches, the normal case and
+# not an error; only 2 and above is a failure. `-a` keeps a line that holds
+# an invalid byte rather than dropping it under a UTF-8 locale.
+#
+# The window is fed with a here-string, not a temp file. It stays this way
+# on purpose: the here-string is simple and every exit-path guarantee still
+# holds — the state is written only after a successful read and append, and
+# grep exiting 1 (no match) is not treated as an error. A temp file would
+# add a path to create and clean up with no gain.
+set +e
+fatal="$(grep -a -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+ UTC \[[0-9]+\] [^ ]+ FATAL:  ' <<<"$window")"
+GREP_EXIT=$?
+set -e
+
+if [ "$GREP_EXIT" -gt 1 ]; then
+  exit 1
 fi
 
-if [ "$total_lines" -lt "$last_seen" ]; then
-  # Rotation (or a container recreate): the log is shorter than what we
-  # tracked last time, so our line-offset bookkeeping from before is no
-  # longer valid against the current log. Re-mirror everything Docker
-  # currently has rather than silently discarding the gap. This can
-  # duplicate a few lines already mirrored before the rotation (fail2ban's
-  # own maxretry/findtime window tolerates a handful of duplicate matches
-  # far better than it tolerates missing ones — a duplicate just makes a
-  # ban trigger microseconds sooner, a miss makes it never trigger), but
-  # it guarantees no failure between the last successful tick and now is
-  # ever silently dropped.
-  #
-  # These two `docker compose logs db` calls are not the same bug class
-  # as `total_lines=` above, and do not need the same bracket (checked):
-  # both are bare commands (writing straight to `>>"$DEST"`
-  # or through `tail`), not assignments. `set -e`'s "assignment absorbs
-  # the substitution's exit status" gap only applies to assignments —
-  # confirmed directly with `false | tail -n +1 >>out.txt` under
-  # `set -euo pipefail`, which correctly aborts the script, unlike the
-  # `OUT="$(false | wc -l)"` case that motivated the fix above. A
-  # failure here correctly kills the script via ordinary `pipefail`,
-  # which is the right outcome: the state file's `echo > "$STATE_FILE"`
-  # below never runs, so no checkpoint is recorded for a tick that never
-  # actually completed a real read.
-  docker compose logs db 2>/dev/null >>"$DEST"
-elif [ "$total_lines" -gt "$last_seen" ]; then
-  docker compose logs db 2>/dev/null | tail -n "+$((last_seen + 1))" >>"$DEST"
+if [ -n "$fatal" ]; then
+  printf '%s\n' "$fatal" >>"$DEST"
 fi
-# total_lines == last_seen: nothing new, nothing to do.
 
-echo "$total_lines" >"$STATE_FILE"
+write_state
+
+# The state file of the line-count version. Nothing reads it any more.
+rm -f /var/lib/announce-pg-auth-log.lines

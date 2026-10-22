@@ -4,3 +4,12 @@
 # kept here as a single Ansible-side source of truth rather than trying to
 # read it back out of the host's own .env at playbook time.
 announce_domain: db.announce.aztec.network
+
+# What the fail2ban jail on the Postgres port does with an address that fails
+# five logins in ten minutes. The default, `watch` (roles/fail2ban/defaults/
+# main.yml), only records the would-be ban and changes no firewall rule, so
+# the port is NOT protected by fail2ban. `ban` blocks the address for ten
+# minutes. Set `ban` here only after two weeks of would-be bans have been
+# read and none is the application's (infra/DEPLOY.md, "Before the first run
+# with the live jail"). Any other value stops the play.
+# announce_fail2ban_mode: ban

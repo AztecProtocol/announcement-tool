@@ -546,15 +546,40 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    bounds the damage a leaked application credential can do. A leaked
    superuser credential is a different, worse incident.
 3. **`fail2ban`** (`infra/ansible/roles/fail2ban`). This rate-limits
-   repeated failed connection attempts against 5432. It is the layer that
-   stops brute-force and credential-stuffing attacks against the port
-   itself, which TLS and the role's grants do not address on their own.
+   repeated failed logins against 5432: in ban mode, five in ten minutes
+   block the address for ten minutes. It is the layer that stops brute-force and
+   credential-stuffing attacks against the port itself, which TLS and the
+   role's grants do not address on their own. The ban is ten minutes, not
+   an hour, because the application shares this port on a shared Netlify
+   egress pool and can fail logins itself after a wrong password; a short
+   ban still stops a brute-force run and heals before it can keep the site
+   off its own database. **It did nothing from the first deployment until
+   the repair of 2026-10-08** (see "not verified" below for the four
+   causes, and a fifth, forge-by-username path found the same day). It is
+   a working control on a given VM only after the Ansible run passes its
+   jail checks and the "Check that fail2ban bans" section of
+   [`DEPLOY.md`](DEPLOY.md) has been done there in ban mode. **The first
+   deployment runs it in watch mode** (`announce_fail2ban_mode: watch`, the
+   role's default): the jail records each would-be ban in its status and in
+   `/var/log/fail2ban.log` but blocks nothing, so **it does not protect the
+   port until it is switched to `ban`**. Watch mode exists so that real
+   traffic can show, before any ban, that the application's own Netlify
+   addresses are never among the would-be bans. The switch is one variable
+   and one play run ("Before the first run with the live jail" in
+   [`DEPLOY.md`](DEPLOY.md)); it clears the addresses recorded in watch mode
+   first, so they do not become real blocks.
 4. **Operator access over the tailnet, not a public SSH port**
    (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
    closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which
    needs no inbound port of its own. This protects operator access only —
    it does nothing for 5432 or 443, which stay open to `0.0.0.0/0` and
-   `::/0` as described above. The `ssh_public_key` variable still exists,
+   `::/0` as described above. **Note:** since 2026-10-08 Postgres is
+   published on IPv4 only (`docker-compose.split.yml`), so the firewall
+   rule for 5432 (`0.0.0.0/0` and `::/0`, `infra/terraform/vm.tf`) is now
+   WIDER than what actually listens: nothing answers on IPv6. Tightening
+   the firewall rule to IPv4 only needs a `terraform apply`; it is left as
+   is here because the terraform resources are not part of this change. The
+   `ssh_public_key` variable still exists,
    but it is not an access path. If the tailnet join itself fails, recovery is
    Hetzner rescue mode, not this key.
 
@@ -566,7 +591,11 @@ cannot maintain it safely. Treating any one of these four as something to
 
 ## What has not been verified — read before you rely on this
 
-Nobody has applied this Terraform or run this Ansible against a real VM.
+**This list was written before the first deployment, when nobody had
+applied this Terraform or run this Ansible against a real VM. The
+procedure in [`DEPLOY.md`](DEPLOY.md) then ran on the real VM on
+2026-09-04. The items below were not revised one by one after that run,
+except the `fail2ban` item, which is current.**
 Real Docker containers, real TLS handshakes, and real fault injection
 were used extensively during development. But several things can only get their first
 real exercise on an actual apply, and you should know which before
@@ -604,16 +633,162 @@ relying on them:
   scenario it exists to close needs a real reboot, or a rescue-mode
   rebuild of a real Hetzner volume, to observe directly. The development
   sandbox had no systemd and no real boot sequence.
-- **`fail2ban-client status <jail>` on a live jail.** The regex was
-  re-verified with `infra/ansible/roles/fail2ban/files/failregex-check.py`
-  against a benign line, a line with a hostile username, and a
-  Unix-socket line. The earlier six-login test used only benign
-  usernames and could not have caught the log-injection case where a
-  client-supplied username forges a fake `[pid] <IP> FATAL:` sequence
-  to make fail2ban ban an address the attacker chose. But `fail2ban`
-  itself could not be installed in the development sandbox (no root or
-  apt access), so the jail has never actually banned a real
-  repeated-failure source IP end to end.
+- **The `fail2ban` jail on the real VM.** Until 2026-10-08 this item said
+  the jail had never banned an address end to end because `fail2ban`
+  could not be installed in the development sandbox. That gap hid a jail
+  that could not ban at all. On 2026-10-08 a real failed login on the
+  deployed VM was looked for in the jail: 0 failed, 0 banned. Four causes
+  were found, each enough alone:
+  1. Ubuntu's `/etc/fail2ban/jail.d/defaults-debian.conf` sets
+     `backend = systemd` for every jail. The jail set `logpath` but no
+     backend, so it read the journal and never opened the mirrored file.
+  2. The mirror script copied `docker compose logs db`, which starts
+     every line with `db-1  | `. The filter is anchored at the start of
+     the line, so no mirrored line could match.
+  3. The filter began with `^\S+ \S+ \S+ ` for the date, the time and the
+     zone. fail2ban removes the timestamp from a line before it tries the
+     filter, so the pattern matched nothing in the real fail2ban even
+     without the prefix. `failregex-check.py` passed because it ran the
+     pattern over the whole line.
+  4. Ubuntu's default ban action puts the ban in a chain on the `input`
+     hook. Port 5432 is published by Docker: its packets are DNAT'ed and
+     pass the `forward` hook, never `input`. A ban there stops nothing.
+
+  A fifth problem would have appeared the moment the jail worked: the
+  filter counted every `FATAL:` line, including `too many clients
+  already` and `the database system is starting up`. A database restart
+  or a connection spike could have blocked the application's own
+  addresses. The filter now counts failed logins only, and
+  the jail ignores loopback and private ranges.
+
+  **A forge-by-username path, found in the same review (2026-10-08).**
+  Postgres logs a newline inside a logged value (a user name, for one) as
+  a CONTINUATION line that begins with a TAB and repeats the message. A
+  caller connecting three times with the user name
+  `"\n[1] 203.0.113.77 FATAL:  no pg_hba.conf entry for"` and any wrong password
+  made the mirror (a plain `grep -F ' FATAL: '`) keep those TAB lines, and
+  the filter (`^\s*`) match the leading TAB and bind `<HOST>` to
+  203.0.113.77 — an address the caller chose. Proven against a real
+  `postgres:16-alpine` and real `fail2ban-regex` 1.0.2: the pre-fix filter
+  reported 203.0.113.77 as a failing IP. Both layers are fixed. The mirror
+  now keeps only lines that START as a real Postgres log line (timestamp,
+  `UTC` zone, `[pid]`, host, `FATAL:  `), so the TAB continuation line is
+  dropped; and the filter anchors on exactly one leading space, so even a
+  continuation line that reached it would not match. Variants tried against
+  the real database and the real filter, before and after: the newline via
+  the user name (truncated to 63 bytes by Postgres, still TAB-led, dropped);
+  the same via the database name, `application_name` and `options` (the injected
+  value appears in no log line); `\r\n` (dropped as a TAB line); a bare `\r` (stays
+  inline, the line keeps its real timestamp and real host, and the filter
+  binds the REAL peer, not the forged address); a forged full timestamp
+  after the newline (still TAB-led, dropped). In every case the forged
+  third-party address is not banned.
+
+  **An IPv6 gap, found in the same review.** Over IPv6 Docker's userland
+  proxy rewrote the client's source address to the bridge gateway before
+  Postgres saw it, so Postgres logged the gateway — which `ignoreip`
+  covers — and the ban's forward hook never saw the traffic. An attacker
+  using the VM's IPv6 address had no rate limit at all. The port is now
+  published on IPv4 only (`"0.0.0.0:${DB_HOST_PORT:-5432}:5432"`); over
+  IPv4 the kernel's DNAT preserves the real source address, which the jail
+  sees and can ban. Proven with real Docker on this host: with the IPv4
+  bind there is a `0.0.0.0` listener and no `[::]` listener, an IPv4 client
+  logs a real routable source address, and the port does not answer on
+  IPv6. The filter's `<HOST>` still matches a synthetic IPv6 line, so the
+  pattern is ready if IPv6 publishing is ever restored, but no live IPv6
+  line is written now.
+
+  **Proven in `ubuntu:24.04` containers with the distribution's
+  fail2ban 1.0.2 (not on the VM):** the four causes, each reproduced; the
+  jail reading the file; five failed logins banning the real address;
+  a synthetic IPv6 line matching the filter; the forged TAB continuation
+  line NOT banning the chosen address, under both the mirror grep and the
+  filter; the other `FATAL:` lines, the private ranges and the old
+  prefixed lines banning nobody; the ban in its own chain on the `forward`
+  hook, separate from the `sshd` jail's `input` chain; and, with a real
+  `postgres:16-alpine` behind a DNAT rule in a router container, a sixth
+  login that still reached Postgres under an `input` ban and was refused
+  under the `forward` ban. The Ansible checks in
+  `roles/fail2ban/tasks/verify.yml` were run there too: they pass on the
+  fixed files and fail on each of the old settings, including the forged
+  TAB line against the 01042ea filter and the mirror-liveness check when
+  the `docker` command cannot read the log.
+
+  **Watch mode (added 2026-10-20), proven in an `ubuntu:24.04` container
+  with fail2ban 1.0.2 (not on the VM):** with `banaction = dummy`, five
+  failed logins gave `NOTICE [announce-postgres] Ban <ip>` in
+  `/var/log/fail2ban.log` and the address in `Banned IP list:`, and
+  `nft list ruleset` stayed empty. Without the role's switch task, a
+  would-be ban followed by a switch to ban mode and a restart gave
+  `Restore Ban <ip>` and a real nftables block of that address; with it,
+  nothing was restored or blocked, and a new burst in ban mode was blocked.
+  Back from ban to watch, the chain was removed at once. The watch-mode
+  check in `verify.yml` passed on the watch jail and failed on a jail with
+  the nftables action, and on one with both actions.
+
+  **Not proven until it is done on the VM:** the whole chain with
+  Docker's own published-port rules, from cron through the mirror to a
+  refused connection. That is the "Check that fail2ban bans" section of
+  [`DEPLOY.md`](DEPLOY.md). Do not call the jail a working control on a
+  VM where that check has not passed.
+
+  **Old failures are not replayed (fixed 2026-10-08, the day the jail
+  became live).** The mirror script used to track its position by line
+  count. When the count went down (Docker rotates the database log at
+  10 MB, or the container is recreated) it copied the whole retained log
+  again, with its old timestamps. fail2ban 1.0 counts an old line that is
+  appended while the jail runs as if it had just happened (seen in a
+  container: lines stamped 20 minutes and 3 days old led to bans). Every
+  public address with five failed logins anywhere in the retained log
+  would have been blocked at that moment, and an address of
+  the application that once had a wrong password deployed is such an
+  address. The script now copies one time window per run, from the end
+  of the previous window to two seconds ago, and never more than the last
+  ten minutes (the jail's `findtime`). It keeps only `FATAL` lines, and
+  the mirrored file is rotated weekly (4 kept).
+
+  What proves it, none of it on the VM:
+  - *Real Docker (29.1.3, Compose 5.2.0) on a developer machine.*
+    `docker compose logs --since A --until B` compares against Docker's
+    own nanosecond stamp of each line, and both ends are inclusive (a
+    line stamped exactly `T` is returned for `--since T` and for
+    `--until T`, and for neither at 1 ns past it). The script therefore
+    reads `[since, until - 1 ns]` and the next run starts at `until`.
+    Times are passed as Unix seconds: a time without a zone is read as
+    local time. `--tail` must not be combined with `--until` (the tail is
+    cut first, and the result can be empty).
+  - *The rendered script, 52 runs 1.3 seconds apart against a real
+    `postgres:16-alpine`* (paths moved out of `/var`, nothing else
+    changed) while 5,122 failed logins were made, about 73 a second, so
+    lines fell on every window boundary. Docker rotated its log file 13
+    times during the run and the container had been recreated just
+    before it. The mirrored file was byte-identical to the `FATAL` lines
+    of `docker logs`: 5,122 lines, none twice, none missing.
+  - *`ubuntu:24.04` with fail2ban 1.0.2 running the jail of this role.*
+    For this part `docker` was a stand-in script that serves
+    `compose logs --since/--until` from a fixture file with the inclusive
+    behaviour seen above, not real Docker. Six failures stamped 20
+    minutes old, first run with no state: none copied, nobody banned.
+    State three days old (a long cron gap), six failures stamped 11
+    minutes old and two stamped 5 minutes old: only the two copied,
+    nobody banned. Five fresh failures: banned. A run in which `docker`
+    fails: exit 0, state unchanged, and the next run copies the lines.
+    As a control, the previous script under the same conditions copied
+    everything and the old addresses were banned at once.
+  - *Rotation of the mirrored file, same container.* `logrotate -f`, then
+    five fresh failures: fail2ban's polling backend read the new file and
+    banned the address, twice in a row. With `/var/log` owned
+    `root:syslog` mode 0775 as on Ubuntu, the rule works through
+    `/etc/logrotate.conf` (which sets `su root adm`, and is how the daily
+    timer runs it). Run alone, `logrotate /etc/logrotate.d/announce-postgres-auth`
+    skips the file with an "insecure permissions" error.
+
+  What it still does: on its first run, and whenever its state file
+  `/var/lib/announce-pg-auth-log.since` is missing or unreadable, it
+  copies the last ten minutes, including lines an earlier run may have
+  copied already. Lines written in the last minute before a container is
+  removed are lost. Not run on the VM: the script under the real cron
+  against the real compose project, and the weekly rotation.
 - **A full, non-syntax-check `ansible-playbook` run against a live
   host.** Only `--syntax-check` and `ansible-lint` (clean at the
   `production` profile) were run. There was no real inventory host to
@@ -647,6 +822,5 @@ against a seeded certificate, including its ambiguous-multi-issuer
 refusal, incomplete-pair detection, and rejected-SIGHUP detection (a
 deliberately mismatched key, confirmed via `openssl s_client` that
 Postgres kept serving the old certificate while the naive checks would
-have reported success); and the fail2ban filter regex against a benign
-line, a hostile-username line, and a Unix-socket line, with
-`failregex-check.py`.
+have reported success); and the fail2ban jail in `ubuntu:24.04`
+containers as listed under "The `fail2ban` jail on the real VM" above.

@@ -219,6 +219,12 @@ resource "hcloud_volume_attachment" "announce_data" {
 #              infra/README.md) is the real control. UNCHANGED — same
 #              cannot-join-a-tailnet constraint as 443. Do not restrict this
 #              rule either.
+#              NOTE (2026-10-08): since the compose file publishes Postgres
+#              on IPv4 only (docker-compose.split.yml, to close an IPv6 ban-
+#              evasion gap), the `::/0` half of this rule is now wider than
+#              what listens — nothing answers on IPv6. This rule is left
+#              as-is on purpose (a terraform change is out of scope for that
+#              fix); tightening it to IPv4 only is a safe follow-up apply.
 #   41641/udp — Tailscale's direct-path port (see var.tailnet /
 #              var.tailscale_acl_tag). Left open to 0.0.0.0/0 and ::/0, same
 #              as the aztec-observability sibling: this is how two tailnet
