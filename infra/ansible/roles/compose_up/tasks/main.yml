@@ -209,6 +209,25 @@
         - { path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.crt", mode: "0644" }
         - { path: "{{ compose_up_db_tls_mountpoint.stdout }}/server.key", mode: "0600" }
 
+# Pull the image-only services (db, signal, caddy). `build --pull` below
+# refreshes only the base images of the two built services, and
+# `up --no-build` never pulls an image that is already present, so without
+# this step the floating tags (postgres:16-alpine,
+# signal-cli-rest-api:latest, caddy:2-alpine) would keep running whatever
+# was pulled on the first deploy. A new upstream digest makes `up` below
+# recreate that container: a short db/caddy/signal restart is expected on
+# such a run. Retries cover short registry faults; a lasting failure stops
+# the deploy on purpose, because skipping the pull would skip the update.
+- name: Pull current images for the image-only services
+  ansible.builtin.command:
+    cmd: docker compose pull --quiet --ignore-buildable
+    chdir: "{{ stack_dir }}"
+  register: compose_up_pull
+  until: compose_up_pull.rc == 0
+  retries: 3
+  delay: 10
+  changed_when: false
+
 # Rebuild custom images from fresh package indexes before starting the stack.
 # Run before handlers flush so the caddy handler can find its container.
 - name: Build custom images with refreshed bases and CA bundles
