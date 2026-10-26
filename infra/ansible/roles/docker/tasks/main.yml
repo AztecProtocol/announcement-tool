@@ -14,6 +14,12 @@
 # volume but is now invisible underneath the mountpoint, and the
 # container runs against an empty database with no error anywhere.
 # This is the single scenario this role exists to prevent.
+- name: Upgrade the host CA trust package
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: latest
+    update_cache: true
+
 - name: Docker apt keyring
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
