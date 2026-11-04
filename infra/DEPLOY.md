@@ -260,6 +260,22 @@ copy of `inventory.yml.example` carries a placeholder `data_mount` path,
 and a wrong mount path can send Postgres's data onto the root disk instead
 of the data volume.
 
+**Pre-flight, before every run:** deploy the current `main`, with no
+local changes. From the repo root:
+
+```sh
+git switch main && git pull
+git status
+```
+
+`git status` must show `nothing to commit, working tree clean` (untracked
+files such as `inventory.yml` are fine; they are never copied). The play
+does not run `git fetch` itself. It prints a `WARNING: this deploy is NOT
+the current main` message, and does not stop, when the checkout is on
+another branch or when `HEAD` differs from the remote-tracking `main` that
+git knows locally. If you did not plan to deploy another commit, stop the
+play (Ctrl-C) at that warning: it comes before any change to the VM.
+
 ```sh
 cd infra/ansible
 ansible-galaxy collection install -r requirements.yml
@@ -279,8 +295,9 @@ from the VM on each run: a file you deleted in git, and any copy that an
 older version of the play left there. `/opt/announce/.env` is next to
 `repo/`, not in it, and the play never touches it.
 
-The play stops before it copies anything if a tracked file has changes
-that are not committed. The message names the files. Commit or discard the
+The play stops before it changes anything on the VM if a tracked file
+has changes that are not committed, or if git tracks a file named
+`.rsync-filter` (the sync would read it as filter rules). The message names the files. Commit or discard the
 changes, then run the play again. To deploy the files as they are on disk
 anyway, add `-e announce_allow_dirty_deploy=true` to the
 `ansible-playbook` command.
@@ -291,8 +308,8 @@ To see which commit runs on the VM:
 tailscale ssh root@<name from step 1> 'cat /opt/announce/repo/DEPLOYED_COMMIT'
 ```
 
-It shows the commit hash, and whether the deploy included changes that
-were not committed (`yes` only after a deploy with
+It shows the commit hash, the branch it came from (`(detached HEAD)` if
+none), and whether the deploy included changes that were not committed (`yes` only after a deploy with
 `announce_allow_dirty_deploy=true`).
 
 > **Note — the first run after 2026-11-04 deletes stray files.** Older
@@ -555,8 +572,9 @@ before Netlify deploys the commit that adds it. A new VM that Netlify does
 not use yet needs only the tailnet setup in item 4.
 
 After that run, Postgres accepts a network login only with TLS, and the
-owner `announce` only from the tailnet, from the VM's own compose network
-(the `backup` job) or from inside the `db` container. Every other login is
+owner `announce` only from the tailnet, from the VM itself (the `samenet`
+line: the `backup` job, the other containers and the host) or from inside
+the `db` container. Every other login is
 refused with `no pg_hba.conf entry for host ...`. `fail2ban` counts that
 message as a failed login. Warning: in ban mode, a site that still connects
 without TLS fails every query and also gets Netlify's egress addresses
@@ -631,9 +649,11 @@ step 6's caution.
 ## Run owner commands over the tailnet
 
 The owner `announce` is the database superuser. Postgres accepts it only
-from the tailnet (`100.64.0.0/10`), from the VM's compose network, or from
-inside the `db` container (`infra/postgres/pg_hba.conf`), and always with
-TLS for a network login. A public address gets
+from the tailnet, from the VM itself (its compose network and the other
+Docker bridges, through the `samenet` line), or from inside the `db`
+container (`infra/postgres/pg_hba.conf`), and always with TLS for a
+network login. A tailnet login often arrives from the Docker bridge
+gateway, not from its `100.x` address (Method A, item 4). A public address gets
 `no pg_hba.conf entry for host ...`.
 
 This applies to every command that uses the owner password: steps 6 and 7
@@ -646,7 +666,9 @@ Warning: a refused owner login counts as a failed login for `fail2ban`. In
 ban mode, five in ten minutes block your public address from port 5432 for
 ten minutes. If you see `no pg_hba.conf entry`, stop and fix the setup
 below. Do not try again and again. (Logins from the tailnet are never
-banned: `100.64.0.0/10` is in the jail's `ignoreip`.)
+banned: they reach Postgres from a tailnet address (`100.64.0.0/10`) or
+from the Docker bridge gateway (`172.x.0.1`, see Method A, item 4), and
+both ranges are in the jail's `ignoreip`.)
 
 ### Method A: from your machine, over the tailnet
 
@@ -691,9 +713,16 @@ lets `autogroup:admin` reach every port of `tag:announce`).
    PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem"      psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce"      -Atc "select inet_client_addr(), (select ssl from pg_stat_ssl where pid = pg_backend_pid())"
    ```
 
-   The first value must start with `100.` (your machine's tailnet address)
-   and the second must be `t`. If you get `no pg_hba.conf entry for host`
-   followed by your public address, the `/etc/hosts` line is not in effect.
+   The proof is that this owner login succeeds and the second value is
+   `t`. The first value starts with `100.` (your machine's tailnet
+   address) or with `172.` (the Docker bridge gateway on the VM). Both are
+   correct. Tailscale's default firewall mode on the VM can masquerade
+   traffic that it forwards from the tailnet, and then Docker hands the
+   connection to Postgres from the bridge gateway; which of the two you
+   see depends on the order of the VM's netfilter rules. The `172.` login
+   is accepted by the `samenet` line of `infra/postgres/pg_hba.conf`. If
+   you get `no pg_hba.conf entry for host` followed by your public
+   address, the `/etc/hosts` line is not in effect.
 
 5. Run the owner commands (steps 6 and 7, or the command you need) without
    changes: they already use `db.announce.aztec.network`.
@@ -701,7 +730,7 @@ lets `autogroup:admin` reach every port of `tag:announce`).
 6. When you are done, remove the line from `/etc/hosts`. Warning: while it
    is there, this machine is not a valid "second machine" for
    [Check that fail2ban bans](#check-that-fail2ban-bans): its failed logins
-   come from the tailnet, which the jail never bans.
+   come from the tailnet or the bridge gateway, which the jail never bans.
 
 ### Method B: on the VM, for SQL only
 
@@ -1241,8 +1270,8 @@ step 3 is on the root disk and must be written again.
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
 | A login fails with `no pg_hba.conf entry for host` | The login is not one the database accepts (`infra/postgres/pg_hba.conf`). `... no encryption` at the end: the client did not use TLS; on Netlify, `DATABASE_SSL_MODE` is not `verify-full`. `user "announce"` from a public address: owner commands must run over the tailnet, see [Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet). Each refusal counts as a failed login for `fail2ban`. |
 | The site cannot reach the database (connection refused or a timeout) right after a wrong `DATABASE_URL` or a wrong password was deployed | In ban mode, five failed logins in ten minutes make `fail2ban` block the address for ten minutes, and a Netlify address is treated like any other (in watch mode nothing is blocked, so the cause is the password alone). Correct the variable first. Then, on the VM, look at `sudo fail2ban-client status announce-postgres`: `Banned IP list:` shows the blocked addresses. Remove one with `sudo fail2ban-client set announce-postgres unbanip <address>`, or all of them with `sudo fail2ban-client unban --all` (this also clears the `sshd` jail, so an SSH address blocked for failed logins is unbanned at the same time). The same applies to your own machine after five mistyped passwords in `psql`. |
-| Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "does NOT put its ban ..." or "announce_fail2ban_mode is `watch`, but ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live, or (watch mode) its action could change the firewall. The message says which check failed and where to look. The port is not protected by `fail2ban` until the run passes, and in watch mode not after it either. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped two things: the pending Caddy restart, and the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. In `/opt/announce` run `sudo docker compose restart caddy`, then `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. |
-| The alert "announce cert-reload failed" says the served certificate "expires in N days ... less than 14", or "does not verify against isrgrootx1.pem", or Ansible's last task "Run the cert-reload check now" fails with that text | `/usr/local/bin/announce-cert-reload.sh` checks, on every daily run and after every reload, what Postgres serves on `127.0.0.1:5432`: it must verify against ISRG Root X1 only (`infra/certs/isrgrootx1.pem`, the same root Netlify trusts) for `db.announce.aztec.network`, and have 14 days or more left. Under 14 days: Caddy has not renewed; read `docker compose logs caddy` for the ACME error. Does not verify: Netlify cannot connect either; compare the chain with step 5's `openssl s_client -starttls postgres` command. "CA file ... missing or changed": the repository copy of the root does not match the SHA-256 in the script; restore it from git, do not update the hash without checking the new file against https://letsencrypt.org/certs/isrgrootx1.pem. |
+| Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "does NOT put its ban ..." or "announce_fail2ban_mode is `watch`, but ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live, or (watch mode) its action could change the firewall. The message says which check failed and where to look. The port is not protected by `fail2ban` until the run passes, and in watch mode not after it either. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. A pending Caddy restart still ran at the end of the stopped play (`site.yml` sets `force_handlers`); look for `RUNNING HANDLER [compose_up : Restart caddy]` in the output. Run `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. Only if the output shows that the Caddy handler failed, also run `sudo docker compose restart caddy` in `/opt/announce`. |
+| The alert "announce cert-reload failed" says the served certificate "expires in N days ... less than X days (one sixth of its ...-day lifetime ...)", or "does not verify against isrgrootx1.pem", or Ansible's last task "Run the cert-reload check now" fails with that text | `/usr/local/bin/announce-cert-reload.sh` checks, on every daily run and after every reload, what Postgres serves on `127.0.0.1:5432` (port 5432 only; the script does not read `DB_HOST_PORT`, which a real deployment never sets): it must verify against ISRG Root X1 only (`infra/certs/isrgrootx1.pem`, the same root Netlify trusts) for `db.announce.aztec.network`, and have at least one sixth of its own lifetime left (notAfter minus notBefore; 15 days for a 90-day certificate, 7.5 for a 45-day one, never less than 3 days). Below that: Caddy has not renewed; read `docker compose logs caddy` for the ACME error. Does not verify: Netlify cannot connect either; compare the chain with step 5's `openssl s_client -starttls postgres` command. "CA file ... missing or changed": the repository copy of the root does not match the SHA-256 in the script; restore it from git, do not update the hash without checking the new file against https://letsencrypt.org/certs/isrgrootx1.pem. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
 | Every page shows `Internal Server Error` and the Netlify function log says `Failed to prepare server` | Trigger a deploy in Netlify (Deploys → Trigger deploy). A function whose start failed keeps failing until it is replaced. Since the start-check change this should only happen for a real misconfiguration; the log line names it. |

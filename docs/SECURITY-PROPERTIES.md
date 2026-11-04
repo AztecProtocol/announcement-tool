@@ -335,16 +335,26 @@ leaves TLS off when the variable is unset; the server refuses any network login 
 **P44 — The database superuser cannot log in from the internet, and no network login works without TLS.**
 The owner `announce` is the image's bootstrap superuser and cannot be demoted; a superuser can run
 `COPY ... FROM PROGRAM`, a shell in the `db` container. *Enforced:* `infra/postgres/pg_hba.conf`, read through
-`-c hba_file=` in `infra/docker-compose.split.yml`: `hostssl` only; `announce` only from the compose network
-(`samenet`, the backup job), the tailnet (`100.64.0.0/10`, owner scripts) and inside the container (socket and
-loopback, used by `cert-reload.sh.j2`); `announce_app` from any address, only to the `announce` database.
+`-c hba_file=` in `infra/docker-compose.split.yml`: `hostssl` only; `announce` only from the VM itself
+(`samenet`), the tailnet (`100.64.0.0/10`, owner scripts) and inside the container (socket and loopback, used
+by `cert-reload.sh.j2`); `announce_app` from any address, only to the `announce` database. *Scope of `samenet`:*
+it is wider than the backup job that needs it. It matches every compose service (also the internet-facing
+`caddy` and the unused `signal`) and, because Docker masquerades connections to the published port from other
+bridges and from the host, any container on any Docker network on the VM and any host process (checked
+2026-11-04 for a container on another bridge and for the host's `127.0.0.1`). It also carries most tailnet
+owner logins: Tailscale's default netfilter mode can masquerade forwarded traffic, so Postgres sees the bridge
+gateway, not the `100.x` address, and the `100.64.0.0/10` line may often go unused (not checked on the VM).
+All of these sources are on the VM or the tailnet, and each still needs the owner password; the property is
+that the internet cannot reach the superuser, not that only the backup job can. Narrowing `samenet` to the
+backup container's fixed address is a possible later step.
 No final `reject` line, so a refusal logs `no pg_hba.conf entry`, which the fail2ban filter counts (a `reject`
 line logs `pg_hba.conf rejects connection`, which it does not). *Evidence (2026-11-04, throwaway
 `postgres:16-alpine` with the exact compose command, not the VM):* every case checked with
 `pg_stat_activity.client_addr` and the log's `%h`; refused lines counted by `fail2ban-regex` 1.0.2, the `reject`
 line not counted; a data volume created before the change keeps its data. *Breaks if:* the port is published
 on IPv6 (Docker's proxy then hands the connection over from the bridge gateway, which is in `samenet`, so the
-owner gets in from the internet), the `db` service joins another network (`samenet` grows), a `host` (not
+owner gets in from the internet), the `db` service joins another network (`samenet` grows), a service on the
+VM that forwards connections from the internet to 5432 is added (it would arrive in `samenet`), a `host` (not
 `hostssl`) or wider `announce` line is added, or a final `reject` line is added (the jail stops counting
 these refusals).
 

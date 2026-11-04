@@ -15,6 +15,12 @@
 # not, as on the tailnet'd aztec-observability module, skipped entirely.
 #
 # Role order matters:
+#   0. preflight      — checks on the control machine only: GNU rsync 3.x,
+#                        no uncommitted changes to tracked files, tracked
+#                        paths the sync can ship, and a warning when the
+#                        checkout is not the current main. First, so that a
+#                        failed check stops the play before anything on the
+#                        host changes.
 #   1. docker         — installs Docker + the RequiresMountsFor drop-in so
 #                        it never starts before the data volume is mounted.
 #   2. volume_mount    — confirms the Hetzner volume is actually mounted at
@@ -29,12 +35,30 @@
 #                        obtained from Let's Encrypt. Runs last because it
 #                        assumes both `db` and `caddy` containers already
 #                        exist.
+#
+# force_handlers: a handler that a task notified runs at the end of the
+# play also when a later task fails on that host. Without it, a failure in
+# fail2ban's or cert_reload's checks dropped the pending "Restart caddy"
+# (roles/compose_up/handlers/main.yml), and Caddy kept serving the old
+# Caddyfile (for example without the Signal path gate) until someone
+# restarted it by hand. The play has two handlers only ("Restart caddy"
+# and "Restart docker"); fail2ban restarts itself with a task, not a
+# handler (see the comment there), so this setting does not move it.
+# force_handlers changes one thing: on a failed host, a pending handler
+# runs at the end instead of being dropped. "Restart docker" is pending at a
+# failure only when the docker role changed the drop-in and volume_mount
+# stopped before its flush (the data volume is not mounted); Docker then
+# restarts with RequiresMountsFor, as it would at the next boot.
+# "Restart caddy" fails as well when the stack was never started on this
+# host (first deploy with no .env); that adds one error line, nothing more.
 - name: Deploy the announcement tool's split-deployment VM stack
   hosts: all
   become: true
+  force_handlers: true
   vars:
     stack_dir: /opt/announce
   roles:
+    - preflight
     - docker
     - volume_mount
     - compose_up

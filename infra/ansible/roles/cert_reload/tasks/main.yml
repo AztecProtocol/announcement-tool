@@ -51,8 +51,8 @@
 # script sends its alerts through scripts/send-alert.sh with the backup's
 # settings in .env (no SMTP/webhook config lives in Ansible): on a failed
 # reload, and on every run where the certificate Postgres serves does not
-# verify against ISRG Root X1 for the domain or has fewer than 14 days
-# left. It also logs every run's outcome (no-op, reloaded, or failed) to
+# verify against ISRG Root X1 for the domain or has less than one sixth of
+# its own lifetime left (at least 3 days; 15 days for a 90-day certificate). It also logs every run's outcome (no-op, reloaded, or failed) to
 # syslog with a distinct tag, and this task
 # installs a logrotate rule so that log survives more than a few days of
 # `journalctl` retention on a small VM. An operator (or a future

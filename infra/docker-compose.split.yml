@@ -133,9 +133,15 @@ services:
     # `announce` may log in from, so an IPv6 publish would also let the
     # superuser in from the internet. Checked 2026-11-04 on a throwaway
     # copy: a client on 127.0.0.1 of the host arrives as the gateway
-    # (172.x.0.1), a client on any other host address arrives with that
-    # address. The terraform firewall allows 5432 on IPv4 only
-    # (infra/terraform/vm.tf); that change needs a terraform apply.
+    # (172.x.0.1); a host process that connects to another of the host's
+    # own addresses arrives with that address. Other sources do not all
+    # keep their address: a container on another Docker bridge arrives as
+    # this network's gateway (checked 2026-11-04), and so does a tailnet
+    # peer when Tailscale's netfilter rules masquerade the traffic they
+    # forward (not checked on the VM). Both are in `samenet`; see
+    # infra/postgres/pg_hba.conf. The terraform firewall allows 5432 on
+    # IPv4 only (infra/terraform/vm.tf); that change needs a terraform
+    # apply.
     ports:
       - "0.0.0.0:${DB_HOST_PORT:-5432}:5432"
     command:

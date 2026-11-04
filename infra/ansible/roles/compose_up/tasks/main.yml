@@ -15,114 +15,18 @@
 #
 # Only files tracked by git are shipped. Untracked and ignored files on the
 # control machine (`.env`, `*.tfvars`, `*.tfstate`, `inventory.yml`, ...)
-# never reach the host, and the play stops if a tracked file has
-# uncommitted changes, so the host gets exactly one commit, recorded in
-# {{ stack_dir }}/repo/DEPLOYED_COMMIT.
-# The sync below needs GNU rsync 3.x on the control machine: it uses a
-# merge filter file with `P` (protect) rules and --delete-excluded. macOS
-# ships /usr/bin/rsync as openrsync ("openrsync: protocol version 29"),
-# which was never tested with these options. Stop here, before anything
-# changes on the host, rather than half-way through the sync.
-#
-# Same binary as the sync: ansible.posix.synchronize runs the rsync named
-# by the variable `ansible_rsync_path` when it is set (a path with a `/`
-# is used as given), otherwise the first `rsync` on the PATH that
-# ansible-playbook was started with. This task runs on the control
-# machine with that same PATH, so it reads the same binary.
-- name: Check that the control machine has GNU rsync 3.x
-  ansible.builtin.command:
-    argv: ["{{ ansible_rsync_path | default('rsync') }}", --version]
-  delegate_to: localhost
-  run_once: true
-  become: false
-  changed_when: false
-  failed_when: false
-  register: compose_up_local_rsync
-
-- name: Stop if the control machine's rsync is not GNU rsync 3.x
-  ansible.builtin.assert:
-    that:
-      - compose_up_local_rsync.rc == 0
-      - compose_up_local_rsync.stdout is match('rsync  version 3\.')
-    fail_msg: >-
-      This deploy needs GNU rsync 3.x on the machine that runs Ansible.
-      Found: {{ (compose_up_local_rsync.stdout_lines | default([]) | first | default(''))
-      if compose_up_local_rsync.rc == 0 else
-      ('no rsync could run as "' ~ (ansible_rsync_path | default('rsync')) ~ '" ('
-      ~ (compose_up_local_rsync.msg | default('no output') | regex_replace('[.]+$', '')) ~ ')') }}.
-      On macOS: brew install rsync, then open a new terminal so
-      /opt/homebrew/bin comes first in PATH.
-    quiet: true
-  run_once: true
-
+# never reach the host, so the host gets exactly one commit, recorded in
+# {{ stack_dir }}/repo/DEPLOYED_COMMIT. The checks on the control machine
+# (GNU rsync 3.x, no uncommitted changes to tracked files, tracked paths
+# the sync can ship, the branch and the commit) are in the `preflight`
+# role, which runs before any role that changes the host. This role uses
+# its results: preflight_repo_root, preflight_git_status,
+# preflight_git_head, preflight_branch and preflight_git_files.
 - name: Create the stack directory
   ansible.builtin.file:
     path: "{{ stack_dir }}"
     state: directory
     mode: "0755"
-
-# `{{ playbook_dir }}/../..` is the repo root (site.yml lives in
-# infra/ansible/). The git commands run on the control machine
-# (delegate_to: localhost, become: false: no sudo on the operator's
-# machine).
-- name: Find the repository root on the control machine
-  ansible.builtin.set_fact:
-    compose_up_repo_root: "{{ (playbook_dir ~ '/../..') | realpath }}"
-
-- name: Look for uncommitted changes to tracked files
-  ansible.builtin.command:
-    argv: [git, -C, "{{ compose_up_repo_root }}", status, --porcelain, --untracked-files=no]
-  delegate_to: localhost
-  run_once: true
-  become: false
-  changed_when: false
-  register: compose_up_git_status
-
-- name: Stop if tracked files have uncommitted changes
-  ansible.builtin.fail:
-    msg: >-
-      Deploy stopped: these tracked files have changes that are not
-      committed: {{ compose_up_git_status.stdout_lines | join('; ') }}.
-      The deploy ships the committed state of the repository only. Commit
-      or discard the changes, then run the play again. To deploy the files
-      as they are on disk anyway, add -e announce_allow_dirty_deploy=true;
-      DEPLOYED_COMMIT on the host then records that the tree had local
-      changes.
-  when:
-    - compose_up_git_status.stdout | length > 0
-    - not (announce_allow_dirty_deploy | default(false) | bool)
-
-- name: Read the commit being deployed
-  ansible.builtin.command:
-    argv: [git, -C, "{{ compose_up_repo_root }}", rev-parse, HEAD]
-  delegate_to: localhost
-  run_once: true
-  become: false
-  changed_when: false
-  register: compose_up_git_head
-
-- name: List the tracked files
-  ansible.builtin.command:
-    argv: [git, -C, "{{ compose_up_repo_root }}", -c, core.quotePath=false, ls-files]
-  delegate_to: localhost
-  run_once: true
-  become: false
-  changed_when: false
-  register: compose_up_git_files
-
-# Even with core.quotePath=false, git prints a path in double quotes when
-# it holds a double quote, a backslash or a control character. The rsync
-# filter below cannot express those paths exactly, so the play stops.
-- name: Refuse tracked paths the rsync filter cannot express
-  ansible.builtin.assert:
-    that:
-      - compose_up_git_files.stdout_lines | length > 0
-      - compose_up_git_files.stdout_lines | select('match', '^"') | list | length == 0
-    fail_msg: >-
-      git ls-files returned no files, or a tracked path with a double
-      quote, backslash or control character. Rename that file; the deploy
-      cannot ship it exactly.
-  run_once: true
 
 - name: Create a temporary rsync filter file on the control machine
   ansible.builtin.tempfile:
@@ -148,8 +52,15 @@
 # touched; the secrets file {{ stack_dir }}/.env sits next to repo/, not in
 # it.
 #
+# synchronize also adds rsync's `-F` (because delay_updates defaults to
+# true), so a file named `.rsync-filter` anywhere in the source tree would
+# add filter rules of its own. The preflight role stops the play if git
+# tracks one; an untracked one is excluded by the filter above, but -F
+# reads it anyway, so do not leave one in the checkout.
+#
 # Notifies the "Restart caddy" handler on change — see
-# roles/compose_up/handlers/main.yml.
+# roles/compose_up/handlers/main.yml. site.yml sets force_handlers, so the
+# restart also runs when a later task or role fails.
 - name: Ship the tracked files to the host
   block:
     - name: Write the tracked-files rsync filter
@@ -165,7 +76,7 @@
 
     - name: Sync the repository to the host
       ansible.posix.synchronize:
-        src: "{{ compose_up_repo_root }}/"
+        src: "{{ preflight_repo_root }}/"
         dest: "{{ stack_dir }}/repo"
         delete: true
         rsync_opts:
@@ -199,8 +110,9 @@
     dest: "{{ stack_dir }}/repo/DEPLOYED_COMMIT"
     mode: "0644"
     content: |
-      commit: {{ compose_up_git_head.stdout }}
-      uncommitted changes to tracked files: {{ 'yes (deployed with announce_allow_dirty_deploy=true)' if compose_up_git_status.stdout | length > 0 else 'no' }}
+      commit: {{ preflight_git_head.stdout }}
+      branch: {{ preflight_branch }}
+      uncommitted changes to tracked files: {{ 'yes (deployed with announce_allow_dirty_deploy=true)' if preflight_git_status.stdout | length > 0 else 'no' }}
 
 # The db container reads infra/postgres/pg_hba.conf as uid 70 (postgres),
 # not as root, through a read-only bind mount (docker-compose.split.yml).

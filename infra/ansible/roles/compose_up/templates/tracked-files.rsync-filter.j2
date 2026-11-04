@@ -8,14 +8,14 @@
 # only in a pattern that holds a wildcard. Escaping these three characters
 # is enough: `app/a/[slug]/page.tsx` becomes `app/a/\[slug]/page.tsx`, in
 # which `]` has no opening bracket and is a plain character. Paths with a
-# backslash are refused before this file is written (the role's "Refuse
-# tracked paths" task).
+# backslash are refused before this file is written (the preflight role's
+# "Refuse tracked paths" task).
 #
 # Keep the record written after the sync; the deletion must not remove it.
 P /DEPLOYED_COMMIT
 {% macro esc(p) %}{{ p | replace('[', '\\[') | replace('*', '\\*') | replace('?', '\\?') }}{% endmacro %}
 {% set ns = namespace(dirs=[]) %}
-{% for f in compose_up_git_files.stdout_lines %}
+{% for f in preflight_git_files.stdout_lines %}
 {% set parts = f.split('/') %}
 {% for i in range(1, parts | length) %}
 {% set ns.dirs = ns.dirs + [parts[:i] | join('/')] %}
@@ -24,7 +24,7 @@ P /DEPLOYED_COMMIT
 {% for d in ns.dirs | unique %}
 + /{{ esc(d) }}/
 {% endfor %}
-{% for f in compose_up_git_files.stdout_lines %}
+{% for f in preflight_git_files.stdout_lines %}
 + /{{ esc(f) }}
 {% endfor %}
 - *

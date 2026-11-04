@@ -1,0 +1,183 @@
+# Checks on the control machine (the operator's checkout) that must pass
+# before the play changes anything on the host. This role is first in
+# site.yml, so a failure here stops the play before the `docker` role
+# installs packages or restarts Docker, and before `volume_mount` writes
+# /etc/docker/daemon.json. Every task runs once, on the control machine
+# (delegate_to: localhost, become: false: no sudo on the operator's
+# machine), and changes nothing. The registered results are used later by
+# compose_up (the sync, the rsync filter template and DEPLOYED_COMMIT):
+# a run_once task's result is set for every host of the play.
+
+# The sync in compose_up needs GNU rsync 3.x on the control machine: it
+# uses a merge filter file with `P` (protect) rules and --delete-excluded.
+# macOS ships /usr/bin/rsync as openrsync ("openrsync: protocol version
+# 29"), which was never tested with these options.
+#
+# Same binary as the sync: ansible.posix.synchronize runs the rsync named
+# by the variable `ansible_rsync_path` when it is set (a path with a `/`
+# is used as given), otherwise the first `rsync` on the PATH that
+# ansible-playbook was started with. This task runs on the control
+# machine with that same PATH, so it reads the same binary.
+- name: Check that the control machine has GNU rsync 3.x
+  ansible.builtin.command:
+    argv: ["{{ ansible_rsync_path | default('rsync') }}", --version]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false
+  register: preflight_local_rsync
+
+- name: Stop if the control machine's rsync is not GNU rsync 3.x
+  ansible.builtin.assert:
+    that:
+      - preflight_local_rsync.rc == 0
+      - preflight_local_rsync.stdout is match('rsync  version 3\.')
+    fail_msg: >-
+      This deploy needs GNU rsync 3.x on the machine that runs Ansible.
+      Found: {{ (preflight_local_rsync.stdout_lines | default([]) | first | default(''))
+      if preflight_local_rsync.rc == 0 else
+      ('no rsync could run as "' ~ (ansible_rsync_path | default('rsync')) ~ '" ('
+      ~ (preflight_local_rsync.msg | default('no output') | regex_replace('[.]+$', '')) ~ ')') }}.
+      On macOS: brew install rsync, then open a new terminal so
+      /opt/homebrew/bin comes first in PATH.
+    quiet: true
+  run_once: true
+
+# `{{ playbook_dir }}/../..` is the repo root (site.yml lives in
+# infra/ansible/).
+- name: Find the repository root on the control machine
+  ansible.builtin.set_fact:
+    preflight_repo_root: "{{ (playbook_dir ~ '/../..') | realpath }}"
+
+- name: Look for uncommitted changes to tracked files
+  ansible.builtin.command:
+    argv: [git, -C, "{{ preflight_repo_root }}", status, --porcelain, --untracked-files=no]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  register: preflight_git_status
+
+- name: Stop if tracked files have uncommitted changes
+  ansible.builtin.fail:
+    msg: >-
+      Deploy stopped: these tracked files have changes that are not
+      committed: {{ preflight_git_status.stdout_lines | join('; ') }}.
+      The deploy ships the committed state of the repository only. Commit
+      or discard the changes, then run the play again. To deploy the files
+      as they are on disk anyway, add -e announce_allow_dirty_deploy=true;
+      DEPLOYED_COMMIT on the host then records that the tree had local
+      changes.
+  when:
+    - preflight_git_status.stdout | length > 0
+    - not (announce_allow_dirty_deploy | default(false) | bool)
+  run_once: true
+
+- name: Read the commit being deployed
+  ansible.builtin.command:
+    argv: [git, -C, "{{ preflight_repo_root }}", rev-parse, HEAD]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  register: preflight_git_head
+
+# rc 0 and the branch name, or rc 1 on a detached HEAD.
+- name: Read the branch being deployed
+  ansible.builtin.command:
+    argv: [git, -C, "{{ preflight_repo_root }}", symbolic-ref, --quiet, --short, HEAD]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false
+  register: preflight_git_branch
+
+# The remote-tracking branch that the local `main` follows, as git knows
+# it now (no `git fetch` here: the play must not change the checkout, and
+# must work offline). It does not exist when the checkout has no local
+# `main`, or `main` has no upstream; the warning below then says so.
+- name: Read the remote-tracking main that git knows locally
+  ansible.builtin.command:
+    argv: [git, -C, "{{ preflight_repo_root }}", rev-parse, --verify, --quiet, --symbolic-full-name, "main@{upstream}"]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false
+  register: preflight_git_main_ref
+
+- name: Read the commit of the remote-tracking main
+  ansible.builtin.command:
+    argv: [git, -C, "{{ preflight_repo_root }}", rev-parse, --verify, --quiet, "main@{upstream}^{commit}"]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false
+  register: preflight_git_main_head
+
+- name: Record the branch name
+  ansible.builtin.set_fact:
+    preflight_branch: "{{ preflight_git_branch.stdout if preflight_git_branch.rc == 0 else '(detached HEAD)' }}"
+
+# A warning, not a stop: deploying a branch on purpose (a hotfix, a
+# rollback to an older commit) is allowed. The remote-tracking ref is only
+# as new as the last `git fetch` or `git pull`; DEPLOY.md's pre-flight
+# says to run `git switch main && git pull` first.
+- name: Compare the checkout with the remote-tracking main
+  ansible.builtin.set_fact:
+    preflight_main_warnings: >-
+      {{ ([] if preflight_branch == 'main' else
+          ['The checkout is on ' ~ preflight_branch ~ ', not main.'])
+      + (['git knows no remote-tracking branch for main (no local main, or main has no upstream), so this play cannot check that HEAD is the current main.']
+          if preflight_git_main_head.rc != 0 else
+         (['HEAD ' ~ preflight_git_head.stdout[:12] ~ ' is not '
+           ~ (preflight_git_main_ref.stdout | regex_replace('^refs/remotes/', '')) ~ ' '
+           ~ preflight_git_main_head.stdout[:12] ~ ' (as of the last git fetch).']
+          if preflight_git_main_head.stdout != preflight_git_head.stdout else [])) }}
+
+- name: Warn if the checkout may not be the current main
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: this deploy may not be the current main.
+      {{ preflight_main_warnings | join(' ') }}
+      If this is not on purpose, stop now (Ctrl-C), run
+      `git switch main && git pull`, and run the play again.
+  when: preflight_main_warnings | length > 0
+  run_once: true
+
+- name: List the tracked files
+  ansible.builtin.command:
+    argv: [git, -C, "{{ preflight_repo_root }}", -c, core.quotePath=false, ls-files]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  register: preflight_git_files
+
+# Even with core.quotePath=false, git prints a path in double quotes when
+# it holds a double quote, a backslash or a control character. The rsync
+# filter in compose_up cannot express those paths exactly, so the play
+# stops.
+#
+# ansible.posix.synchronize adds rsync's `-F` (with its default
+# delay_updates: true). `-F` reads every file named `.rsync-filter` in the
+# source tree as more filter rules, so a tracked `.rsync-filter` could
+# exclude or protect files on the host without anyone seeing it in the
+# play. None is tracked; the play stops if one is.
+- name: Refuse tracked paths the sync cannot ship exactly
+  ansible.builtin.assert:
+    that:
+      - preflight_git_files.stdout_lines | length > 0
+      - preflight_git_files.stdout_lines | select('match', '^"') | list | length == 0
+      - preflight_git_files.stdout_lines | select('search', '(^|/)\.rsync-filter$') | list | length == 0
+    fail_msg: >-
+      git ls-files returned no files, a tracked path with a double quote,
+      backslash or control character, or a tracked file named
+      .rsync-filter ({{ preflight_git_files.stdout_lines | default([])
+      | select('search', '(^|/)\.rsync-filter$') | join(', ') | default('none', true) }}).
+      Rename or remove that file; the deploy cannot ship it exactly
+      (rsync's -F would read a .rsync-filter as filter rules).
+  run_once: true

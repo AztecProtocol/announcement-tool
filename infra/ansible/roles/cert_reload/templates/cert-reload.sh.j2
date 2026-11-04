@@ -179,8 +179,13 @@ fail() {
 #
 # It runs on every run, also when nothing changed: a renewal that Caddy
 # never managed shows up here as a shrinking day count long before the
-# certificate expires (Caddy renews with about 30 days left, so under 14
-# days means renewal has failed for two weeks or more).
+# certificate expires. The alert threshold is relative to the
+# certificate's own lifetime (notAfter - notBefore): one sixth of it, but
+# never less than 3 days. Caddy renews with about a third of the lifetime
+# left, so under a sixth means renewal has failed for half of that renewal
+# window. For today's 90-day Let's Encrypt certificates that is 15 days;
+# for a 45-day certificate 7.5 days; a fixed number of days would alert
+# falsely once Let's Encrypt shortens its certificates.
 #
 # Where it runs: on this host, with the host's openssl, against the
 # published port on 127.0.0.1. The db image has no openssl (see the
@@ -203,10 +208,19 @@ fail() {
 # The three cert_reload_* variables exist for a test harness only (a
 # self-made CA and a free port); the role does not set them, so a real
 # deploy always gets X1 and 5432.
+#
+# Port 5432 only: this script does not read DB_HOST_PORT from .env. A real
+# deployment never sets DB_HOST_PORT (see the `ports:` comment on `db` in
+# docker-compose.split.yml; Netlify's DATABASE_URL and the fail2ban jail
+# use 5432 too). With DB_HOST_PORT set, this check fails with "no TLS
+# handshake" on 127.0.0.1:5432 and alerts.
 ROOT_CA_FILE="{{ cert_reload_root_ca_file | default(stack_dir ~ '/repo/infra/certs/isrgrootx1.pem') }}"
 ROOT_CA_SHA256="{{ cert_reload_root_ca_sha256 | default('22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1') }}"
 DB_TLS_PORT="{{ cert_reload_db_port | default(5432) }}"
-EXPIRY_ALERT_DAYS=14
+# Alert below LIFETIME / EXPIRY_ALERT_DIVISOR, but never below
+# EXPIRY_ALERT_FLOOR_DAYS.
+EXPIRY_ALERT_DIVISOR=6
+EXPIRY_ALERT_FLOOR_DAYS=3
 
 # Returns 0 and sets SERVED_CERT_SUMMARY when the served certificate passes
 # every check. Otherwise returns 1 and sets SERVED_PROBLEMS (one line per
@@ -215,7 +229,8 @@ EXPIRY_ALERT_DAYS=14
 SERVED_PROBLEMS=""
 SERVED_CERT_SUMMARY=""
 check_served_cert() {
-  local problems="" served end_epoch now_epoch days_left verify_out verify_exit ca_hash
+  local problems="" served start_epoch end_epoch now_epoch days_left verify_out verify_exit ca_hash
+  local lifetime_s threshold_s threshold_days
 
   case "$(openssl version 2>/dev/null)" in
     "OpenSSL 1.1.1"* | "OpenSSL 3."*) ;;
@@ -239,11 +254,19 @@ check_served_cert() {
     SERVED_PROBLEMS="could not read the certificate Postgres serves on 127.0.0.1:$DB_TLS_PORT (no TLS handshake)"
     return 1
   fi
+  start_epoch="$(date -u -d "$(printf '%s\n' "$served" | openssl x509 -noout -startdate | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
   end_epoch="$(date -u -d "$(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
   now_epoch="$(date -u +%s)"
   days_left=$(( (end_epoch - now_epoch) / 86400 ))
-  if ! printf '%s\n' "$served" | openssl x509 -noout -checkend $((EXPIRY_ALERT_DAYS * 86400)) >/dev/null 2>&1; then
-    problems="${problems}the certificate Postgres serves expires in $days_left days ($(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)), less than $EXPIRY_ALERT_DAYS; Caddy has not renewed it, or this script did not install the renewal — check the caddy logs and $LOG_FILE
+  lifetime_s=$(( end_epoch - start_epoch ))
+  threshold_s=$(( lifetime_s / EXPIRY_ALERT_DIVISOR ))
+  if [ "$threshold_s" -lt $(( EXPIRY_ALERT_FLOOR_DAYS * 86400 )) ]; then
+    threshold_s=$(( EXPIRY_ALERT_FLOOR_DAYS * 86400 ))
+  fi
+  # One decimal, for the message only (7.5 for a 45-day certificate).
+  threshold_days="$(( threshold_s / 86400 )).$(( (threshold_s % 86400) * 10 / 86400 ))"
+  if ! printf '%s\n' "$served" | openssl x509 -noout -checkend "$threshold_s" >/dev/null 2>&1; then
+    problems="${problems}the certificate Postgres serves expires in $days_left days ($(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)), less than $threshold_days days (one sixth of its $(( lifetime_s / 86400 ))-day lifetime, at least $EXPIRY_ALERT_FLOOR_DAYS); Caddy has not renewed it, or this script did not install the renewal — check the caddy logs and $LOG_FILE
 "
   fi
 

@@ -280,16 +280,20 @@ running the playbook. If you skip it, `compose_up`'s "Confirm the
 environment file exists" task fails immediately, with a message pointing
 back here.
 
-`compose_up` first checks that the machine running Ansible has GNU rsync
-3.x (macOS's `/usr/bin/rsync` is openrsync and is refused; see "Before
-you start" in `DEPLOY.md`). It then copies only the files git tracks to `/opt/announce/repo`,
+The first role, `preflight`, changes nothing: on the machine running
+Ansible it checks for GNU rsync 3.x (macOS's `/usr/bin/rsync` is
+openrsync and is refused; see "Before you start" in `DEPLOY.md`), for
+uncommitted changes to tracked files and for a tracked `.rsync-filter`,
+and warns (without stopping) when the checkout is not the current
+`main`. Only then do the roles that change the host run. `compose_up`
+copies only the files git tracks to `/opt/announce/repo`,
 deletes every other file there, and writes the deployed commit to
-`/opt/announce/repo/DEPLOYED_COMMIT`. It stops the play if a tracked file
-has uncommitted changes, unless `-e announce_allow_dirty_deploy=true` is
-given. See step 4 of `DEPLOY.md`.
+`/opt/announce/repo/DEPLOYED_COMMIT` (commit and branch). The play
+stops if a tracked file has uncommitted changes, unless
+`-e announce_allow_dirty_deploy=true` is given. See step 4 of `DEPLOY.md`.
 
 Roles run in this order (see `site.yml`'s own comment for the full
-reasoning): `docker`, then `volume_mount`, then `compose_up`, then
+reasoning): `preflight`, then `docker`, then `volume_mount`, then `compose_up`, then
 `fail2ban`, then `cert_reload`. `compose_up` also generates a short-lived
 (7-day) self-signed placeholder certificate for Postgres on first run.
 This solves a chicken-and-egg problem: Postgres needs a certificate to
@@ -359,7 +363,7 @@ and `compose_up`'s repo sync deliberately excludes `node_modules`.
 
 **Run them over the tailnet.** The login rules
 (`infra/postgres/pg_hba.conf`) accept the owner `announce` only from the
-tailnet, from the VM's compose network, or from inside the `db` container,
+tailnet, from the VM itself (`samenet`), or from inside the `db` container,
 and every network login only with TLS. From a public address the owner gets
 `no pg_hba.conf entry for host ...`, which `fail2ban` also counts as a
 failed login. Map `db.announce.aztec.network` to the VM's tailnet address
@@ -575,8 +579,18 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    use TLS (`hostssl`). `announce_app` may log in from any address, and
    only to the `announce` database. The owner `announce`, the image's
    bootstrap superuser, which cannot be demoted, may log in only from the
-   compose network (the `backup` job), from the tailnet (owner scripts)
-   and from inside the `db` container. Before 2026-11-04 the image's stock
+   VM itself, from the tailnet (owner scripts) and from inside the `db`
+   container. "From the VM itself" is the `samenet` line, and it is wider
+   than the `backup` job that needs it: it matches every compose service
+   (also the internet-facing `caddy` and the unused `signal`) and,
+   because Docker masquerades connections to the published port from
+   other bridges and from the host, any container on any Docker network
+   on the VM and any host process (127.0.0.1 arrives as the gateway). All
+   of it is VM-local, and each login still needs the owner password.
+   Owner logins from the tailnet often arrive through the same line:
+   Tailscale's default netfilter mode can masquerade the traffic it
+   forwards, so Postgres sees the bridge gateway, not the `100.x`
+   address, and the `100.64.0.0/10` line may go unused. Before 2026-11-04 the image's stock
    rule (`host all all all scram-sha-256`) accepted plaintext logins and
    the superuser from anywhere, and a superuser can run
    `COPY ... FROM PROGRAM`, a shell in the `db` container. There is no
@@ -668,7 +682,8 @@ relying on them:
   this chain gets checked at all. Since 2026-11-04 the cert-reload hook
   also checks it every day on the VM: it verifies what Postgres serves
   against `infra/certs/isrgrootx1.pem` alone and for the hostname, and
-  alerts with fewer than 14 days left. The live certificate after the
+  alerts when less than one sixth of the certificate's lifetime is left
+  (at least 3 days; 15 days for a 90-day certificate). The live certificate after the
   2026-11-02 renewal passed that check on 2026-11-04 (chain leaf, YE2,
   Root YE, ISRG Root X2, ISRG Root X1).
 - **The Hetzner firewall's real behaviour.** No Hetzner resources were
@@ -851,7 +866,11 @@ relying on them:
   and over the container's loopback (cert-reload's check) works. A
   connection to the published port from the host's own `127.0.0.1`
   arrives as the bridge gateway (in `samenet`, so it is accepted); one to
-  another host address arrives with that address. The public and tailnet
+  another host address arrives with that address. A container on another
+  Docker bridge also arrives as the gateway (checked 2026-11-04). Not
+  checked: whether a real tailnet login arrives from its `100.x` address
+  or, through Tailscale's masquerade, from the gateway; both are
+  accepted. The public and tailnet
   sources were addresses on Docker bridges of the test host, not real
   internet or Tailscale traffic, and the refused-login lines were checked
   with `fail2ban-regex` 1.0.2, not with the live jail.
