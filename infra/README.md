@@ -280,7 +280,9 @@ running the playbook. If you skip it, `compose_up`'s "Confirm the
 environment file exists" task fails immediately, with a message pointing
 back here.
 
-`compose_up` copies only the files git tracks to `/opt/announce/repo`,
+`compose_up` first checks that the machine running Ansible has GNU rsync
+3.x (macOS's `/usr/bin/rsync` is openrsync and is refused; see "Before
+you start" in `DEPLOY.md`). It then copies only the files git tracks to `/opt/announce/repo`,
 deletes every other file there, and writes the deployed commit to
 `/opt/announce/repo/DEPLOYED_COMMIT`. It stops the play if a tracked file
 has uncommitted changes, unless `-e announce_allow_dirty_deploy=true` is

@@ -18,6 +18,43 @@
 # never reach the host, and the play stops if a tracked file has
 # uncommitted changes, so the host gets exactly one commit, recorded in
 # {{ stack_dir }}/repo/DEPLOYED_COMMIT.
+# The sync below needs GNU rsync 3.x on the control machine: it uses a
+# merge filter file with `P` (protect) rules and --delete-excluded. macOS
+# ships /usr/bin/rsync as openrsync ("openrsync: protocol version 29"),
+# which was never tested with these options. Stop here, before anything
+# changes on the host, rather than half-way through the sync.
+#
+# Same binary as the sync: ansible.posix.synchronize runs the rsync named
+# by the variable `ansible_rsync_path` when it is set (a path with a `/`
+# is used as given), otherwise the first `rsync` on the PATH that
+# ansible-playbook was started with. This task runs on the control
+# machine with that same PATH, so it reads the same binary.
+- name: Check that the control machine has GNU rsync 3.x
+  ansible.builtin.command:
+    argv: ["{{ ansible_rsync_path | default('rsync') }}", --version]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  failed_when: false
+  register: compose_up_local_rsync
+
+- name: Stop if the control machine's rsync is not GNU rsync 3.x
+  ansible.builtin.assert:
+    that:
+      - compose_up_local_rsync.rc == 0
+      - compose_up_local_rsync.stdout is match('rsync  version 3\.')
+    fail_msg: >-
+      This deploy needs GNU rsync 3.x on the machine that runs Ansible.
+      Found: {{ (compose_up_local_rsync.stdout_lines | default([]) | first | default(''))
+      if compose_up_local_rsync.rc == 0 else
+      ('no rsync could run as "' ~ (ansible_rsync_path | default('rsync')) ~ '" ('
+      ~ (compose_up_local_rsync.msg | default('no output') | regex_replace('[.]+$', '')) ~ ')') }}.
+      On macOS: brew install rsync, then open a new terminal so
+      /opt/homebrew/bin comes first in PATH.
+    quiet: true
+  run_once: true
+
 - name: Create the stack directory
   ansible.builtin.file:
     path: "{{ stack_dir }}"

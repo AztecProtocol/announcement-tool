@@ -61,8 +61,22 @@ tailscale status
 `tailscale` is not installed, or you are logged into the wrong tailnet,
 install it and join the same tailnet as `var.tailnet` before continuing.
 
-Install `terraform`, `ansible`, `psql`, `dig` and `openssl` on the machine you
-are working from. Also install this repo's own Node dependencies
+Install `terraform`, `ansible`, GNU `rsync` 3.x, `psql`, `dig` and `openssl`
+on the machine you are working from.
+
+Warning: **macOS's own `/usr/bin/rsync` is openrsync
+(`openrsync: protocol version 29`), not GNU rsync.** The deploy (step 4)
+uses rsync filter rules that need GNU rsync 3.x, and its first task stops
+the play if `rsync --version` does not start with `rsync  version 3.`.
+Install it with `brew install rsync`, then open a new terminal and check
+that `which rsync` shows `/opt/homebrew/bin/rsync` (Apple silicon) or
+`/usr/local/bin/rsync` (Intel), and `rsync --version` shows version 3.
+If you cannot change your PATH, give the path to Ansible instead:
+`ansible-playbook ... -e ansible_rsync_path=/opt/homebrew/bin/rsync`.
+The check and the sync both use that variable when it is set, and the
+first `rsync` on your PATH when it is not.
+
+Also install this repo's own Node dependencies
 (`npm install`) — steps 6 and 7 run `npm run migrate` and
 `npm run seed:publisher` from here, not on the VM. The VM has no Node
 runtime and no `npm`. These commands log in as the database owner, and the
