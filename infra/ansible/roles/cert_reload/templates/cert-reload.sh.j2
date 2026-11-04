@@ -169,6 +169,107 @@ fail() {
   exit 1
 }
 
+# --- What Postgres serves: expiry, chain to ISRG Root X1, hostname ---------
+# Netlify's functions trust exactly one certificate: ISRG Root X1, pasted
+# into DATABASE_SSL_ROOT_CERT (infra/README.md). A served certificate that
+# is near its end, or whose chain does not lead to X1, or that is not for
+# $DOMAIN, takes the site down at the next connection. The checks above
+# and below only prove that Postgres took the new files; this one checks
+# what a client actually receives, the way Netlify does.
+#
+# It runs on every run, also when nothing changed: a renewal that Caddy
+# never managed shows up here as a shrinking day count long before the
+# certificate expires (Caddy renews with about 30 days left, so under 14
+# days means renewal has failed for two weeks or more).
+#
+# Where it runs: on this host, with the host's openssl, against the
+# published port on 127.0.0.1. The db image has no openssl (see the
+# sha256sum comment below), and the host has it (Ubuntu 24.04: OpenSSL 3;
+# compose_up already uses it for the placeholder certificate). The check
+# only does the TLS handshake (`-starttls postgres` sends the SSLRequest,
+# then TLS) and closes before any login, so no password is needed and no
+# pg_hba.conf line is used. A connection from the host's 127.0.0.1 reaches
+# Postgres from the Docker network gateway (see the `ports:` comment on
+# `db`). `-starttls postgres` needs OpenSSL 1.1.1 or later.
+#
+# The CA file is the repository copy of ISRG Root X1. Its SHA-256 is
+# checked before use, so a changed file cannot quietly widen what this
+# check accepts. Source: https://letsencrypt.org/certs/isrgrootx1.pem,
+# fetched 2026-11-04, byte-identical to Ubuntu's
+# /etc/ssl/certs/ISRG_Root_X1.pem.
+#   file SHA-256:        22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1
+#   certificate SHA-256: 96:BC:EC:06:26:49:76:F3:74:60:77:9A:CF:28:C5:A7:CF:E8:A3:C0:AA:E1:1A:8F:FC:EE:05:C0:BD:DF:08:C6
+#   valid until:         2035-06-04
+# The three cert_reload_* variables exist for a test harness only (a
+# self-made CA and a free port); the role does not set them, so a real
+# deploy always gets X1 and 5432.
+ROOT_CA_FILE="{{ cert_reload_root_ca_file | default(stack_dir ~ '/repo/infra/certs/isrgrootx1.pem') }}"
+ROOT_CA_SHA256="{{ cert_reload_root_ca_sha256 | default('22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1') }}"
+DB_TLS_PORT="{{ cert_reload_db_port | default(5432) }}"
+EXPIRY_ALERT_DAYS=14
+
+# Returns 0 and sets SERVED_CERT_SUMMARY when the served certificate passes
+# every check. Otherwise returns 1 and sets SERVED_PROBLEMS (one line per
+# problem). Globals, not output: the caller must not run this in a
+# subshell, or the summary is lost.
+SERVED_PROBLEMS=""
+SERVED_CERT_SUMMARY=""
+check_served_cert() {
+  local problems="" served end_epoch now_epoch days_left verify_out verify_exit ca_hash
+
+  case "$(openssl version 2>/dev/null)" in
+    "OpenSSL 1.1.1"* | "OpenSSL 3."*) ;;
+    *)
+      SERVED_PROBLEMS="the host needs OpenSSL 1.1.1 or later for -starttls postgres (found: $(openssl version 2>&1 | head -n1))"
+      return 1
+      ;;
+  esac
+
+  ca_hash="$(sha256sum "$ROOT_CA_FILE" 2>/dev/null | awk '{print $1}')"
+  if [ "$ca_hash" != "$ROOT_CA_SHA256" ]; then
+    SERVED_PROBLEMS="the CA file $ROOT_CA_FILE is missing or changed (SHA-256 ${ca_hash:-<unreadable>}, expected $ROOT_CA_SHA256) — refusing to verify against it"
+    return 1
+  fi
+
+  # 1. Read the served leaf, no verification, to get its end date.
+  served="$(timeout 20 openssl s_client -starttls postgres -connect "127.0.0.1:$DB_TLS_PORT" \
+      -servername "$DOMAIN" </dev/null 2>/dev/null \
+    | openssl x509 2>/dev/null || true)"
+  if [ -z "$served" ]; then
+    SERVED_PROBLEMS="could not read the certificate Postgres serves on 127.0.0.1:$DB_TLS_PORT (no TLS handshake)"
+    return 1
+  fi
+  end_epoch="$(date -u -d "$(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
+  now_epoch="$(date -u +%s)"
+  days_left=$(( (end_epoch - now_epoch) / 86400 ))
+  if ! printf '%s\n' "$served" | openssl x509 -noout -checkend $((EXPIRY_ALERT_DAYS * 86400)) >/dev/null 2>&1; then
+    problems="${problems}the certificate Postgres serves expires in $days_left days ($(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)), less than $EXPIRY_ALERT_DAYS; Caddy has not renewed it, or this script did not install the renewal — check the caddy logs and $LOG_FILE
+"
+  fi
+
+  # 2. Verify the served chain against X1 only, and the hostname.
+  # -no-CApath and -no-CAstore keep the system trust store out, so the only
+  # trusted certificate is the file above, as on Netlify.
+  # -verify_return_error makes a failed verification fail the handshake
+  # and the exit code.
+  set +e
+  verify_out="$(timeout 20 openssl s_client -starttls postgres -connect "127.0.0.1:$DB_TLS_PORT" \
+      -servername "$DOMAIN" -CAfile "$ROOT_CA_FILE" -no-CApath -no-CAstore \
+      -verify_hostname "$DOMAIN" -verify_return_error </dev/null 2>&1)"
+  verify_exit=$?
+  set -e
+  if [ "$verify_exit" -ne 0 ]; then
+    problems="${problems}the certificate Postgres serves does not verify against $(basename "$ROOT_CA_FILE") for host $DOMAIN, so clients with DATABASE_SSL_MODE=verify-full (Netlify) cannot connect: $(printf '%s\n' "$verify_out" | grep -m1 -E 'verify error|Verify return code' || printf '%s\n' "$verify_out" | tail -n1)
+"
+  fi
+
+  if [ -n "$problems" ]; then
+    SERVED_PROBLEMS="${problems%$'\n'}"
+    return 1
+  fi
+  SERVED_CERT_SUMMARY="served cert verifies to $(basename "$ROOT_CA_FILE") for $DOMAIN, expires in $days_left days"
+}
+
 cd "$STACK_DIR" || fail "cannot cd to $STACK_DIR"
 
 # Sanity check before searching: if the caddy container isn't even
@@ -290,7 +391,12 @@ CURRENT_FINGERPRINT="$(docker compose exec -T db sh -c "test -f /var/lib/postgre
 set -e
 
 if [ "$NEW_FINGERPRINT" = "$CURRENT_FINGERPRINT" ] && [ -n "$CURRENT_FINGERPRINT" ]; then
-  log "no change (fingerprint matches, cert=$NEW_FINGERPRINT)"
+  # Nothing to install, but still check what Postgres serves (see
+  # check_served_cert above).
+  if ! check_served_cert; then
+    fail "no new certificate from Caddy (cert=$NEW_FINGERPRINT), but: $SERVED_PROBLEMS"
+  fi
+  log "no change (fingerprint matches, cert=$NEW_FINGERPRINT; $SERVED_CERT_SUMMARY)"
   exit 0
 fi
 
@@ -609,4 +715,12 @@ if [ "$LIVE_SSL_CHECK" != "t" ]; then
   fail "reload was accepted per Postgres's own log, and the on-disk cert matches, but a live post-reload TLS connection did not report an encrypted session (got: '${LIVE_SSL_CHECK:-<empty>}') — check db container logs"
 fi
 
-log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT; Postgres logged no reload rejection within ${RELOAD_CHECK_TIMEOUT}s of SIGHUP, on-disk file matches, and a live post-SIGHUP TLS connection succeeded)${RELOAD_CHECK_NOTE}"
+# What a client receives after the reload: chain to ISRG Root X1, hostname
+# and expiry, through the published port (see check_served_cert at the
+# top). The loopback check above stays: it proves Postgres reloaded and
+# still serves TLS; this one proves Netlify can verify what it serves.
+if ! check_served_cert; then
+  fail "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT) and Postgres serves TLS, but: $SERVED_PROBLEMS"
+fi
+
+log "reloaded (old=${CURRENT_FINGERPRINT:-none} new=$NEW_FINGERPRINT; Postgres logged no reload rejection within ${RELOAD_CHECK_TIMEOUT}s of SIGHUP, on-disk file matches, a live post-SIGHUP TLS connection succeeded, and the $SERVED_CERT_SUMMARY)${RELOAD_CHECK_NOTE}"

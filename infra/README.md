@@ -663,8 +663,12 @@ relying on them:
   different certificates. Nothing in this repository's test suite or local
   proofs exercises that two-certificate chain. The `openssl s_client
   -starttls postgres` command in step 4 above is the first point where
-  this chain gets checked at all, and it has not yet been run against a
-  real deployment.
+  this chain gets checked at all. Since 2026-11-04 the cert-reload hook
+  also checks it every day on the VM: it verifies what Postgres serves
+  against `infra/certs/isrgrootx1.pem` alone and for the hostname, and
+  alerts with fewer than 14 days left. The live certificate after the
+  2026-11-02 renewal passed that check on 2026-11-04 (chain leaf, YE2,
+  Root YE, ISRG Root X2, ISRG Root X1).
 - **The Hetzner firewall's real behaviour.** No Hetzner resources were
   ever created during development. The firewall rules in `vm.tf` were
   validated by `terraform plan`/`validate` against the real Hetzner API,
@@ -893,5 +897,12 @@ against a seeded certificate, including its ambiguous-multi-issuer
 refusal, incomplete-pair detection, and rejected-SIGHUP detection (a
 deliberately mismatched key, confirmed via `openssl s_client` that
 Postgres kept serving the old certificate while the naive checks would
-have reported success); and the fail2ban jail in `ubuntu:24.04`
+have reported success); the cert-reload check of what Postgres serves
+(2026-11-04, seeded certificates in throwaway containers, the script run
+from `ubuntu:24.04` with OpenSSL 3.0.13: a chain to a self-made root, a
+leaf for another hostname, a leaf with 5 days left on the reload run and
+on the "no change" run, and a changed CA file each send the alert and
+exit 1; a good chain to a test root gives no alert; the same function
+against the live `db.announce.aztec.network:5432` with the repository's
+ISRG Root X1 passes); and the fail2ban jail in `ubuntu:24.04`
 containers as listed under "The `fail2ban` jail on the real VM" above.
