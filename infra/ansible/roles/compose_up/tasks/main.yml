@@ -3,17 +3,21 @@
 # are never generated or templated by this role — see the note on
 # `stack_dir + /.env` below.
 #
-# Why the whole repo, not just the compose file and Caddyfile: `backup` and
-# `signal-receive` in docker-compose.split.yml build their images from
+# Why every tracked file, not just the compose file and Caddyfile: `backup`
+# and `signal-receive` in docker-compose.split.yml build their images from
 # `context: ./repo` (relative to {{ stack_dir }}, the project directory
 # `docker compose` is invoked from — see the "Start / converge the stack"
 # task below) plus Dockerfile.backup / Dockerfile.signal-receive /
 # scripts/backup.sh / scripts/signal-receive.sh, all of which live in the
 # repo, not in infra/. Copying only the two infra files here would leave
 # those `docker compose build` invocations with no build context on the
-# host at all. Syncing the full checkout keeps the build context identical
-# to what a developer has locally, so "it built here" and "it builds on
-# the VM" mean the same thing.
+# host at all.
+#
+# Only files tracked by git are shipped. Untracked and ignored files on the
+# control machine (`.env`, `*.tfvars`, `*.tfstate`, `inventory.yml`, ...)
+# never reach the host, and the play stops if a tracked file has
+# uncommitted changes, so the host gets exactly one commit, recorded in
+# {{ stack_dir }}/repo/DEPLOYED_COMMIT.
 - name: Create the stack directory
   ansible.builtin.file:
     path: "{{ stack_dir }}"
@@ -21,27 +25,145 @@
     mode: "0755"
 
 # `{{ playbook_dir }}/../..` is the repo root (site.yml lives in
-# infra/ansible/). rsync, not copy + recursive, so re-runs are fast and
-# deletions on the source side (e.g. a removed script) are reflected on the
-# host instead of accumulating stale files forever. Excludes match
-# .gitignore's own intent: never ship node_modules/.next/build artifacts
-# to a host that doesn't need or want them, and never ship
-# infra/dev/certs — those are local dev-only fixtures, this deployment
-# gets its cert from Let's Encrypt via Caddy.
+# infra/ansible/). The git commands run on the control machine
+# (delegate_to: localhost, become: false: no sudo on the operator's
+# machine).
+- name: Find the repository root on the control machine
+  ansible.builtin.set_fact:
+    compose_up_repo_root: "{{ (playbook_dir ~ '/../..') | realpath }}"
+
+- name: Look for uncommitted changes to tracked files
+  ansible.builtin.command:
+    argv: [git, -C, "{{ compose_up_repo_root }}", status, --porcelain, --untracked-files=no]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  register: compose_up_git_status
+
+- name: Stop if tracked files have uncommitted changes
+  ansible.builtin.fail:
+    msg: >-
+      Deploy stopped: these tracked files have changes that are not
+      committed: {{ compose_up_git_status.stdout_lines | join('; ') }}.
+      The deploy ships the committed state of the repository only. Commit
+      or discard the changes, then run the play again. To deploy the files
+      as they are on disk anyway, add -e announce_allow_dirty_deploy=true;
+      DEPLOYED_COMMIT on the host then records that the tree had local
+      changes.
+  when:
+    - compose_up_git_status.stdout | length > 0
+    - not (announce_allow_dirty_deploy | default(false) | bool)
+
+- name: Read the commit being deployed
+  ansible.builtin.command:
+    argv: [git, -C, "{{ compose_up_repo_root }}", rev-parse, HEAD]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  register: compose_up_git_head
+
+- name: List the tracked files
+  ansible.builtin.command:
+    argv: [git, -C, "{{ compose_up_repo_root }}", -c, core.quotePath=false, ls-files]
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: false
+  register: compose_up_git_files
+
+# Even with core.quotePath=false, git prints a path in double quotes when
+# it holds a double quote, a backslash or a control character. The rsync
+# filter below cannot express those paths exactly, so the play stops.
+- name: Refuse tracked paths the rsync filter cannot express
+  ansible.builtin.assert:
+    that:
+      - compose_up_git_files.stdout_lines | length > 0
+      - compose_up_git_files.stdout_lines | select('match', '^"') | list | length == 0
+    fail_msg: >-
+      git ls-files returned no files, or a tracked path with a double
+      quote, backslash or control character. Rename that file; the deploy
+      cannot ship it exactly.
+  run_once: true
+
+- name: Create a temporary rsync filter file on the control machine
+  ansible.builtin.tempfile:
+    suffix: .rsync-filter
+  delegate_to: localhost
+  run_once: true
+  become: false
+  # Scratch file on the control machine, not a change to the host.
+  changed_when: false
+  register: compose_up_filter_file
+
+# rsync, not copy + recursive, so re-runs are fast. The filter file holds
+# one include line per tracked file and parent directory, then `- *`.
+# `--delete-excluded` (with `delete: true`) removes from the host every file
+# the filter does not include: files deleted in git, and untracked files an
+# older version of this task copied (it shipped the whole working tree).
+# Proven on 2026-11-04 that `--files-from=<list>` with `--delete`, with or
+# without `-r`, deletes nothing, so it is not used here.
+#
+# The five excludes are a second layer: they also match nothing tracked
+# today. The filter's first rule, `P /DEPLOYED_COMMIT`, protects the record
+# written below from the deletion. Nothing outside {{ stack_dir }}/repo is
+# touched; the secrets file {{ stack_dir }}/.env sits next to repo/, not in
+# it.
+#
 # Notifies the "Restart caddy" handler on change — see
 # roles/compose_up/handlers/main.yml.
-- name: Sync the repository to the host
-  ansible.posix.synchronize:
-    src: "{{ playbook_dir }}/../../"
-    dest: "{{ stack_dir }}/repo"
-    delete: true
-    rsync_opts:
-      - "--exclude=.git"
-      - "--exclude=node_modules"
-      - "--exclude=.next"
-      - "--exclude=infra/dev/certs"
-      - "--exclude=infra/terraform/.terraform"
-  notify: Restart caddy
+- name: Ship the tracked files to the host
+  block:
+    - name: Write the tracked-files rsync filter
+      ansible.builtin.template:
+        src: tracked-files.rsync-filter.j2
+        dest: "{{ compose_up_filter_file.path }}"
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+      become: false
+      # Scratch file on the control machine, not a change to the host.
+      changed_when: false
+
+    - name: Sync the repository to the host
+      ansible.posix.synchronize:
+        src: "{{ compose_up_repo_root }}/"
+        dest: "{{ stack_dir }}/repo"
+        delete: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=node_modules"
+          - "--exclude=.next"
+          - "--exclude=infra/dev/certs"
+          - "--exclude=infra/terraform/.terraform"
+          # A merge file, not --include-from: --include-from reads every
+          # line as an include pattern, so the `P` (protect) rule in the
+          # file would not work. `merge_` is rsync's spelling of
+          # "merge " without a space; synchronize joins rsync_opts into one
+          # command line without quoting them, hence also `quote`.
+          - "--filter=merge_{{ compose_up_filter_file.path | quote }}"
+          - "--delete-excluded"
+      notify: Restart caddy
+  always:
+    - name: Remove the temporary rsync filter file
+      ansible.builtin.file:
+        path: "{{ compose_up_filter_file.path }}"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+      become: false
+      # Scratch file on the control machine, not a change to the host.
+      changed_when: false
+
+# Read on the host with `cat /opt/announce/repo/DEPLOYED_COMMIT`.
+- name: Record the deployed commit on the host
+  ansible.builtin.copy:
+    dest: "{{ stack_dir }}/repo/DEPLOYED_COMMIT"
+    mode: "0644"
+    content: |
+      commit: {{ compose_up_git_head.stdout }}
+      uncommitted changes to tracked files: {{ 'yes (deployed with announce_allow_dirty_deploy=true)' if compose_up_git_status.stdout | length > 0 else 'no' }}
 
 # Symlinks, not copies: `docker compose` resolves a relative build context
 # (docker-compose.split.yml's `backup`/`signal-receive` use `./repo`)

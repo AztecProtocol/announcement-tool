@@ -1,0 +1,30 @@
+# rsync filter for the repository sync (roles/compose_up/tasks/main.yml).
+# Generated on the control machine from `git ls-files`: it includes every
+# tracked file and its parent directories, then excludes everything else.
+# With --delete-excluded, any other file under {{ stack_dir }}/repo on the
+# host is deleted.
+#
+# rsync reads `[`, `*` and `?` as wildcards, and a backslash escapes them
+# only in a pattern that holds a wildcard. Escaping these three characters
+# is enough: `app/a/[slug]/page.tsx` becomes `app/a/\[slug]/page.tsx`, in
+# which `]` has no opening bracket and is a plain character. Paths with a
+# backslash are refused before this file is written (the role's "Refuse
+# tracked paths" task).
+#
+# Keep the record written after the sync; the deletion must not remove it.
+P /DEPLOYED_COMMIT
+{% macro esc(p) %}{{ p | replace('[', '\\[') | replace('*', '\\*') | replace('?', '\\?') }}{% endmacro %}
+{% set ns = namespace(dirs=[]) %}
+{% for f in compose_up_git_files.stdout_lines %}
+{% set parts = f.split('/') %}
+{% for i in range(1, parts | length) %}
+{% set ns.dirs = ns.dirs + [parts[:i] | join('/')] %}
+{% endfor %}
+{% endfor %}
+{% for d in ns.dirs | unique %}
++ /{{ esc(d) }}/
+{% endfor %}
+{% for f in compose_up_git_files.stdout_lines %}
++ /{{ esc(f) }}
+{% endfor %}
+- *

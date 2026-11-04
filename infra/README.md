@@ -274,6 +274,12 @@ running the playbook. If you skip it, `compose_up`'s "Confirm the
 environment file exists" task fails immediately, with a message pointing
 back here.
 
+`compose_up` copies only the files git tracks to `/opt/announce/repo`,
+deletes every other file there, and writes the deployed commit to
+`/opt/announce/repo/DEPLOYED_COMMIT`. It stops the play if a tracked file
+has uncommitted changes, unless `-e announce_allow_dirty_deploy=true` is
+given. See step 4 of `DEPLOY.md`.
+
 Roles run in this order (see `site.yml`'s own comment for the full
 reasoning): `docker`, then `volume_mount`, then `compose_up`, then
 `fail2ban`, then `cert_reload`. `compose_up` also generates a short-lived

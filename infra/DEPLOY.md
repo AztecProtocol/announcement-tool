@@ -254,6 +254,38 @@ This installs Docker, mounts the data volume, starts Postgres, the Signal
 sidecar and Caddy, configures `fail2ban`, and installs the certificate-renewal
 job.
 
+**The deploy ships the committed state of your checkout only.** The play
+copies the files that git tracks (`git ls-files`) to `/opt/announce/repo`
+on the VM. Untracked and ignored files on your machine (`.env`,
+`terraform.tfvars`, `*.tfstate`, `inventory.yml`, ...) are never copied.
+Any file under `/opt/announce/repo` that git does not track is deleted
+from the VM on each run: a file you deleted in git, and any copy that an
+older version of the play left there. `/opt/announce/.env` is next to
+`repo/`, not in it, and the play never touches it.
+
+The play stops before it copies anything if a tracked file has changes
+that are not committed. The message names the files. Commit or discard the
+changes, then run the play again. To deploy the files as they are on disk
+anyway, add `-e announce_allow_dirty_deploy=true` to the
+`ansible-playbook` command.
+
+To see which commit runs on the VM:
+
+```sh
+tailscale ssh root@<name from step 1> 'cat /opt/announce/repo/DEPLOYED_COMMIT'
+```
+
+It shows the commit hash, and whether the deploy included changes that
+were not committed (`yes` only after a deploy with
+`announce_allow_dirty_deploy=true`).
+
+> **Note — the first run after 2026-11-04 deletes stray files.** Older
+> versions of the play copied the whole working tree, so untracked files
+> can be on the VM under `/opt/announce/repo` (two `inventory.yml` copies
+> were there on 2026-11-04). The first run with this version deletes them.
+> Nothing restarts because of this, except the Caddy restart that every
+> run with a changed file already causes.
+
 > **Note — the first run after 2026-10-08 restarts Postgres once.** The
 > database port mapping changed to IPv4-only
 > (`"0.0.0.0:${DB_HOST_PORT:-5432}:5432"`, to close an IPv6 ban-evasion
@@ -982,6 +1014,7 @@ step 3 is on the root disk and must be written again.
 | `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; the SSH key from "Before you start" does not help here — the Hetzner web console is a keyboard-and-screen session at a boot prompt, not an SSH endpoint, and a stock image has no root password set. Use Hetzner **rescue mode** instead: boot the rescue system from the Hetzner console, mount the VM's root disk, and inspect `cloud-init` / Tailscale logs or set a password from inside the mounted filesystem, then reboot normally. |
 | `tailscale ssh` hangs for you but works for a tailnet admin | You are not named in the ACL's `ssh` rule for `tag:announce` (`autogroup:admin` in `rpc.aztec.foundation/tailscale.tf`). Ask an admin to add you to the tailnet's admins, or extend the rule in code. Nothing on the VM is wrong. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
+| Ansible stops with "Deploy stopped: these tracked files have changes that are not committed" | Your checkout has local changes to tracked files. Commit or discard them, or see step 4 for `announce_allow_dirty_deploy=true`. Nothing on the VM changed. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
