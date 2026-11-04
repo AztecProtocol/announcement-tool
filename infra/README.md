@@ -625,7 +625,8 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    addresses are never among the would-be bans. The switch is one variable
    and one play run ("Before the first run with the live jail" in
    [`DEPLOY.md`](DEPLOY.md)); it clears the addresses recorded in watch mode
-   first, so they do not become real blocks.
+   first, so they do not become real blocks. Production runs in ban mode
+   since 2026-11-04 (`infra/ansible/group_vars/all.yml`).
 5. **Operator access over the tailnet, not a public SSH port**
    (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
    closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which

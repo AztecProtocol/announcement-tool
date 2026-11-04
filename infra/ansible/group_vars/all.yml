@@ -12,4 +12,8 @@ announce_domain: db.announce.aztec.network
 # minutes. Set `ban` here only after two weeks of would-be bans have been
 # read and none is the application's (infra/DEPLOY.md, "Before the first run
 # with the live jail"). Any other value stops the play.
-# announce_fail2ban_mode: ban
+#
+# Production runs in ban mode since 2026-11-04, after the watch period from
+# 2026-10-22: no address failed a login as announce_app except a test
+# machine, and no AWS address did.
+announce_fail2ban_mode: ban

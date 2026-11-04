@@ -402,8 +402,9 @@ and nothing else AND rejects a forged TAB continuation line, the ban is on the `
 mirror leaves a fresh state stamp (`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is
 proven by "Check that fail2ban bans" in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the
 jail there as unproven.
-*The first deployment runs the jail in watch mode, and watch mode does not protect the port.* The role variable
-`announce_fail2ban_mode` defaults to `watch`: the jail counts and decides exactly as in ban mode, but its action is
+*A new deployment runs the jail in watch mode, and watch mode does not protect the port.* The role default of
+`announce_fail2ban_mode` is `watch` (production sets `ban` in `infra/ansible/group_vars/all.yml` since
+2026-11-04, after its watch period): the jail counts and decides exactly as in ban mode, but its action is
 fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status, `/var/log/fail2ban.log`) and no
 firewall rule changes. The port has no rate limit from fail2ban until the variable is set to `ban`. Watch mode
 exists so that real traffic shows, before any ban, that the application's Netlify addresses never appear among
