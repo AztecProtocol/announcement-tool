@@ -17,15 +17,18 @@
 # Role order matters:
 #   0. preflight      — checks on the control machine only: GNU rsync 3.x,
 #                        no uncommitted changes to tracked files, tracked
-#                        paths the sync can ship, and a warning when the
-#                        checkout is not the current main. First, so that a
+#                        paths the sync can ship, and a stop when the
+#                        checkout is not the current main (override:
+#                        -e announce_deploy_not_main=true). First, so that a
 #                        failed check stops the play before anything on the
 #                        host changes.
-#   1. docker         — installs Docker + the RequiresMountsFor drop-in so
-#                        it never starts before the data volume is mounted.
-#   2. volume_mount    — confirms the Hetzner volume is actually mounted at
-#                        the path Terraform told us about, and creates the
-#                        stack directory on it.
+#   1. docker         — first confirms, on the host, that the Hetzner volume
+#                        is actually mounted at the path Terraform told us
+#                        about (findmnt), then installs Docker + the
+#                        RequiresMountsFor drop-in so it never starts before
+#                        the data volume is mounted.
+#   2. volume_mount    — creates the stack directory on the volume and points
+#                        Docker's data-root at it.
 #   3. compose_up      — renders .env, copies the compose file + Caddyfile,
 #                        brings the stack up.
 #   4. fail2ban        — installed after the stack is up so its Postgres
@@ -45,10 +48,13 @@
 # and "Restart docker"); fail2ban restarts itself with a task, not a
 # handler (see the comment there), so this setting does not move it.
 # force_handlers changes one thing: on a failed host, a pending handler
-# runs at the end instead of being dropped. "Restart docker" is pending at a
-# failure only when the docker role changed the drop-in and volume_mount
-# stopped before its flush (the data volume is not mounted); Docker then
-# restarts with RequiresMountsFor, as it would at the next boot.
+# runs at the end instead of being dropped. "Restart docker" can be pending
+# at a failure only between the docker role's drop-in and volume_mount's
+# flush (an apt or file task failing in that window); Docker then restarts
+# with RequiresMountsFor, as it would at the next boot. A data volume that
+# is not mounted at data_mount (a wrong data_mount included) is caught by
+# the docker role's FIRST task, before the drop-in is written, so it never
+# leaves a Docker restart pending.
 # "Restart caddy" fails as well when the stack was never started on this
 # host (first deploy with no .env); that adds one error line, nothing more.
 - name: Deploy the announcement tool's split-deployment VM stack

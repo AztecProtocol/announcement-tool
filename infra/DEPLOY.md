@@ -265,16 +265,20 @@ local changes. From the repo root:
 
 ```sh
 git switch main && git pull
-git status
+git status --untracked-files=no
 ```
 
-`git status` must show `nothing to commit, working tree clean` (untracked
-files such as `inventory.yml` are fine; they are never copied). The play
-does not run `git fetch` itself. It prints a `WARNING: this deploy is NOT
-the current main` message, and does not stop, when the checkout is on
-another branch or when `HEAD` differs from the remote-tracking `main` that
-git knows locally. If you did not plan to deploy another commit, stop the
-play (Ctrl-C) at that warning: it comes before any change to the VM.
+`git status --untracked-files=no` must show `nothing to commit, working
+tree clean` (untracked files such as `inventory.yml` are fine; they are
+never copied). The play does not run `git fetch` itself. When the checkout
+is on another branch, when `HEAD` differs from the remote-tracking `main`
+that git knows locally, or when git knows no remote-tracking `main`, it
+prints `WARNING: this deploy may not be the current main.` and then stops
+with `Deploy stopped: this checkout is not the current main.`, before any
+change to the VM. Both messages say what is different. To fix it, run
+`git switch main && git pull` and run the play again. To deploy another
+commit on purpose (a hotfix, a rollback), add
+`-e announce_deploy_not_main=true` to the `ansible-playbook` command.
 
 ```sh
 cd infra/ansible
@@ -340,10 +344,14 @@ none), and whether the deploy included changes that were not committed (`yes` on
 > second restart. See
 > [Before the first run with the login rules](#before-the-first-run-with-the-login-rules).
 
-The first run installs the `fail2ban` jail for the database port in watch
-mode: it records who it would ban and blocks nobody. See
+The run installs the `fail2ban` jail for the database port in **ban mode**:
+`infra/ansible/group_vars/all.yml` sets `announce_fail2ban_mode: ban` for
+every inventory. A new VM or a rebuild that must first only record who the
+jail would ban has to ask for it: add `-e announce_fail2ban_mode=watch` to
+its first runs. See
 [Before the first run with the live jail](#before-the-first-run-with-the-live-jail)
-for what that means, how to read it, and how to switch to ban mode.
+for what watch mode does, how to read it, and how to go from one mode to
+the other.
 
 The run stops with an error if the `fail2ban` jail for the database port is
 not live: if it does not read the log file, if its filter does not count a
@@ -747,9 +755,17 @@ no TLS. It cannot run the `npm run` commands.
 
 ## Before the first run with the live jail
 
-The `fail2ban` role starts the jail for the database port in **watch mode**
-(`announce_fail2ban_mode: watch`, the default in
-`infra/ansible/roles/fail2ban/defaults/main.yml`). In watch mode the jail
+**This repository deploys the jail for the database port in ban mode.**
+`infra/ansible/group_vars/all.yml` sets `announce_fail2ban_mode: ban`, and
+that file applies to every inventory. The role default,
+`announce_fail2ban_mode: watch` in
+`infra/ansible/roles/fail2ban/defaults/main.yml`, applies only where that
+value is not set. A new VM or a rebuild that wants a watch period first must
+ask for it: add `-e announce_fail2ban_mode=watch` to every run of that
+period. Production ran in watch mode from 2026-10-22 and was switched to ban
+mode on 2026-11-04 (step 5).
+
+**Watch mode.** In watch mode the jail
 reads the same log, counts the same failed logins and decides exactly as in
 ban mode, but it blocks nothing: its action is `fail2ban`'s own `dummy`, which
 changes no firewall rule. Each would-be ban is recorded, nothing more. **In
@@ -763,7 +779,8 @@ mode shows, from real traffic, whether the jail would ever do that before it
 can.
 
 Do steps 1 and 2 once, on the VM, before the first Ansible run that
-installs the working jail, and steps 3 to 5 after it. They make sure the ban cannot take out Docker's
+installs the working jail, and step 3 after it. Steps 4 and 5 apply only to
+a deployment that runs a watch period (`-e announce_fail2ban_mode=watch`). They make sure the ban cannot take out Docker's
 own network rules, and that the application is not already failing logins
 from an address the jail would block.
 
@@ -819,7 +836,8 @@ from an address the jail would block.
    ```
 
    The jail status must show `File list: /var/log/announce-postgres-auth.log`.
-   In watch mode the second command must end with the one line `dummy`.
+   In watch mode the second command must end with the one line `dummy`;
+   in ban mode it must not.
    Run `cat` on the state file twice, about a minute apart: the number must
    change (it is the time of the last mirror run, in Unix seconds). Then open
    `https://announce.aztec.network/archive` in a browser — it must load.
@@ -876,30 +894,38 @@ from an address the jail would block.
    Switch to ban mode only when two weeks have passed with no
    `announce_app` failure from an AWS address.
 
-5. **Switch to ban mode.**
+5. **How the switch to ban mode was made, and how to go back to watch.**
 
-   1. In `infra/ansible/group_vars/all.yml`, set (remove the `#` from the
-      line that is there):
+   Production was switched on 2026-11-04, after the watch period from
+   2026-10-22, by one commit: it set `announce_fail2ban_mode: ban` in
+   `infra/ansible/group_vars/all.yml`. A deployment in a watch period
+   switches the same way: it stops adding `-e announce_fail2ban_mode=watch`
+   and runs the play, from `infra/ansible`:
 
-      ```yaml
-      announce_fail2ban_mode: ban
-      ```
+   ```sh
+   ansible-playbook -i inventory.yml site.yml
+   ```
 
-   2. Run the play again, from `infra/ansible`:
+   The run must end the `fail2ban` role with `fail2ban jail
+   announce-postgres is in BAN mode`. On the switch the role first clears
+   the addresses recorded in watch mode (`fail2ban-client reload --restart
+   --unban announce-postgres`). Without that, `fail2ban` would restore each
+   recent would-be ban from its database as a real block. No address
+   recorded during watch mode is blocked by the switch. Then do
+   [Check that fail2ban bans](#check-that-fail2ban-bans) from a second
+   machine. Until it passes, treat the port as not protected.
 
-      ```sh
-      ansible-playbook -i inventory.yml site.yml
-      ```
+   To go back to watch mode, run the play with the override:
 
-      The run must end the `fail2ban` role with `fail2ban jail
-      announce-postgres is in BAN mode`. On the switch the role first clears
-      the addresses recorded in watch mode (`fail2ban-client reload --restart
-      --unban announce-postgres`). Without that, `fail2ban` would restore
-      each recent would-be ban from its database as a real block. No
-      address recorded during watch mode is blocked by the switch.
+   ```sh
+   ansible-playbook -i inventory.yml site.yml -e announce_fail2ban_mode=watch
+   ```
 
-   3. Do [Check that fail2ban bans](#check-that-fail2ban-bans) from a second
-      machine. Until it passes, treat the port as not protected.
+   The run must end with `fail2ban jail announce-postgres is in WATCH
+   mode`. The jail's firewall chain is removed at once, and every address
+   it had blocked is free again. Every later run must also have the
+   override, or it switches back to ban mode. To stay in watch mode for a
+   long time, change the value in `group_vars/all.yml` in a commit instead.
 
 6. If you must undo the jail, fastest first:
 
@@ -915,9 +941,7 @@ from an address the jail would block.
 
    Step 3 is permanent only until the next Ansible run, which reinstalls the
    jail. To keep it off, also stop running the `fail2ban` role. To go back
-   from ban mode to watch mode instead, set `announce_fail2ban_mode: watch`
-   (or put the `#` back) and run the play: the jail's firewall chain is
-   removed at once, and every address it had blocked is free again.
+   from ban mode to watch mode instead, see step 5.
 
 ---
 
@@ -1264,6 +1288,7 @@ step 3 is on the root disk and must be written again.
 | `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; the SSH key from "Before you start" does not help here — the Hetzner web console is a keyboard-and-screen session at a boot prompt, not an SSH endpoint, and a stock image has no root password set. Use Hetzner **rescue mode** instead: boot the rescue system from the Hetzner console, mount the VM's root disk, and inspect `cloud-init` / Tailscale logs or set a password from inside the mounted filesystem, then reboot normally. |
 | `tailscale ssh` hangs for you but works for a tailnet admin | You are not named in the ACL's `ssh` rule for `tag:announce` (`autogroup:admin` in `rpc.aztec.foundation/tailscale.tf`). Ask an admin to add you to the tailnet's admins, or extend the rule in code. Nothing on the VM is wrong. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
+| Ansible stops with "Deploy stopped: this checkout is not the current main." | The checkout is on another branch, `HEAD` is not the remote-tracking `main`, or `main` has no upstream. The message says which. Run `git switch main && git pull` and run the play again. To deploy this commit on purpose (a hotfix, a rollback), add `-e announce_deploy_not_main=true`. Nothing on the VM changed. |
 | Ansible stops with "Deploy stopped: these tracked files have changes that are not committed" | Your checkout has local changes to tracked files. Commit or discard them, or see step 4 for `announce_allow_dirty_deploy=true`. Nothing on the VM changed. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
@@ -1271,7 +1296,7 @@ step 3 is on the root disk and must be written again.
 | A login fails with `no pg_hba.conf entry for host` | The login is not one the database accepts (`infra/postgres/pg_hba.conf`). `... no encryption` at the end: the client did not use TLS; on Netlify, `DATABASE_SSL_MODE` is not `verify-full`. `user "announce"` from a public address: owner commands must run over the tailnet, see [Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet). Each refusal counts as a failed login for `fail2ban`. |
 | The site cannot reach the database (connection refused or a timeout) right after a wrong `DATABASE_URL` or a wrong password was deployed | In ban mode, five failed logins in ten minutes make `fail2ban` block the address for ten minutes, and a Netlify address is treated like any other (in watch mode nothing is blocked, so the cause is the password alone). Correct the variable first. Then, on the VM, look at `sudo fail2ban-client status announce-postgres`: `Banned IP list:` shows the blocked addresses. Remove one with `sudo fail2ban-client set announce-postgres unbanip <address>`, or all of them with `sudo fail2ban-client unban --all` (this also clears the `sshd` jail, so an SSH address blocked for failed logins is unbanned at the same time). The same applies to your own machine after five mistyped passwords in `psql`. |
 | Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "does NOT put its ban ..." or "announce_fail2ban_mode is `watch`, but ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live, or (watch mode) its action could change the firewall. The message says which check failed and where to look. The port is not protected by `fail2ban` until the run passes, and in watch mode not after it either. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. A pending Caddy restart still ran at the end of the stopped play (`site.yml` sets `force_handlers`); look for `RUNNING HANDLER [compose_up : Restart caddy]` in the output. Run `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. Only if the output shows that the Caddy handler failed, also run `sudo docker compose restart caddy` in `/opt/announce`. |
-| The alert "announce cert-reload failed" says the served certificate "expires in N days ... less than X days (one sixth of its ...-day lifetime ...)", or "does not verify against isrgrootx1.pem", or Ansible's last task "Run the cert-reload check now" fails with that text | `/usr/local/bin/announce-cert-reload.sh` checks, on every daily run and after every reload, what Postgres serves on `127.0.0.1:5432` (port 5432 only; the script does not read `DB_HOST_PORT`, which a real deployment never sets): it must verify against ISRG Root X1 only (`infra/certs/isrgrootx1.pem`, the same root Netlify trusts) for `db.announce.aztec.network`, and have at least one sixth of its own lifetime left (notAfter minus notBefore; 15 days for a 90-day certificate, 7.5 for a 45-day one, never less than 3 days). Below that: Caddy has not renewed; read `docker compose logs caddy` for the ACME error. Does not verify: Netlify cannot connect either; compare the chain with step 5's `openssl s_client -starttls postgres` command. "CA file ... missing or changed": the repository copy of the root does not match the SHA-256 in the script; restore it from git, do not update the hash without checking the new file against https://letsencrypt.org/certs/isrgrootx1.pem. |
+| The alert "announce cert-reload failed" says the served certificate "expires in N days ... less than X days (one sixth of its ...-day lifetime ...)", or "does not verify against isrgrootx1.pem", or Ansible's last task "Run the cert-reload check now" fails with that text | `/usr/local/bin/announce-cert-reload.sh` checks, on every daily run and after every reload, what Postgres serves on `127.0.0.1:5432` (port 5432 only; the script does not read `DB_HOST_PORT`, which a real deployment never sets): it must verify against ISRG Root X1 only (`infra/certs/isrgrootx1.pem`, the same root Netlify trusts) for `db.announce.aztec.network`, and have at least one sixth of its own lifetime left (notAfter minus notBefore, plus 1 second; 15 days for a 90-day certificate, 7.5 for a 45-day one, never less than 3 days). Below that: Caddy has not renewed; read `docker compose logs caddy` for the ACME error. Does not verify: Netlify cannot connect either; compare the chain with step 5's `openssl s_client -starttls postgres` command. "CA file ... missing or changed": the repository copy of the root does not match the SHA-256 in the script; restore it from git, do not update the hash without checking the new file against https://letsencrypt.org/certs/isrgrootx1.pem. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
 | Every page shows `Internal Server Error` and the Netlify function log says `Failed to prepare server` | Trigger a deploy in Netlify (Deploys → Trigger deploy). A function whose start failed keeps failing until it is replaced. Since the start-check change this should only happen for a real misconfiguration; the log line names it. |
@@ -1286,9 +1311,11 @@ unproven there:
   was issued. Until one has happened, the renewal hook has only run against
   a stand-in certificate.
 - **A `fail2ban` ban.** The jail installed on 2026-09-04 could not ban. It
-  was repaired on 2026-10-08 and proven in containers only. The next
-  Ansible run installs it in watch mode, which blocks nothing. After the
-  switch to ban mode, do [Check that fail2ban bans](#check-that-fail2ban-bans).
+  was repaired on 2026-10-08 and proven in containers only. It ran in
+  watch mode, which blocks nothing, from 2026-10-22, and this repository
+  deploys it in ban mode since 2026-11-04. Until
+  [Check that fail2ban bans](#check-that-fail2ban-bans) has passed on the
+  VM, treat the ban there as unproven.
 - **The log mirror for `fail2ban` under the real cron, and the weekly
   rotation of `/var/log/announce-postgres-auth.log`.** Both were proven
   against real Docker on a developer machine and in containers.

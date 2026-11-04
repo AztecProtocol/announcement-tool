@@ -25,8 +25,11 @@
 # FAIL when the running jail is not live, so it cannot be silently inert
 # again.
 #
-# WATCH MODE FIRST. `announce_fail2ban_mode` (defaults/main.yml) is `watch`
-# unless set to `ban`. In watch mode the jail is the same in every setting
+# BAN OR WATCH. The role default (defaults/main.yml) is `watch`, but this
+# repository deploys `ban`: group_vars/all.yml sets announce_fail2ban_mode:
+# ban for every inventory. A new VM or a rebuild that wants a watch period
+# first must ask for it with -e announce_fail2ban_mode=watch on its first
+# runs. In watch mode the jail is the same in every setting
 # but its action, which is fail2ban's `dummy`: each would-be ban is recorded
 # (jail status, /var/log/fail2ban.log) and no firewall rule changes. The
 # application shares this port from Netlify's shared egress addresses, so
@@ -410,8 +413,8 @@
       is in WATCH mode. It records would-be bans and blocks NOTHING: port 5432
       is NOT protected by fail2ban. Read the would-be bans as described in
       infra/DEPLOY.md, "Before the first run with the live jail", and switch
-      to ban mode (announce_fail2ban_mode: ban) only when none of them is the
-      application's.{% else %}fail2ban jail announce-postgres is in BAN mode.
+      to ban mode (drop -e announce_fail2ban_mode=watch; group_vars/all.yml
+      sets ban) only when none of them is the application's.{% else %}fail2ban jail announce-postgres is in BAN mode.
       Five failed logins in ten minutes block the address from port 5432 for
       ten minutes. Prove it once with "Check that fail2ban bans" in
       infra/DEPLOY.md.{% endif %}

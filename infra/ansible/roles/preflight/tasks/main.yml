@@ -4,9 +4,12 @@
 # installs packages or restarts Docker, and before `volume_mount` writes
 # /etc/docker/daemon.json. Every task runs once, on the control machine
 # (delegate_to: localhost, become: false: no sudo on the operator's
-# machine), and changes nothing. The registered results are used later by
-# compose_up (the sync, the rsync filter template and DEPLOYED_COMMIT):
-# a run_once task's result is set for every host of the play.
+# machine), and changes nothing. The `command` tasks only read, so they set
+# check_mode: false: under `ansible-playbook --check` they still run and
+# the checks below see real results, not empty skipped ones. The
+# registered results are used later by compose_up (the sync, the rsync
+# filter template and DEPLOYED_COMMIT): a run_once task's result is set for
+# every host of the play.
 
 # The sync in compose_up needs GNU rsync 3.x on the control machine: it
 # uses a merge filter file with `P` (protect) rules and --delete-excluded.
@@ -25,6 +28,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   failed_when: false
   register: preflight_local_rsync
 
@@ -57,6 +61,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   register: preflight_git_status
 
 - name: Stop if tracked files have uncommitted changes
@@ -81,6 +86,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   register: preflight_git_head
 
 # rc 0 and the branch name, or rc 1 on a detached HEAD.
@@ -91,6 +97,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   failed_when: false
   register: preflight_git_branch
 
@@ -105,6 +112,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   failed_when: false
   register: preflight_git_main_ref
 
@@ -115,6 +123,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   failed_when: false
   register: preflight_git_main_head
 
@@ -122,10 +131,11 @@
   ansible.builtin.set_fact:
     preflight_branch: "{{ preflight_git_branch.stdout if preflight_git_branch.rc == 0 else '(detached HEAD)' }}"
 
-# A warning, not a stop: deploying a branch on purpose (a hotfix, a
-# rollback to an older commit) is allowed. The remote-tracking ref is only
-# as new as the last `git fetch` or `git pull`; DEPLOY.md's pre-flight
-# says to run `git switch main && git pull` first.
+# A stop, with an override: deploying another commit on purpose (a
+# hotfix, a rollback to an older commit) is allowed with
+# -e announce_deploy_not_main=true. The remote-tracking ref is only as new
+# as the last `git fetch` or `git pull`; DEPLOY.md's pre-flight says to run
+# `git switch main && git pull` first.
 - name: Compare the checkout with the remote-tracking main
   ansible.builtin.set_fact:
     preflight_main_warnings: >-
@@ -148,6 +158,19 @@
   when: preflight_main_warnings | length > 0
   run_once: true
 
+- name: Stop unless the checkout is the current main or the override is set
+  ansible.builtin.fail:
+    msg: >-
+      Deploy stopped: this checkout is not the current main.
+      {{ preflight_main_warnings | join(' ') }}
+      To deploy main: run `git switch main && git pull`, then run the play
+      again. To deploy this commit on purpose (a hotfix, a rollback), add
+      -e announce_deploy_not_main=true. Nothing was changed on the host.
+  when:
+    - preflight_main_warnings | length > 0
+    - not (announce_deploy_not_main | default(false) | bool)
+  run_once: true
+
 - name: List the tracked files
   ansible.builtin.command:
     argv: [git, -C, "{{ preflight_repo_root }}", -c, core.quotePath=false, ls-files]
@@ -155,6 +178,7 @@
   run_once: true
   become: false
   changed_when: false
+  check_mode: false
   register: preflight_git_files
 
 # Even with core.quotePath=false, git prints a path in double quotes when

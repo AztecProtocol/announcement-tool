@@ -9,9 +9,12 @@ announce_domain: db.announce.aztec.network
 # five logins in ten minutes. The default, `watch` (roles/fail2ban/defaults/
 # main.yml), only records the would-be ban and changes no firewall rule, so
 # the port is NOT protected by fail2ban. `ban` blocks the address for ten
-# minutes. Set `ban` here only after two weeks of would-be bans have been
-# read and none is the application's (infra/DEPLOY.md, "Before the first run
-# with the live jail"). Any other value stops the play.
+# minutes. Any other value stops the play.
+#
+# This repository deploys `ban`, and this file applies to every inventory.
+# A new VM or a rebuild that wants a watch period first must ask for it with
+# -e announce_fail2ban_mode=watch on its first runs (infra/DEPLOY.md,
+# "Before the first run with the live jail").
 #
 # Production runs in ban mode since 2026-11-04, after the watch period from
 # 2026-10-22: no address failed a login as announce_app except a test

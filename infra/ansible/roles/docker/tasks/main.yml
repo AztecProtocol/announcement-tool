@@ -14,6 +14,30 @@
 # volume but is now invisible underneath the mountpoint, and the
 # container runs against an empty database with no error anywhere.
 # This is the single scenario this role exists to prevent.
+
+# Confirms the Hetzner data volume Terraform attached
+# (hcloud_volume_attachment.announce_data, automount = true) is actually
+# mounted where inventory.yml says it is. Runs on the host, FIRST in this
+# role: before the drop-in below names `data_mount` and notifies "Restart
+# docker", and before volume_mount writes daemon.json. A wrong data_mount
+# therefore stops the play with no change on the host, and no pending
+# Docker restart that force_handlers (site.yml) would run at the end.
+#
+# `automount = true` in Terraform makes Hetzner's cloud-init integration
+# mount the volume on first boot, but this role does not simply trust that:
+# it asserts the mountpoint is a real mount, so a broken automount fails
+# the playbook loudly here rather than letting RequiresMountsFor silently
+# block Docker from ever starting (a systemd unit waiting forever on a
+# mount that will never appear looks identical, from a monitoring
+# standpoint, to "the playbook hasn't gotten here yet" — better to fail in
+# Ansible's own output). Read-only, so it also runs under --check.
+- name: Confirm the data volume is mounted
+  ansible.builtin.command: findmnt --noheadings {{ data_mount }}
+  changed_when: false
+  check_mode: false
+  register: volume_mount_findmnt_result
+  failed_when: volume_mount_findmnt_result.rc != 0
+
 - name: Upgrade the host CA trust package
   ansible.builtin.apt:
     name: ca-certificates

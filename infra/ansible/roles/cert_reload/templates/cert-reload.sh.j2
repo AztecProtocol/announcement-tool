@@ -180,12 +180,19 @@ fail() {
 # It runs on every run, also when nothing changed: a renewal that Caddy
 # never managed shows up here as a shrinking day count long before the
 # certificate expires. The alert threshold is relative to the
-# certificate's own lifetime (notAfter - notBefore): one sixth of it, but
-# never less than 3 days. Caddy renews with about a third of the lifetime
-# left, so under a sixth means renewal has failed for half of that renewal
-# window. For today's 90-day Let's Encrypt certificates that is 15 days;
-# for a 45-day certificate 7.5 days; a fixed number of days would alert
-# falsely once Let's Encrypt shortens its certificates.
+# certificate's own lifetime: one sixth of it, but never less than 3 days.
+# The lifetime is notAfter - notBefore + 1 second, because X.509 validity
+# includes both ends: a 90-day Let's Encrypt certificate has notAfter 90
+# days minus 1 second after notBefore, and must count as 90 days, not 89.
+# Caddy renews with about a third of the lifetime left, so under a sixth
+# means renewal has failed for half of that renewal window. For today's
+# 90-day Let's Encrypt certificates that is 15 days; for a 45-day
+# certificate 7.5 days. A fixed number of days would alert falsely once
+# Let's Encrypt shortens its certificates. The relative threshold removes
+# most of those false alerts, not all: for a short-lived certificate of
+# about 6 days, one sixth is 1 day, so the 3-day floor applies, and a
+# certificate that Caddy renews on schedule (with about 2 days left) can
+# still alert on the runs before that renewal.
 #
 # Where it runs: on this host, with the host's openssl, against the
 # published port on 127.0.0.1. The db image has no openssl (see the
@@ -228,9 +235,16 @@ EXPIRY_ALERT_FLOOR_DAYS=3
 # subshell, or the summary is lost.
 SERVED_PROBLEMS=""
 SERVED_CERT_SUMMARY=""
+# Seconds as days with one decimal, truncated toward zero: 1296000 -> 15.0,
+# 1295999 -> 14.9, -43200 -> -0.5.
+fmt_days() {
+  local s="$1" sign=""
+  if [ "$s" -lt 0 ]; then sign="-"; s=$(( -s )); fi
+  printf '%s%d.%d' "$sign" $(( s / 86400 )) $(( (s % 86400) * 10 / 86400 ))
+}
 check_served_cert() {
   local problems="" served start_epoch end_epoch now_epoch days_left verify_out verify_exit ca_hash
-  local lifetime_s threshold_s threshold_days
+  local lifetime_s left_s threshold_s threshold_days
 
   case "$(openssl version 2>/dev/null)" in
     "OpenSSL 1.1.1"* | "OpenSSL 3."*) ;;
@@ -257,14 +271,18 @@ check_served_cert() {
   start_epoch="$(date -u -d "$(printf '%s\n' "$served" | openssl x509 -noout -startdate | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
   end_epoch="$(date -u -d "$(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
   now_epoch="$(date -u +%s)"
-  days_left=$(( (end_epoch - now_epoch) / 86400 ))
-  lifetime_s=$(( end_epoch - start_epoch ))
+  # Validity includes the notAfter second: +1 in both figures.
+  left_s=$(( end_epoch + 1 - now_epoch ))
+  lifetime_s=$(( end_epoch + 1 - start_epoch ))
   threshold_s=$(( lifetime_s / EXPIRY_ALERT_DIVISOR ))
   if [ "$threshold_s" -lt $(( EXPIRY_ALERT_FLOOR_DAYS * 86400 )) ]; then
     threshold_s=$(( EXPIRY_ALERT_FLOOR_DAYS * 86400 ))
   fi
-  # One decimal, for the message only (7.5 for a 45-day certificate).
-  threshold_days="$(( threshold_s / 86400 )).$(( (threshold_s % 86400) * 10 / 86400 ))"
+  # One decimal, truncated, for the messages only (7.5 for a 45-day
+  # certificate). Both figures use the same rounding, so an alert always
+  # reads "expires in X days, less than Y days" with X not above Y.
+  days_left="$(fmt_days "$left_s")"
+  threshold_days="$(fmt_days "$threshold_s")"
   if ! printf '%s\n' "$served" | openssl x509 -noout -checkend "$threshold_s" >/dev/null 2>&1; then
     problems="${problems}the certificate Postgres serves expires in $days_left days ($(printf '%s\n' "$served" | openssl x509 -noout -enddate | cut -d= -f2)), less than $threshold_days days (one sixth of its $(( lifetime_s / 86400 ))-day lifetime, at least $EXPIRY_ALERT_FLOOR_DAYS); Caddy has not renewed it, or this script did not install the renewal — check the caddy logs and $LOG_FILE
 "

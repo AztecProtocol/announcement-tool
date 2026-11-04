@@ -284,8 +284,8 @@ The first role, `preflight`, changes nothing: on the machine running
 Ansible it checks for GNU rsync 3.x (macOS's `/usr/bin/rsync` is
 openrsync and is refused; see "Before you start" in `DEPLOY.md`), for
 uncommitted changes to tracked files and for a tracked `.rsync-filter`,
-and warns (without stopping) when the checkout is not the current
-`main`. Only then do the roles that change the host run. `compose_up`
+and stops when the checkout is not the current `main` (unless
+`-e announce_deploy_not_main=true` is given). Only then do the roles that change the host run. `compose_up`
 copies only the files git tracks to `/opt/announce/repo`,
 deletes every other file there, and writes the deployed commit to
 `/opt/announce/repo/DEPLOYED_COMMIT` (commit and branch). The play
@@ -616,9 +616,12 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    causes, and a fifth, forge-by-username path found the same day). It is
    a working control on a given VM only after the Ansible run passes its
    jail checks and the "Check that fail2ban bans" section of
-   [`DEPLOY.md`](DEPLOY.md) has been done there in ban mode. **The first
-   deployment runs it in watch mode** (`announce_fail2ban_mode: watch`, the
-   role's default): the jail records each would-be ban in its status and in
+   [`DEPLOY.md`](DEPLOY.md) has been done there in ban mode. **This
+   repository deploys it in ban mode** (`announce_fail2ban_mode: ban` in
+   `ansible/group_vars/all.yml`, which applies to every inventory and
+   overrides the role default, `watch`). A new VM or a rebuild that wants a
+   watch period first must ask for it with `-e announce_fail2ban_mode=watch`
+   on its first runs. In watch mode the jail records each would-be ban in its status and in
    `/var/log/fail2ban.log` but blocks nothing, so **it does not protect the
    port until it is switched to `ban`**. Watch mode exists so that real
    traffic can show, before any ban, that the application's own Netlify

@@ -402,11 +402,13 @@ and nothing else AND rejects a forged TAB continuation line, the ban is on the `
 mirror leaves a fresh state stamp (`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is
 proven by "Check that fail2ban bans" in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the
 jail there as unproven.
-*A new deployment runs the jail in watch mode, and watch mode does not protect the port.* The role default of
-`announce_fail2ban_mode` is `watch` (production sets `ban` in `infra/ansible/group_vars/all.yml` since
-2026-11-04, after its watch period): the jail counts and decides exactly as in ban mode, but its action is
-fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status, `/var/log/fail2ban.log`) and no
-firewall rule changes. The port has no rate limit from fail2ban until the variable is set to `ban`. Watch mode
+*This repository deploys the jail in ban mode. Watch mode, when it is asked for, does not protect the port.*
+`infra/ansible/group_vars/all.yml` sets `announce_fail2ban_mode: ban` for every inventory (since 2026-11-04,
+after a watch period from 2026-10-22); it overrides the role default, `watch`. A new VM or a rebuild therefore
+bans from its first run. A deployment that wants a watch period first must ask for it with
+`-e announce_fail2ban_mode=watch` on its first runs. In watch mode the jail counts and decides exactly as in ban
+mode, but its action is fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status,
+`/var/log/fail2ban.log`) and no firewall rule changes: the port has no rate limit from fail2ban. Watch mode
 exists so that real traffic shows, before any ban, that the application's Netlify addresses never appear among
 the would-be bans. The switch to `ban` clears the addresses recorded in watch mode first; without that,
 fail2ban restores each unexpired ban from its database at start and a watched address would be blocked at once
