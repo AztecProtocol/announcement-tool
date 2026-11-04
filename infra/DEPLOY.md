@@ -515,8 +515,8 @@ exactly `verify-full`, and the database refuses every login without TLS):
   start if either is present.
 - `DATABASE_SSL_ROOT_CERT` is the Let's Encrypt root certificate from step 5.
   It is not the VM's own certificate, and not anything from Caddy's storage.
-- `ENABLED_CHANNELS` must not contain `signal` until a Signal number is
-  registered. The app refuses to start otherwise.
+- `ENABLED_CHANNELS` must not contain `signal`. The app refuses to start
+  on Netlify when it does, even with a registered Signal number.
 - `openssl rand -base64 32` can emit `/` and `+` in its output. Both must be
   percent-encoded if you place this password into a `DATABASE_URL`'s
   userinfo section. An unencoded `/` or `+` there produces an opaque

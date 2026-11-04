@@ -109,23 +109,29 @@ procedure that live outside Terraform.
 **Provisions:** Postgres (port 5432, publicly reachable — see the
 security note below), `signal-cli-rest-api` (not published to the host
 directly), and Caddy (port 443). Caddy obtains and renews the Let's
-Encrypt certificate for `db.announce.aztec.network` and reverse-proxies to
-the Signal sidecar behind a shared-secret gate. The VM also runs a
+Encrypt certificate for `db.announce.aztec.network` and reverse-proxies one
+endpoint of the Signal sidecar, `POST /v2/send`, behind a shared-secret
+gate. Every other path and method returns 403, with the secret or without
+it. The VM also runs a
 nightly backup job. See `infra/docker-compose.split.yml`'s top comment
 and `infra/Caddyfile.split` for exactly what runs and why.
 
 **Does not provision:**
 - **The app or the worker.** Those run on Netlify. This VM has no `app`,
   `worker`, or `migrate` service.
-- **A registered Signal account.** `signal-cli-rest-api` comes up, but
-  nothing registers a phone number with it. Signal is supported by this
-  stack: the sidecar, the Caddy gate, and `signal-receive`'s keep-alive
-  job all exist. But Signal is not usable until a number is registered by
-  hand. That registration procedure is not documented in this repository.
-  It needs a phone number registered with `signal-cli` against the
-  running sidecar (`signal-cli-rest-api`'s own docs cover the `register`/
-  `verify` flow); do that by hand against this VM's sidecar before adding
-  `signal` to Netlify's `ENABLED_CHANNELS` (see step 7).
+- **A registered Signal account, or Signal delivery from Netlify.**
+  `signal-cli-rest-api` comes up, but nothing registers a phone number
+  with it, and that procedure is not documented in this repository
+  (`signal-cli-rest-api`'s own docs cover the `register`/`verify` flow).
+  Registration cannot go through Caddy: the gate passes only
+  `POST /v2/send`. Run it on the VM against `http://signal:8080` on the
+  compose network (for example from a throwaway container on that
+  network), never by widening the Caddy gate.
+  Even with a number registered, Signal is not a channel the Netlify app
+  can run today: `src/core/production-guard.ts` refuses to start the
+  Netlify shape when `ENABLED_CHANNELS` names `signal`, with or without a
+  registered number. Turning Signal on for Netlify needs a code change to
+  that guard first, not only a configuration change.
 - **DNS.** Terraform does not manage the `aztec.network` nameservers. The
   A record is a manual step (step 3).
 
@@ -515,7 +521,7 @@ environment configuration, not in this repo:
 | `DATABASE_SSL_ROOT_CERT` | The ISRG Root X1 certificate. Download it from `https://letsencrypt.org/certs/isrgrootx1.pem` and paste its PEM content directly, the full text from `-----BEGIN CERTIFICATE-----` through `-----END CERTIFICATE-----`. | Required whenever `DATABASE_SSL_MODE=verify-full`. Without it, verification falls back to the system trust store. That gives a false sense of security, not a lesser one. Warning: do not paste the VM's own certificate, and do not paste anything out of Caddy's ACME storage. Postgres serves the leaf certificate for `db.announce.aztec.network` (the file `cert-reload.sh.j2` copies out of Caddy's storage into `server.crt`). That is what the client receives on the wire, not what it verifies against. TLS verification checks the leaf against its issuer. The issuer of a Let's Encrypt leaf is Let's Encrypt's own root, ISRG Root X1. ISRG Root X1 is a fixed, long-lived certificate that does not change across renewals. Pasting the leaf, `server.crt`, or anything Caddy stores fails immediately with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. The correct value is the root CA, obtained independently of this VM. On Netlify this value must be the inline PEM value, not a path: a serverless function has no filesystem to hold a CA file on. `resolveCaFile` (`src/db/connect.ts`) detects inline PEM by its `-----BEGIN CERTIFICATE-----` header and uses it directly. Anything that does not start with that header is instead treated as a filesystem path and read from disk. That form is used elsewhere on this host and by local dev, where a real file naturally exists (for example, `infra/dev/certs/ca.crt` locally; on the VM itself, this same ISRG Root X1 PEM, not anything derived from Caddy's storage). If Netlify's UI flattens the pasted value's newlines into literal `\n` characters, `resolveCaFile` detects and un-escapes that automatically. This is a known failure mode for certificates pasted through some web UIs, not something you need to work around by hand. |
 | `SIGNAL_API_BASE` | `https://db.announce.aztec.network` | Reaches the Signal sidecar through Caddy's reverse proxy, not directly. The sidecar itself is never published to the host. |
 | `SIGNAL_API_SECRET` | The same value as `ANNOUNCE_SIGNAL_SECRET` in `/opt/announce/.env` on the VM. | Sent as the `x-announce-signal-secret` header (`src/core/signal-auth.ts`) and checked by `infra/Caddyfile.split`'s gate. The two values must match exactly, or every Signal request returns 403. |
-| `ENABLED_CHANNELS` | For example `webhook,discord,telegram,email`. Must not include `signal`. | Netlify has no Signal account registered yet (step 0). `src/core/production-guard.ts`'s startup guard refuses to boot the Netlify shape if `ENABLED_CHANNELS` is unset (which defaults to all five, including Signal) or explicitly names `signal`. Add `signal` here only after a real number is registered, and after `SIGNAL_API_SECRET`/`SIGNAL_API_BASE` are both live and verified. |
+| `ENABLED_CHANNELS` | For example `webhook,discord,telegram,email`. Must not include `signal`. | `src/core/production-guard.ts`'s startup guard refuses to boot the Netlify shape if `ENABLED_CHANNELS` is unset (which defaults to all five, including Signal) or names `signal`. The guard does not look at whether a number is registered, so adding `signal` here stops the app from starting in every case. Signal on Netlify needs a change to that guard first (see step 0). |
 
 **Verify:** after deploying with these set, confirm the Netlify build and
 runtime logs show no `production-guard` startup failure, and that a real
@@ -871,7 +877,11 @@ What was proven, with real Docker containers: TLS handshakes against both the bo
 certificates; certificate rejection with a wrong CA; the Signal proxy's
 fail-closed behavior (missing header, wrong header, unset secret — all
 return 403, and `docker compose up` itself refuses to start without
-`ANNOUNCE_SIGNAL_SECRET` set); the cert-reload hook firing end-to-end
+`ANNOUNCE_SIGNAL_SECRET` set); the Signal proxy's path gate (2026-11-04:
+with the correct header, `/v1/register/…`, `/v1/qrcodelink`,
+`/v1/devices/…`, `/v1/accounts`, `/v1/receive/…`, `GET /v2/send` and
+`/v2/send/` all return 403 and never reach the sidecar, while
+`POST /v2/send` does, always forwarded as exactly `/v2/send`); the cert-reload hook firing end-to-end
 against a seeded certificate, including its ambiguous-multi-issuer
 refusal, incomplete-pair detection, and rejected-SIGHUP detection (a
 deliberately mismatched key, confirmed via `openssl s_client` that

@@ -69,7 +69,8 @@ Netlify or Hetzner, and a compromised publisher *pair* acting in collusion.
    `infra/postgres/pg_hba.conf`: TLS only, the superuser never from a public address).
 4. **Worker → third-party channel APIs** (Discord/Telegram/Signal/ESP) and **worker → subscriber webhooks**
    (the SSRF boundary, `src/core/safe-url.ts`).
-5. **App → Signal sidecar** on the VM (`x-announce-signal-secret` shared secret).
+5. **App → Signal sidecar** on the VM (`x-announce-signal-secret` shared secret; Caddy passes only
+   `POST /v2/send`, so the secret never reaches the account endpoints).
 6. **Netlify scheduled/background function → `/tick`** (`src/core/tick-auth.ts` shared secret).
 
 ---

@@ -14,8 +14,8 @@
 # only Postgres (fronted by nothing — clients speak the Postgres wire
 # protocol directly to the published 5432 port, not through Caddy) and
 # signal-cli-rest-api. So this Caddy instance has exactly one job: terminate
-# TLS for db.announce.aztec.network and reverse-proxy to the Signal sidecar,
-# gated by a shared secret.
+# TLS for db.announce.aztec.network and reverse-proxy one endpoint of the
+# Signal sidecar (POST /v2/send), gated by a shared secret.
 #
 # Do not add a /admin block, a Tailscale-User-Login strip, or any of
 # main's public-route list here. There is nothing on this host for them to
@@ -104,7 +104,8 @@
 # express the latter directly).
 #
 # @authorized matches only when the incoming header equals that value (or
-# the real secret, once set); handle @authorized reverse-proxies; the
+# the real secret, once set) AND the request is POST /v2/send; handle
+# @authorized reverse-proxies; the
 # catch-all handle{} below 403s everything else — missing header, wrong
 # value, and the standalone-Caddyfile sentinel-mismatch case, all the
 # same path.
@@ -135,16 +136,35 @@
 
 	encode zstd gzip
 
-	@authorized header x-announce-signal-secret {$ANNOUNCE_SIGNAL_SECRET:__announce_signal_secret_unset__}
+	# Only the one call the app makes: POST /v2/send (src/adapters/signal.ts).
+	# All matchers in this block must match. signal-cli-rest-api has no
+	# authentication of its own, and every other endpoint is an account
+	# operation (register, verify, link a device, list or remove accounts,
+	# read incoming messages), so a leaked secret must not reach them.
+	# signal-receive polls GET /v1/receive directly over the compose network
+	# (http://signal:8080), not through this Caddy, so it needs no rule here.
+	# Register a number from the VM itself, never through this proxy — see
+	# infra/README.md step 0.
+	@authorized {
+		method POST
+		path_regexp ^/v2/send$
+		header x-announce-signal-secret {$ANNOUNCE_SIGNAL_SECRET:__announce_signal_secret_unset__}
+	}
 
 	handle @authorized {
+		# The matcher above sees the cleaned path, so /v2//send or
+		# /v1/../v2/send also match it. Forward the one canonical URI, with
+		# no query, so the sidecar never receives a raw path that differs
+		# from the one that was checked.
+		rewrite * /v2/send?
 		reverse_proxy signal:8080
 	}
 
 	# Catch-all: anything that didn't match @authorized above — missing
-	# header, wrong value, or ANNOUNCE_SIGNAL_SECRET unset. It is kept last
-	# and unconditional so there is no path through this Caddyfile that
-	# reaches the sidecar without the check above.
+	# header, wrong value, ANNOUNCE_SIGNAL_SECRET unset, another method, or
+	# any path other than /v2/send. It is kept last and unconditional so
+	# there is no path through this Caddyfile that reaches the sidecar
+	# without all the checks above.
 	handle {
 		error 403
 	}
