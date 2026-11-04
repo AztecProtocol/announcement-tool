@@ -338,7 +338,7 @@ If none of the three resolves an identity, the admin layout renders an access-de
 
 **Required before any Netlify cutover:** send `/admin` a request with the internal auth header hand-set to an arbitrary identity, and confirm access is denied. `middleware.ts` has no automated test coverage of this path, because it requires a live Auth0 tenant to exercise end to end. This check has not been run against a real deployment.
 
-**Known gap, not yet implemented:** Next 16.2.12 deprecates `middleware.ts` in favor of `proxy.ts`. Migrating is a separate task. This repository keeps `middleware.ts` as documented above.
+**Known gap, not yet implemented:** Next 16 (still in 16.4.5) deprecates `middleware.ts` in favor of `proxy.ts`. Migrating is a separate task. This repository keeps `middleware.ts` as documented above.
 
 ### Startup safety checks
 
