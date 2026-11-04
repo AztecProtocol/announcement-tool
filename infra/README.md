@@ -849,6 +849,13 @@ relying on them:
   sources were addresses on Docker bridges of the test host, not real
   internet or Tailscale traffic, and the refused-login lines were checked
   with `fail2ban-regex` 1.0.2, not with the live jail.
+- **The 10 s `authentication_timeout` on the real VM.** Proven on
+  2026-11-04 against a throwaway `postgres:16-alpine` container with the
+  exact compose `db` command: a TCP client that sends nothing, and one
+  that stops after the TLS request, are both dropped after 10.0 s (60.0 s
+  before the setting), and a `verify-full` TLS login still works.
+  `max_connections` stays at the default 100; the reason is in the
+  comment on the setting in `docker-compose.split.yml`.
 - **A full, non-syntax-check `ansible-playbook` run against a live
   host.** Only `--syntax-check` and `ansible-lint` (clean at the
   `production` profile) were run. There was no real inventory host to

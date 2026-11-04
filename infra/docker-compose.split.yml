@@ -161,6 +161,32 @@ services:
       # starts with it unchanged (checked 2026-11-04).
       - -c
       - hba_file=/etc/postgresql/announce/pg_hba.conf
+      # A client that opens TCP to 5432 and then sends nothing (or stalls
+      # in the TLS handshake or the password exchange) holds a backend
+      # process and a connection slot until this timeout. The default is
+      # 60 s; 10 s is plenty for a real client (a TLS login from Netlify
+      # takes well under a second) and cuts by six the time a stalled
+      # client holds a slot. Checked 2026-11-04 on a throwaway container
+      # with this command: a raw TCP client that sends nothing is dropped
+      # after 10.0 s (60.0 s without this line), and a TLS login still
+      # works. Postgres logs nothing for a client that sent no bytes, so
+      # this is not visible to fail2ban; the timeout is the only limit.
+      #
+      # max_connections stays at the default 100 (3 kept for superusers
+      # by superuser_reserved_connections). Who connects: each warm
+      # Netlify instance of the web app holds a pool of up to 5
+      # (src/web/db.ts), each tick-background run up to 4
+      # (netlify/functions/tick-background.ts, closed at the end of the
+      # run), the backup job 1 at a time (scripts/backup.sh runs pg_dump
+      # and psql one after the other), cert-reload 1 (its loopback check),
+      # and an owner script or psql session 1 or 2. For a tool that posts
+      # a few announcements a month, that is far below 97, so a raise is
+      # not needed. A cut is not needed either: the limit has been 100
+      # since the first deploy, and a lower one would only bring the
+      # `too many clients` error closer for a burst of web traffic.
+      # Revisit if Postgres logs `sorry, too many clients already`.
+      - -c
+      - authentication_timeout=10s
       # log_line_prefix with %h (client host address) matters for
       # infra/ansible/roles/fail2ban's jail. It is not a cosmetic logging
       # preference. Verified directly against a real postgres:16-alpine

@@ -303,7 +303,10 @@ were not committed (`yes` only after a deploy with
 > so `docker compose up` RECREATES the `db` container on this run: a restart
 > of a few seconds, once, with the data volume kept. From then on Postgres
 > refuses every login without TLS, and every login of the owner `announce`
-> from a public address. See
+> from a public address. The same change to the `db` command also sets
+> `authentication_timeout=10s` (a client that connects and sends nothing is
+> dropped after 10 s, not 60 s); it needs no step of its own and adds no
+> second restart. See
 > [Before the first run with the login rules](#before-the-first-run-with-the-login-rules).
 
 The first run installs the `fail2ban` jail for the database port in watch
