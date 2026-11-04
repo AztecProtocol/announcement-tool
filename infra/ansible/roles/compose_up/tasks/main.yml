@@ -165,6 +165,18 @@
       commit: {{ compose_up_git_head.stdout }}
       uncommitted changes to tracked files: {{ 'yes (deployed with announce_allow_dirty_deploy=true)' if compose_up_git_status.stdout | length > 0 else 'no' }}
 
+# The db container reads infra/postgres/pg_hba.conf as uid 70 (postgres),
+# not as root, through a read-only bind mount (docker-compose.split.yml).
+# The sync keeps the modes of the operator's checkout, so a checkout made
+# with umask 077 arrives as 0600 root-readable only, and Postgres then
+# refuses to start ("could not open file .../pg_hba.conf: Permission
+# denied", checked 2026-11-04). The file holds no secret.
+- name: Let Postgres read its login rules
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/repo/infra/postgres"
+    mode: "u=rwX,go=rX"
+    recurse: true
+
 # Symlinks, not copies: `docker compose` resolves a relative build context
 # (docker-compose.split.yml's `backup`/`signal-receive` use `./repo`)
 # against the project directory it is invoked from, not against the

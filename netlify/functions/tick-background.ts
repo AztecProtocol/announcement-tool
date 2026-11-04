@@ -34,7 +34,7 @@
  */
 import { loadEnv } from '../../src/env.js';
 loadEnv();
-import { checkEnvironment } from '../../src/core/production-guard.js';
+import { checkEnvironment, guardEnvFromProcess } from '../../src/core/production-guard.js';
 import { assertPublishersConfigured } from '../../src/core/identity.js';
 import { tickSecretMatches } from '../../src/core/tick-auth.js';
 import { runTick } from '../../src/worker/tick.js';
@@ -55,18 +55,10 @@ export default async (req: Request): Promise<Response | void> => {
   // This function only ever runs on the Netlify deployment — the VM's
   // equivalent is src/worker/main.ts, which sets DEPLOY_TARGET=vm. Hardcoding
   // 'netlify' here is a fact about which binary this is, matching that.
-  const guardEnv = {
-    deployTarget: 'netlify' as const,
-    adminEmail: process.env.ADMIN_EMAIL,
-    hostname: process.env.HOSTNAME,
-    publicBaseUrl: process.env.PUBLIC_BASE_URL,
-    allowInsecureDev: process.env.ANNOUNCE_ALLOW_INSECURE_DEV,
-    auth0Issuer: process.env.AUTH0_ISSUER ?? (process.env.AUTH0_DOMAIN ? `https://${process.env.AUTH0_DOMAIN}/` : undefined),
-    auth0Audience: process.env.AUTH0_AUDIENCE ?? process.env.AUTH0_CLIENT_ID,
-    auth0ClientSecret: process.env.AUTH0_CLIENT_SECRET,
-    sessionSecret: process.env.SESSION_SECRET,
-    enabledChannels: process.env.ENABLED_CHANNELS,
-  };
+  // Every other field comes from guardEnvFromProcess, the same reader the
+  // web app's start hook uses, so a check added there (DATABASE_SSL_MODE,
+  // for example) cannot be missed here.
+  const guardEnv = { ...guardEnvFromProcess(), deployTarget: 'netlify' as const };
   const problems = checkEnvironment(guardEnv);
   if (problems.length > 0) {
     console.error('tick-background: refusing to run, unsafe production configuration.');

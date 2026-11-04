@@ -65,7 +65,9 @@ Install `terraform`, `ansible`, `psql`, `dig` and `openssl` on the machine you
 are working from. Also install this repo's own Node dependencies
 (`npm install`) — steps 6 and 7 run `npm run migrate` and
 `npm run seed:publisher` from here, not on the VM. The VM has no Node
-runtime and no `npm`.
+runtime and no `npm`. These commands log in as the database owner, and the
+owner can log in only over the tailnet: see
+[Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet).
 
 ---
 
@@ -294,6 +296,16 @@ were not committed (`yes` only after a deploy with
 > data volume is kept, so no data is lost; the site may see a brief
 > connection error during the restart. Later runs do not recreate it again.
 
+> **Note — the first run after 2026-11-04 (database login rules) restarts
+> Postgres once. On a VM that already serves the site, do the pre-flight
+> first.** The `db` service now reads its login rules from
+> `infra/postgres/pg_hba.conf` (a new mount and a new `-c hba_file=` flag),
+> so `docker compose up` RECREATES the `db` container on this run: a restart
+> of a few seconds, once, with the data volume kept. From then on Postgres
+> refuses every login without TLS, and every login of the owner `announce`
+> from a public address. See
+> [Before the first run with the login rules](#before-the-first-run-with-the-login-rules).
+
 The first run installs the `fail2ban` jail for the database port in watch
 mode: it records who it would ban and blocks nobody. See
 [Before the first run with the live jail](#before-the-first-run-with-the-live-jail)
@@ -364,17 +376,25 @@ means the app cannot connect. Do not continue.
 Run these from your own machine (the one with this repo checked out and
 `npm install` already run — see "Before you start"), not on the VM. There is
 no Node runtime there. Stay in the repo root — the same directory as step 5,
-with both `package.json` and `isrgrootx1.pem` in it. Both commands below go
-over the internet to `db.announce.aztec.network:5432`, so both must use
-verified TLS.
+with both `package.json` and `isrgrootx1.pem` in it.
+
+The commands in steps 6 and 7 log in as the owner `announce`, and Postgres
+accepts the owner only over the tailnet. First do method A of
+[Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet)
+(the `/etc/hosts` line), and remove that line when step 7 is done. The
+commands then reach `db.announce.aztec.network:5432` over the tailnet, and
+must still use verified TLS: Postgres refuses a login without TLS, and only
+`verify-full` proves that the server is the real one.
 
 Warning: do not drop `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` (for the
 `npm run` commands) or `PGSSLMODE`/`PGSSLROOTCERT` (for `psql`) to "simplify"
-this. Without them the database owner's password — the most powerful
-credential in this system — crosses the internet unverified, or in plain
-text, and `src/db/connect.ts` fails open on a missing value rather than
-refusing to run: forgetting one of these variables produces no error, only
-a silent unverified connection.
+this. Without `DATABASE_SSL_MODE`, `src/db/connect.ts` does not use TLS,
+and the server refuses the login (`no pg_hba.conf entry ... no
+encryption`) before any password or SQL is sent; that refusal also counts
+for `fail2ban`. Without `PGSSLMODE`, `psql` uses `prefer`: an encrypted
+connection that does not verify the server, with no error. Whoever stands
+in the path then reads the SQL, including the new `announce_app` password
+in the `alter role` command below.
 
 Set both once, so there is one place to get this right instead of four:
 
@@ -451,7 +471,10 @@ nothing else in this system depends on the old value.
 The app refuses to start until at least one publisher exists. Run this from
 the same machine, same directory, and same session as step 6 — the
 `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` you exported there are still in
-effect.
+effect, and so is the `/etc/hosts` line for the tailnet. Remove that line
+when this step is done (see
+[Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet),
+item 6).
 
 ```sh
 DATABASE_URL='postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce' \
@@ -484,7 +507,9 @@ repository.
 | `DISCORD_BOT_TOKEN` | Optional. The token of the Foundation's "Aztec Announcements Publisher" Discord bot. Leave it out and posts are delivered but not published to following servers. The bot needs View Channel, Send Messages, Manage Messages and Read Message History on each announcement channel; see the README. |
 | `DEPLOY_TARGET` | `netlify` |
 
-Four rules that cause silent failures if broken:
+Four rules that cause silent failures if broken (a fifth, `DATABASE_SSL_MODE`,
+is checked: on `DEPLOY_TARGET=netlify` the app refuses to start unless it is
+exactly `verify-full`, and the database refuses every login without TLS):
 
 - Do not put `sslmode` or `sslrootcert` in `DATABASE_URL`. The app refuses to
   start if either is present.
@@ -502,6 +527,175 @@ Netlify also needs the Auth0 and session variables. The root
 
 **Check:** deploy, then confirm the Netlify logs show no startup failure, and
 that the admin page signs you in rather than showing "Admin is unavailable".
+
+---
+
+## Before the first run with the login rules
+
+Do this once, before the first Ansible run that installs
+`infra/postgres/pg_hba.conf` on a VM that already serves the site, and
+before Netlify deploys the commit that adds it. A new VM that Netlify does
+not use yet needs only the tailnet setup in item 4.
+
+After that run, Postgres accepts a network login only with TLS, and the
+owner `announce` only from the tailnet, from the VM's own compose network
+(the `backup` job) or from inside the `db` container. Every other login is
+refused with `no pg_hba.conf entry for host ...`. `fail2ban` counts that
+message as a failed login. Warning: in ban mode, a site that still connects
+without TLS fails every query and also gets Netlify's egress addresses
+banned from the database.
+
+**Pre-flight:**
+
+1. In the Netlify UI (Site configuration, Environment variables), check
+   these values in every deploy context that sets `DEPLOY_TARGET=netlify`
+   (Production, and Deploy Previews or Branch deploys if they use this
+   database), with a scope that includes Functions:
+   - `DATABASE_SSL_MODE` is exactly `verify-full`.
+   - `DATABASE_SSL_ROOT_CERT` is set and starts with
+     `-----BEGIN CERTIFICATE-----` (step 8).
+   - `DATABASE_URL` logs in as `announce_app`, not `announce`, and has no
+     `sslmode` or `sslrootcert` in it.
+
+   From this commit on, the app also refuses to start on Netlify without
+   `DATABASE_SSL_MODE=verify-full` (`src/core/production-guard.ts`), so
+   this check is needed before Netlify deploys the commit, too.
+2. On the VM, look at who is connected now. Run it a few times, and load
+   `https://announce.aztec.network/archive` in between, because the site's
+   connections are short:
+
+   ```sh
+   docker compose -f /opt/announce/docker-compose.yml exec db      psql -U announce -d announce -c "select a.usename, a.client_addr, s.ssl from pg_stat_activity a join pg_stat_ssl s using (pid) where a.backend_type = 'client backend' and a.client_addr is not null"
+   ```
+
+   Every row from a public address must show `announce_app` and `ssl` = `t`.
+   A row with `announce` from a public address, or with `ssl` = `f`, is a
+   client that the new rules refuse. Find it and move it first. Rows from a
+   `172.` address are the VM's own containers and are fine.
+3. Know what restarts on this run: `db` is recreated once (a few seconds;
+   the site can show a brief database error). `fail2ban` restarts once,
+   because the text of its filter file changed. `caddy` restarts, as on
+   every run that changes a file. Nothing else restarts.
+4. Set up [Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet)
+   before you need it. After this run, `npm run migrate`,
+   `npm run seed:publisher`, `npm run setup:channel` and `psql` as `announce`
+   from a public address are refused.
+
+**After the run, check:**
+
+```sh
+tailscale ssh root@<name from step 1>   'cd /opt/announce && docker compose exec -T db psql -U announce -d announce -Atc "show hba_file" -c "select count(*) from pg_hba_file_rules where error is not null"'
+```
+
+The first line must be `/etc/postgresql/announce/pg_hba.conf`, the second
+`0`. Then load `https://announce.aztec.network/archive`, and run the query
+from item 2 again: the same rows, all `announce_app` with `ssl` = `t`.
+Then run one backup now
+([Off-host backups](#off-host-backups-on-hetzner-object-storage), item 3):
+it logs in as `announce` from the compose network and must still pass.
+
+Then prove that the owner is closed to the internet. From your machine,
+WITHOUT the `/etc/hosts` line from the tailnet section, try ONE owner login:
+
+```sh
+PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem" PGCONNECT_TIMEOUT=5   psql "postgres://announce:<POSTGRES_PASSWORD>@db.announce.aztec.network:5432/announce" -c 'select 1'
+```
+
+It must answer `no pg_hba.conf entry for host "<your public address>",
+user "announce", database "announce", SSL encryption`. Try it once only: it
+counts as a failed login for `fail2ban`.
+
+If the site fails after the run, the cause is almost always item 1. Fix
+the Netlify variable and redeploy, then clear any ban as described in
+step 6's caution.
+
+---
+
+## Run owner commands over the tailnet
+
+The owner `announce` is the database superuser. Postgres accepts it only
+from the tailnet (`100.64.0.0/10`), from the VM's compose network, or from
+inside the `db` container (`infra/postgres/pg_hba.conf`), and always with
+TLS for a network login. A public address gets
+`no pg_hba.conf entry for host ...`.
+
+This applies to every command that uses the owner password: steps 6 and 7
+(`npm run migrate`, `psql` as `announce`, `npm run seed:publisher`), and
+later `npm run setup:channel`, a password rotation, or any other `psql` as
+`announce`. Use method A for the `npm run` commands (the VM has no Node).
+Method B is enough for a plain SQL statement.
+
+Warning: a refused owner login counts as a failed login for `fail2ban`. In
+ban mode, five in ten minutes block your public address from port 5432 for
+ten minutes. If you see `no pg_hba.conf entry`, stop and fix the setup
+below. Do not try again and again. (Logins from the tailnet are never
+banned: `100.64.0.0/10` is in the jail's `ignoreip`.)
+
+### Method A: from your machine, over the tailnet
+
+You need to be a tailnet admin, as for `tailscale ssh` (the tailnet ACL
+lets `autogroup:admin` reach every port of `tag:announce`).
+
+1. Find the VM's tailnet address:
+
+   ```sh
+   tailscale ip -4 <name from step 1>
+   ```
+
+2. Point the database name at that address on your machine. Add one line
+   to `/etc/hosts`:
+
+   ```sh
+   echo '<tailnet address> db.announce.aztec.network' | sudo tee -a /etc/hosts
+   ```
+
+   Keep the name `db.announce.aztec.network` in every connection string.
+   The client checks the server certificate against the name in the
+   connection string, not against the address it connects to. The
+   certificate is for `db.announce.aztec.network`, so `verify-full` passes
+   on the tailnet address too. Warning: do not put the tailnet address or
+   the MagicDNS name in the connection string instead. The certificate does
+   not name them, and `verify-full` fails.
+
+3. Check that the name now points at the tailnet address:
+
+   ```sh
+   getent hosts db.announce.aztec.network                   # Linux
+   dscacheutil -q host -a name db.announce.aztec.network    # macOS
+   ```
+
+   On macOS, if the old address still shows, run
+   `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`.
+
+4. Check the path with one owner login, from the repo root (where
+   `isrgrootx1.pem` from step 5 is):
+
+   ```sh
+   PGSSLMODE=verify-full PGSSLROOTCERT="$PWD/isrgrootx1.pem"      psql "postgres://announce:<POSTGRES_PASSWORD from step 3>@db.announce.aztec.network:5432/announce"      -Atc "select inet_client_addr(), (select ssl from pg_stat_ssl where pid = pg_backend_pid())"
+   ```
+
+   The first value must start with `100.` (your machine's tailnet address)
+   and the second must be `t`. If you get `no pg_hba.conf entry for host`
+   followed by your public address, the `/etc/hosts` line is not in effect.
+
+5. Run the owner commands (steps 6 and 7, or the command you need) without
+   changes: they already use `db.announce.aztec.network`.
+
+6. When you are done, remove the line from `/etc/hosts`. Warning: while it
+   is there, this machine is not a valid "second machine" for
+   [Check that fail2ban bans](#check-that-fail2ban-bans): its failed logins
+   come from the tailnet, which the jail never bans.
+
+### Method B: on the VM, for SQL only
+
+```sh
+tailscale ssh root@<name from step 1>
+cd /opt/announce
+docker compose exec db psql -U announce -d announce
+```
+
+This uses the socket inside the `db` container and needs no password and
+no TLS. It cannot run the `npm run` commands.
 
 ---
 
@@ -699,6 +893,16 @@ You need a second machine with `psql` whose address may be blocked from the
 database for a short time. **Do not use the Netlify site, and do not use a
 machine or a network that needs the database.** A cloud shell or a phone
 hotspot is fine. Only port 5432 is blocked for that address, nothing else.
+The machine must reach the database over the internet, not the tailnet: no
+`/etc/hosts` line for `db.announce.aztec.network` (see
+[Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet)).
+The jail never bans a tailnet address.
+
+The test logs in as `announce_app` with TLS (`sslmode=require`), the one
+role and transport the database accepts from a public address, so a wrong
+password gives `password authentication failed`. Do not use the owner
+`announce` for this test: it gives `no pg_hba.conf entry` instead. That is
+also counted, but it is not the message steps 2 and 4 expect.
 
 1. On the VM, confirm the jail reads the log file:
 
@@ -1018,6 +1222,7 @@ step 3 is on the root disk and must be written again.
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
 | The app cannot log in to the database | Step 6's `alter role` did not run. The check returns `f`. |
+| A login fails with `no pg_hba.conf entry for host` | The login is not one the database accepts (`infra/postgres/pg_hba.conf`). `... no encryption` at the end: the client did not use TLS; on Netlify, `DATABASE_SSL_MODE` is not `verify-full`. `user "announce"` from a public address: owner commands must run over the tailnet, see [Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet). Each refusal counts as a failed login for `fail2ban`. |
 | The site cannot reach the database (connection refused or a timeout) right after a wrong `DATABASE_URL` or a wrong password was deployed | In ban mode, five failed logins in ten minutes make `fail2ban` block the address for ten minutes, and a Netlify address is treated like any other (in watch mode nothing is blocked, so the cause is the password alone). Correct the variable first. Then, on the VM, look at `sudo fail2ban-client status announce-postgres`: `Banned IP list:` shows the blocked addresses. Remove one with `sudo fail2ban-client set announce-postgres unbanip <address>`, or all of them with `sudo fail2ban-client unban --all` (this also clears the `sshd` jail, so an SSH address blocked for failed logins is unbanned at the same time). The same applies to your own machine after five mistyped passwords in `psql`. |
 | Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "does NOT put its ban ..." or "announce_fail2ban_mode is `watch`, but ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live, or (watch mode) its action could change the firewall. The message says which check failed and where to look. The port is not protected by `fail2ban` until the run passes, and in watch mode not after it either. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped two things: the pending Caddy restart, and the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. In `/opt/announce` run `sudo docker compose restart caddy`, then `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
@@ -1040,6 +1245,15 @@ unproven there:
 - **The log mirror for `fail2ban` under the real cron, and the weekly
   rotation of `/var/log/announce-postgres-auth.log`.** Both were proven
   against real Docker on a developer machine and in containers.
+- **The database login rules (`infra/postgres/pg_hba.conf`) on the VM.**
+  Proven on 2026-11-04 against throwaway `postgres:16-alpine` containers
+  with the exact compose `db` command, on an existing and on a new data
+  volume: TLS logins of `announce_app` from a public address, the owner from
+  the compose network (with `CREATE`/`DROP DATABASE`), from a tailnet-range
+  address and from inside the container work; plaintext logins and the
+  owner from a public address are refused. The public and tailnet sources
+  were host addresses on Docker bridges, not real internet or Tailscale
+  traffic. Owner access over the real tailnet (method A) has not run yet.
 
 [`README.md`](README.md) has the details of what was tested and how. Most of
 its list was written before 2026-09-04 and was not revised after that run.

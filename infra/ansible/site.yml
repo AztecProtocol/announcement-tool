@@ -6,11 +6,12 @@
 #   ansible-galaxy collection install -r requirements.yml
 #   ansible-playbook -i inventory.yml site.yml
 #
-# No tailnet on this deployment — see infra/terraform/vm.tf. Postgres
-# (5432) and Caddy (443) are exposed to the public internet on purpose;
-# TLS + the least-privilege announce_app DB role + fail2ban are what
-# protect them (infra/README.md, infra/docker-compose.split.yml's `db`
-# comment). That's why `fail2ban` and `cert_reload` are real roles here and
+# The tailnet carries operator access only (SSH, and the database owner's
+# logins) — see infra/terraform/vm.tf. Postgres (5432) and Caddy (443) are
+# exposed to the public internet on purpose, for Netlify; TLS + the login
+# rules in infra/postgres/pg_hba.conf + the least-privilege announce_app DB
+# role + fail2ban are what protect them (infra/README.md,
+# infra/docker-compose.split.yml's `db` comment). That's why `fail2ban` and `cert_reload` are real roles here and
 # not, as on the tailnet'd aztec-observability module, skipped entirely.
 #
 # Role order matters:

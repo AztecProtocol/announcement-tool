@@ -65,7 +65,8 @@ Netlify or Hetzner, and a compromised publisher *pair* acting in collusion.
 1. **Internet → Next.js middleware** (`middleware.ts`). The single boundary for admin identity.
 2. **Middleware → app** via the unsigned internal header `AUTH0_IDENTITY_HEADER`. Trusted *only* because
    step 1 of the middleware deletes every inbound copy first, unconditionally.
-3. **App → Postgres** (TLS, pinned root certs, `app_role`).
+3. **App → Postgres** (TLS, pinned root certs, `app_role`; server-side login rules in
+   `infra/postgres/pg_hba.conf`: TLS only, the superuser never from a public address).
 4. **Worker → third-party channel APIs** (Discord/Telegram/Signal/ESP) and **worker → subscriber webhooks**
    (the SSRF boundary, `src/core/safe-url.ts`).
 5. **App → Signal sidecar** on the VM (`x-announce-signal-secret` shared secret).
@@ -325,7 +326,26 @@ alert rather than silence.
 *Reviewer task:* grep every `console.*` and error path for interpolated config.
 
 **P38 — The app talks to Postgres over TLS against pinned root certificates, and fails loudly if they are
-unusable.** *Enforced:* `src/db/connect.ts`; *tested:* `test/db-connect.test.ts`, `test/db-tls.integration.test.ts`.
+unusable.** *Enforced:* `src/db/connect.ts`; on `DEPLOY_TARGET=netlify` the start guard
+(`src/core/production-guard.ts`) refuses to run unless `DATABASE_SSL_MODE=verify-full`, because `connect.ts`
+leaves TLS off when the variable is unset; the server refuses any network login without TLS (P44).
+*Tested:* `test/db-connect.test.ts`, `test/db-tls.integration.test.ts`, `test/production-guard.test.ts`.
+
+**P44 — The database superuser cannot log in from the internet, and no network login works without TLS.**
+The owner `announce` is the image's bootstrap superuser and cannot be demoted; a superuser can run
+`COPY ... FROM PROGRAM`, a shell in the `db` container. *Enforced:* `infra/postgres/pg_hba.conf`, read through
+`-c hba_file=` in `infra/docker-compose.split.yml`: `hostssl` only; `announce` only from the compose network
+(`samenet`, the backup job), the tailnet (`100.64.0.0/10`, owner scripts) and inside the container (socket and
+loopback, used by `cert-reload.sh.j2`); `announce_app` from any address, only to the `announce` database.
+No final `reject` line, so a refusal logs `no pg_hba.conf entry`, which the fail2ban filter counts (a `reject`
+line logs `pg_hba.conf rejects connection`, which it does not). *Evidence (2026-11-04, throwaway
+`postgres:16-alpine` with the exact compose command, not the VM):* every case checked with
+`pg_stat_activity.client_addr` and the log's `%h`; refused lines counted by `fail2ban-regex` 1.0.2, the `reject`
+line not counted; a data volume created before the change keeps its data. *Breaks if:* the port is published
+on IPv6 (Docker's proxy then hands the connection over from the bridge gateway, which is in `samenet`, so the
+owner gets in from the internet), the `db` service joins another network (`samenet` grows), a `host` (not
+`hostssl`) or wider `announce` line is added, or a final `reject` line is added (the jail stops counting
+these refusals).
 
 **P39 — The app's DB role is least-privilege** (`migrations/014_app_role.sql`) — no DDL, no ability to drop
 the audit log.
@@ -338,7 +358,8 @@ which carries a per-request nonce and so cannot be a static value.
 default, so the browser reports and blocks nothing. It becomes a control when `CSP_MODE=enforce` is set. See
 the end of this section.
 
-**P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd;
+**P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd; the
+Postgres superuser reachable only from the tailnet and the VM itself (P44);
 a username cannot forge a banned address. *What holds now, and what enforces it:* a client-supplied value
 cannot make fail2ban ban an address the caller chose. Two independent layers hold this. First, the mirror
 (`infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2`) keeps only lines that START as a real Postgres

@@ -581,20 +581,16 @@ fi
 
 # Live TLS proof: open a real encrypted connection to Postgres after the
 # SIGHUP and confirm it negotiates TLS. It connects over TCP to 127.0.0.1
-# from inside the db container, which the stock postgres:16-alpine
-# image's default pg_hba.conf trusts without a password (`host all all
-# 127.0.0.1/32 trust`, ahead of the catch-all scram-sha-256 rule —
-# checked directly against a real container; this script has no
-# business holding real application credentials, and doesn't need to
-# for a same-host loopback liveness check). This is an assumption about
-# the stock image, not something pinned by this deployment's own config:
-# if a future hardening pass mounts a custom pg_hba.conf over the
-# publicly exposed 5432 port (a plausible next step for exactly this
-# deployment) and removes or narrows that trust rule, this check starts
-# failing on every healthy reload and pages whoever reads
-# ALERT_EMAIL_TO daily. Whoever makes that change must either keep a
-# loopback trust/peer exception for 127.0.0.1, or give this script real
-# credentials and update this comment.
+# from inside the db container, which the deployment's own login rules
+# (infra/postgres/pg_hba.conf, `host all all 127.0.0.1/32 trust`) trust
+# without a password — this script has no business holding real
+# application credentials, and doesn't need to for a same-host loopback
+# liveness check. Checked on 2026-11-04 against a real container running
+# those rules: this exact command answers `t`. If that trust line is ever
+# removed or narrowed, this check starts failing on every healthy reload
+# and pages whoever reads ALERT_EMAIL_TO daily. Whoever makes that change
+# must either keep a loopback trust/peer exception for 127.0.0.1, or give
+# this script real credentials and update this comment.
 #
 # `PGSSLMODE=require` makes the connection itself fail outright
 # if the server cannot or will not negotiate TLS at all — catching a

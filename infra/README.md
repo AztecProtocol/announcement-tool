@@ -347,11 +347,21 @@ used from step 6 onward.
 **Run both commands from your own machine, not the VM.** There is no
 Node runtime, no `npm`, and no application code on this VM at all —
 `docker-compose.split.yml` has no `app`, `worker`, or `migrate` service,
-and `compose_up`'s repo sync deliberately excludes `node_modules`. The
-commands below go over the internet to
-`db.announce.aztec.network:5432`, so both must use verified TLS
-explicitly. This is different from the pre-split deployment shape, where
-the same commands ran over Tailscale against a private address.
+and `compose_up`'s repo sync deliberately excludes `node_modules`.
+
+**Run them over the tailnet.** The login rules
+(`infra/postgres/pg_hba.conf`) accept the owner `announce` only from the
+tailnet, from the VM's compose network, or from inside the `db` container,
+and every network login only with TLS. From a public address the owner gets
+`no pg_hba.conf entry for host ...`, which `fail2ban` also counts as a
+failed login. Map `db.announce.aztec.network` to the VM's tailnet address
+in `/etc/hosts` on your machine, as in "Run owner commands over the
+tailnet" in [`DEPLOY.md`](DEPLOY.md), and keep that name in every
+connection string: the certificate names `db.announce.aztec.network`, and
+the client checks the name in the connection string, not the address, so
+`verify-full` still passes. Remove the `/etc/hosts` line when you are done.
+The same applies to every later owner command (`npm run setup:channel`, a
+password rotation). Both commands still use verified TLS explicitly.
 
 **Apply `migrations/014_app_role.sql` first**, and every other pending
 migration, using the app's own migration entrypoint from a checkout of
@@ -374,11 +384,12 @@ DATABASE_URL='postgres://announce:<owner password>@db.announce.aztec.network:543
 `buildConnectionOptions`/`resolveCaFile`, the same TLS-enforcing path the
 app itself uses. `DATABASE_SSL_MODE=verify-full` plus an explicit
 `DATABASE_SSL_ROOT_CERT` is not optional here: this connection crosses
-the public internet, and `buildConnectionOptions`'s `case undefined`
-leaves `ssl` unset entirely if `DATABASE_SSL_MODE` is left unset — the
-same behavior local dev relies on, which would send the owner credential,
-the most powerful credential in this system, over the internet with no
-TLS at all, with no error. Exporting both once, as shown above, means
+the network, and `buildConnectionOptions`'s `case undefined` leaves `ssl`
+unset entirely if `DATABASE_SSL_MODE` is left unset — the same behavior
+local dev relies on. The database refuses that plaintext login
+(`no pg_hba.conf entry ... no encryption`), so the owner password does not
+get through, but only `verify-full` proves that the server you send it to
+is the real one. Exporting both once, as shown above, means
 there is one place to get this right instead of retyping it on every
 command in this section.
 
@@ -404,10 +415,12 @@ Warning: psql's default `sslmode` is `prefer`. It negotiates TLS
 opportunistically, but falls back to plaintext silently, and never
 verifies the server either way. Running this command without the
 `PGSSLMODE=verify-full PGSSLROOTCERT=...` prefix shown above would send
-the freshly generated password across the internet as literal plaintext,
-inside the SQL statement itself. This is worse than a plaintext
-connection alone, because the text being sent is the secret you are
-trying to protect.
+the freshly generated password, inside the SQL statement itself, to a
+server that was never verified: whoever stands in the path can read it.
+(The plaintext fallback no longer gets through: the login rules in
+`infra/postgres/pg_hba.conf` refuse a login without TLS before any SQL is
+sent.) This is worse than an unverified connection alone, because the
+text being sent is the secret you are trying to protect.
 
 Two more things that catch operators out on this exact command:
 
@@ -476,10 +489,10 @@ is doing its job.
 
 Warning: `scripts/seed-publisher.ts` goes through `src/db/connect.ts`, the
 same TLS-enforcing path as the app itself. Leaving out
-`DATABASE_SSL_MODE=verify-full` and `DATABASE_SSL_ROOT_CERT` would send
-the owner credential across the internet with no TLS at all — see step
-5's warning. There is no VM-local fallback for this command: this VM has
-no Node runtime to run it with.
+`DATABASE_SSL_MODE=verify-full` and `DATABASE_SSL_ROOT_CERT` makes it try
+a login without TLS, which the database refuses — see step 5's warning. It
+must also run over the tailnet, like step 5. There is no VM-local fallback
+for this command: this VM has no Node runtime to run it with.
 
 The root README's "Startup safety checks" section requires at least one
 row in `publishers` before the admin app is safe to expose. While the
@@ -498,7 +511,7 @@ environment configuration, not in this repo:
 | Variable | Value | Why |
 |----------|-------|-----|
 | `DATABASE_URL` | `postgres://announce_app:<password from step 5>@db.announce.aztec.network:5432/announce` | Do not put `sslmode` or `sslrootcert` in this URL's query string. `src/db/connect.ts` refuses to build a connection if either is present. Otherwise they could let `postgres.js` bypass `DATABASE_SSL_MODE`/`DATABASE_SSL_ROOT_CERT` below entirely, including through a `?sslmode=require` value (encrypted but unverified) that every Postgres tutorial suggests. |
-| `DATABASE_SSL_MODE` | `verify-full` | This is the only accepted value once the database is reachable over the public internet. `require` is refused outright. See `connect.ts`'s comment for why: `require` stops a passive eavesdropper, but not an active one. |
+| `DATABASE_SSL_MODE` | `verify-full` | This is the only accepted value once the database is reachable over the public internet. `require` is refused outright. See `connect.ts`'s comment for why: `require` stops a passive eavesdropper, but not an active one. On `DEPLOY_TARGET=netlify`, `src/core/production-guard.ts` refuses to start unless it is exactly `verify-full`: unset, `connect.ts` would connect without TLS, which the database refuses (`infra/postgres/pg_hba.conf`) and `fail2ban` counts as a failed login. |
 | `DATABASE_SSL_ROOT_CERT` | The ISRG Root X1 certificate. Download it from `https://letsencrypt.org/certs/isrgrootx1.pem` and paste its PEM content directly, the full text from `-----BEGIN CERTIFICATE-----` through `-----END CERTIFICATE-----`. | Required whenever `DATABASE_SSL_MODE=verify-full`. Without it, verification falls back to the system trust store. That gives a false sense of security, not a lesser one. Warning: do not paste the VM's own certificate, and do not paste anything out of Caddy's ACME storage. Postgres serves the leaf certificate for `db.announce.aztec.network` (the file `cert-reload.sh.j2` copies out of Caddy's storage into `server.crt`). That is what the client receives on the wire, not what it verifies against. TLS verification checks the leaf against its issuer. The issuer of a Let's Encrypt leaf is Let's Encrypt's own root, ISRG Root X1. ISRG Root X1 is a fixed, long-lived certificate that does not change across renewals. Pasting the leaf, `server.crt`, or anything Caddy stores fails immediately with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. The correct value is the root CA, obtained independently of this VM. On Netlify this value must be the inline PEM value, not a path: a serverless function has no filesystem to hold a CA file on. `resolveCaFile` (`src/db/connect.ts`) detects inline PEM by its `-----BEGIN CERTIFICATE-----` header and uses it directly. Anything that does not start with that header is instead treated as a filesystem path and read from disk. That form is used elsewhere on this host and by local dev, where a real file naturally exists (for example, `infra/dev/certs/ca.crt` locally; on the VM itself, this same ISRG Root X1 PEM, not anything derived from Caddy's storage). If Netlify's UI flattens the pasted value's newlines into literal `\n` characters, `resolveCaFile` detects and un-escapes that automatically. This is a known failure mode for certificates pasted through some web UIs, not something you need to work around by hand. |
 | `SIGNAL_API_BASE` | `https://db.announce.aztec.network` | Reaches the Signal sidecar through Caddy's reverse proxy, not directly. The sidecar itself is never published to the host. |
 | `SIGNAL_API_SECRET` | The same value as `ANNOUNCE_SIGNAL_SECRET` in `/opt/announce/.env` on the VM. | Sent as the `x-announce-signal-secret` header (`src/core/signal-auth.ts`) and checked by `infra/Caddyfile.split`'s gate. The two values must match exactly, or every Signal request returns 403. |
@@ -517,11 +530,13 @@ only the five variables that point at this VM specifically.
 Signal proxy (443, via Caddy) are reachable from the public internet. This
 is unchanged since operator access moved onto the tailnet (2026-08-31):
 there is still no VPN and no IP allowlist in front of either port. The
-Hetzner firewall (`infra/terraform/vm.tf`) opens both to `0.0.0.0/0` and
-`::/0` on purpose, because Netlify's egress pool has no stable IP range
-to allowlist against. The tailnet protects only operator access (SSH);
-it does not sit in front of 5432 or 443, and does not reduce what those
-two ports expose.
+Hetzner firewall (`infra/terraform/vm.tf`) opens 443 to `0.0.0.0/0` and
+`::/0`, and 5432 to `0.0.0.0/0` (IPv4 only, as Postgres is published on
+IPv4 only), on purpose, because Netlify's egress pool has no stable IP
+range to allowlist against. The tailnet carries operator access: SSH, and
+since 2026-11-04 the owner `announce`'s database logins
+(`infra/postgres/pg_hba.conf`). It does not sit in front of 5432 or 443 for
+Netlify.
 
 **What the database holds:** the Discord webhook URL and the Telegram
 bot token (`channel_settings`), every subscriber's email address
@@ -543,15 +558,30 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
 
 **What protects this, and why each layer matters:**
 1. **Verified TLS** (`DATABASE_SSL_MODE=verify-full` with an explicit CA,
-   enforced in `src/db/connect.ts`). This stops both passive
+   enforced in `src/db/connect.ts`, and required on Netlify by
+   `src/core/production-guard.ts`). This stops both passive
    eavesdropping and an active attacker who can redirect the connection.
    `sslmode=require` only stops the former.
-2. **The least-privilege `announce_app` role** (`NOLOGIN` until step 5,
+2. **The login rules** (`infra/postgres/pg_hba.conf`, read through
+   `-c hba_file=` in `docker-compose.split.yml`). Every network login must
+   use TLS (`hostssl`). `announce_app` may log in from any address, and
+   only to the `announce` database. The owner `announce`, the image's
+   bootstrap superuser, which cannot be demoted, may log in only from the
+   compose network (the `backup` job), from the tailnet (owner scripts)
+   and from inside the `db` container. Before 2026-11-04 the image's stock
+   rule (`host all all all scram-sha-256`) accepted plaintext logins and
+   the superuser from anywhere, and a superuser can run
+   `COPY ... FROM PROGRAM`, a shell in the `db` container. There is no
+   final `reject` line, on purpose: a refusal without it logs
+   `no pg_hba.conf entry`, which the `fail2ban` filter counts; a `reject`
+   line logs `pg_hba.conf rejects connection`, which it does not.
+3. **The least-privilege `announce_app` role** (`NOLOGIN` until step 5,
    no `DROP`/`TRUNCATE`/`ALTER` ever, no `DELETE` on the append-only
    audit tables, read-only on `publishers`/`channel_settings`). This
    bounds the damage a leaked application credential can do. A leaked
-   superuser credential is a different, worse incident.
-3. **`fail2ban`** (`infra/ansible/roles/fail2ban`). This rate-limits
+   superuser credential is a different, worse incident, now limited to
+   someone who is also on the tailnet or on the VM.
+4. **`fail2ban`** (`infra/ansible/roles/fail2ban`). This rate-limits
    repeated failed logins against 5432: in ban mode, five in ten minutes
    block the address for ten minutes. It is the layer that stops brute-force and
    credential-stuffing attacks against the port itself, which TLS and the
@@ -574,25 +604,25 @@ only `SELECT` on `publishers` and `channel_settings`, never `INSERT` or
    and one play run ("Before the first run with the live jail" in
    [`DEPLOY.md`](DEPLOY.md)); it clears the addresses recorded in watch mode
    first, so they do not become real blocks.
-4. **Operator access over the tailnet, not a public SSH port**
+5. **Operator access over the tailnet, not a public SSH port**
    (`var.tailnet`/`var.tailscale_acl_tag`, `terraform/vm.tf`). Port 22 is
    closed in the Hetzner firewall; day-2 access is `tailscale ssh`, which
    needs no inbound port of its own. This protects operator access only —
-   it does nothing for 5432 or 443, which stay open to `0.0.0.0/0` and
-   `::/0` as described above. **Note:** since 2026-10-08 Postgres is
-   published on IPv4 only (`docker-compose.split.yml`), so the firewall
-   rule for 5432 (`0.0.0.0/0` and `::/0`, `infra/terraform/vm.tf`) is now
-   WIDER than what actually listens: nothing answers on IPv6. Tightening
-   the firewall rule to IPv4 only needs a `terraform apply`; it is left as
-   is here because the terraform resources are not part of this change. The
+   it does nothing for Netlify's path to 5432 or 443, which stay open as
+   described above. Since 2026-10-08 Postgres is published on IPv4 only
+   (`docker-compose.split.yml`), and since 2026-11-04 the firewall rule for
+   5432 in `infra/terraform/vm.tf` is IPv4 only (`::/0` removed). That
+   firewall change takes effect only with a `terraform apply`; the Ansible
+   deploy does not apply Terraform, and until the apply the live rule
+   still allows `::/0` (nothing answers there). The
    `ssh_public_key` variable still exists,
    but it is not an access path. If the tailnet join itself fails, recovery is
    Hetzner rescue mode, not this key.
 
-None of these four layers is optional, and none compensates for a
+None of these five layers is optional, and none compensates for a
 failure in another. Removing any one weakens the justification for the
 others. An operator who does not know what this VM exposes, and why,
-cannot maintain it safely. Treating any one of these four as something to
+cannot maintain it safely. Treating any one of these five as something to
 "harden later" is a live security regression, not a convenience.
 
 ## What has not been verified — read before you rely on this
@@ -795,6 +825,24 @@ relying on them:
   copied already. Lines written in the last minute before a container is
   removed are lost. Not run on the VM: the script under the real cron
   against the real compose project, and the weekly rotation.
+- **The login rules (`infra/postgres/pg_hba.conf`) on the real VM.**
+  Proven on 2026-11-04 against throwaway `postgres:16-alpine` containers
+  with the exact compose `db` command, on a data volume created with the
+  old command (data kept, the stock file in the volume no longer read) and
+  on a new one. Each case was checked with `pg_stat_activity.client_addr`
+  and the `%h` log field: `announce_app` with TLS from a public address
+  works, without TLS it is refused; the owner from a public address is
+  refused with and without TLS; the owner from the compose network (with
+  `CREATE`/`DROP DATABASE`, as `scripts/backup.sh` does), from a
+  tailnet-range address (also through `npm run migrate` with
+  `verify-full` and an `/etc/hosts`-style name mapping), over the socket
+  and over the container's loopback (cert-reload's check) works. A
+  connection to the published port from the host's own `127.0.0.1`
+  arrives as the bridge gateway (in `samenet`, so it is accepted); one to
+  another host address arrives with that address. The public and tailnet
+  sources were addresses on Docker bridges of the test host, not real
+  internet or Tailscale traffic, and the refused-login lines were checked
+  with `fail2ban-regex` 1.0.2, not with the live jail.
 - **A full, non-syntax-check `ansible-playbook` run against a live
   host.** Only `--syntax-check` and `ansible-lint` (clean at the
   `production` profile) were run. There was no real inventory host to

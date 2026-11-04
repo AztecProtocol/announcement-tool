@@ -1,7 +1,8 @@
 # Rate-limits repeated failed connection attempts against the publicly
-# exposed Postgres port (5432). There is no tailnet on this deployment
-# (infra/terraform/vm.tf) — Postgres is reachable from anywhere, TLS +
-# the least-privilege `announce_app` role are what stop a stolen or
+# exposed Postgres port (5432). There is no tailnet in front of it for
+# Netlify (infra/terraform/vm.tf) — Postgres is reachable from anywhere, TLS
+# (required by infra/postgres/pg_hba.conf) + the least-privilege
+# `announce_app` role are what stop a stolen or
 # guessed credential from doing damage, but neither stops a brute-force
 # credential-stuffing run against the port itself. fail2ban is the layer
 # that does.
@@ -165,12 +166,13 @@
       #   - `no pg_hba.conf entry for host ...`: a connection whose
       #     (host, user, database, auth-method) tuple matches no line in
       #     pg_hba.conf, so Postgres refuses it before any password is
-      #     checked. In this image pg_hba.conf is a single wide line
-      #     (`host all all all scram-sha-256`), so this message is produced
-      #     by the connection shapes that line does not cover: a
-      #     `replication` connection (a different database class, not
-      #     covered by `all`). It is NOT "a connection without TLS": this image accepts
-      #     both TLS and non-TLS on the same line.
+      #     checked. The rules are infra/postgres/pg_hba.conf, so this
+      #     message is what a plaintext login of any role, and a login of
+      #     the owner `announce` from a public address, produce (checked
+      #     with real postgres:16-alpine + fail2ban-regex 1.0.2 on
+      #     2026-11-04). That file has NO final `reject` line on purpose:
+      #     a `reject` match logs `pg_hba.conf rejects connection for
+      #     host ...`, which this filter does not count.
       # A new alternative belongs here only if it is a refused login.
       #
       # WHAT THE REGEX SEES IS NOT THE WHOLE LINE. fail2ban finds the
