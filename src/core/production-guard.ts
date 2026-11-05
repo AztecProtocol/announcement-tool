@@ -86,6 +86,17 @@ export interface GuardEnv {
    * to the admin-identity checks below.
    */
   enabledChannels?: string;
+  /**
+   * Raw DATABASE_SSL_MODE value. Only checked on the Netlify shape, where it
+   * must be exactly 'verify-full'. src/db/connect.ts leaves TLS off when the
+   * variable is unset (local dev and the compose network rely on that), so
+   * a Netlify deploy without it would talk plaintext across the internet.
+   * The VM's Postgres (infra/postgres/pg_hba.conf) refuses every plaintext
+   * login with "no pg_hba.conf entry", which the fail2ban jail counts: such
+   * a deploy would fail every query and, in ban mode, get Netlify's own
+   * egress addresses banned. A refusal to start names the cause instead.
+   */
+  databaseSslMode?: string;
 }
 
 /** Loopback only. Anything else means the port is reachable off-host. */
@@ -166,6 +177,15 @@ export function checkEnvironment(env: GuardEnv): string[] {
       );
     }
 
+    if (env.databaseSslMode !== 'verify-full') {
+      problems.push(
+        `DATABASE_SSL_MODE must be "verify-full" on the Netlify shape (got ${JSON.stringify(env.databaseSslMode ?? null)}). `
+        + 'Unset, src/db/connect.ts connects without TLS, and the database refuses every login '
+        + 'that is not TLS (infra/postgres/pg_hba.conf). Set DATABASE_SSL_MODE=verify-full and '
+        + 'DATABASE_SSL_ROOT_CERT in the Netlify environment.',
+      );
+    }
+
     if (!env.enabledChannels || env.enabledChannels.trim() === '') {
       problems.push(
         'ENABLED_CHANNELS must be set on the Netlify shape. Unset, it defaults to all five '
@@ -233,5 +253,6 @@ export function guardEnvFromProcess(): GuardEnv {
     auth0ClientSecret: process.env.AUTH0_CLIENT_SECRET,
     sessionSecret: process.env.SESSION_SECRET,
     enabledChannels: process.env.ENABLED_CHANNELS,
+    databaseSslMode: process.env.DATABASE_SSL_MODE,
   };
 }

@@ -40,7 +40,7 @@
  * `resolveIdentity` returns undefined and `requirePublisher` (src/web/admin-gate.ts) refuses.
  */
 // Deep imports, not `next/server`. The public specifier does not type-check under
-// TS7/NodeNext (next@16.2.12 ships no "exports" map), and mapping it in tsconfig
+// TS7/NodeNext (next@16.4.5 still ships no "exports" map), and mapping it in tsconfig
 // `paths` would point the RUNTIME import at a .d.ts with no exports — making
 // `NextResponse.next` compile to `(void 0)` under Turbopack. These are the modules
 // `next/server` itself re-exports. Same treatment as app/admin/layout.tsx; the full

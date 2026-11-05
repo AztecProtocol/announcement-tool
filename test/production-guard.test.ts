@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkEnvironment, checksApply } from '../src/core/production-guard.js';
+import { checkEnvironment, checksApply, guardEnvFromProcess } from '../src/core/production-guard.js';
 
 const prod = {
   nodeEnv: 'production',
@@ -17,6 +17,7 @@ const netlifyProd = {
   auth0ClientSecret: 'a-client-secret',
   sessionSecret: 'x'.repeat(32),
   enabledChannels: 'discord,email',
+  databaseSslMode: 'verify-full',
 };
 
 describe('checksApply', () => {
@@ -151,8 +152,9 @@ describe('checkEnvironment — checks that apply in both shapes', () => {
       sessionSecret: undefined,
       auth0ClientSecret: undefined,
       enabledChannels: undefined,
+      databaseSslMode: undefined,
     });
-    expect(problems).toHaveLength(6);
+    expect(problems).toHaveLength(7);
   });
 });
 
@@ -246,5 +248,50 @@ describe('checkEnvironment — ambiguous or unset deployment shape fails closed'
   it('does not silently pass with an unset shape — never skips both checks', () => {
     const problems = checkEnvironment({ publicBaseUrl: 'https://announce.example.org' });
     expect(problems.length).toBeGreaterThan(0);
+  });
+});
+
+describe('checkEnvironment — Netlify shape: DATABASE_SSL_MODE', () => {
+  // src/db/connect.ts leaves TLS off when DATABASE_SSL_MODE is unset (local
+  // dev and the compose network rely on that). On Netlify the database is
+  // across the internet, and infra/postgres/pg_hba.conf refuses every
+  // plaintext login with "no pg_hba.conf entry", which the fail2ban jail
+  // counts: a plaintext Netlify deploy would fail every query and, in ban
+  // mode, get its own egress addresses banned. Refuse to start instead.
+  it('rejects an unset DATABASE_SSL_MODE on the Netlify shape', () => {
+    const problems = checkEnvironment({ ...netlifyProd, databaseSslMode: undefined });
+    expect(problems.some(p => p.includes('DATABASE_SSL_MODE'))).toBe(true);
+  });
+
+  it('rejects a blank DATABASE_SSL_MODE on the Netlify shape', () => {
+    const problems = checkEnvironment({ ...netlifyProd, databaseSslMode: '' });
+    expect(problems.some(p => p.includes('DATABASE_SSL_MODE'))).toBe(true);
+  });
+
+  it.each(['require', 'disable', 'prefer', 'VERIFY-FULL', ' verify-full'])(
+    'rejects DATABASE_SSL_MODE=%j on the Netlify shape', (mode) => {
+      const problems = checkEnvironment({ ...netlifyProd, databaseSslMode: mode });
+      expect(problems.some(p => p.includes('DATABASE_SSL_MODE'))).toBe(true);
+    });
+
+  it('accepts DATABASE_SSL_MODE=verify-full on the Netlify shape', () => {
+    expect(checkEnvironment(netlifyProd)).toEqual([]);
+  });
+
+  it('does not check DATABASE_SSL_MODE on the VM shape', () => {
+    expect(checkEnvironment({ ...prod, databaseSslMode: undefined })).toEqual([]);
+  });
+
+  it('is read from process.env by guardEnvFromProcess', () => {
+    const saved = process.env.DATABASE_SSL_MODE;
+    try {
+      process.env.DATABASE_SSL_MODE = 'verify-full';
+      expect(guardEnvFromProcess().databaseSslMode).toBe('verify-full');
+      delete process.env.DATABASE_SSL_MODE;
+      expect(guardEnvFromProcess().databaseSslMode).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.DATABASE_SSL_MODE;
+      else process.env.DATABASE_SSL_MODE = saved;
+    }
   });
 });

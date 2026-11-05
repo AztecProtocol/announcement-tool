@@ -26,7 +26,7 @@
       }
     ],
     // TypeScript 7's NodeNext resolver can't find subpath imports like
-    // `next/navigation` in packages without an "exports" map (next@16.2.12
+    // `next/navigation` in packages without an "exports" map (next@16.4.5
     // has none) — it only checks ancestor node_modules for a literal
     // `next/navigation` package folder, never the sibling .d.ts file. This
     // paths mapping is a targeted workaround, not a resolution-mode change.

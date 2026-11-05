@@ -65,10 +65,12 @@ Netlify or Hetzner, and a compromised publisher *pair* acting in collusion.
 1. **Internet → Next.js middleware** (`middleware.ts`). The single boundary for admin identity.
 2. **Middleware → app** via the unsigned internal header `AUTH0_IDENTITY_HEADER`. Trusted *only* because
    step 1 of the middleware deletes every inbound copy first, unconditionally.
-3. **App → Postgres** (TLS, pinned root certs, `app_role`).
+3. **App → Postgres** (TLS, pinned root certs, `app_role`; server-side login rules in
+   `infra/postgres/pg_hba.conf`: TLS only, the superuser never from a public address).
 4. **Worker → third-party channel APIs** (Discord/Telegram/Signal/ESP) and **worker → subscriber webhooks**
    (the SSRF boundary, `src/core/safe-url.ts`).
-5. **App → Signal sidecar** on the VM (`x-announce-signal-secret` shared secret).
+5. **App → Signal sidecar** on the VM (`x-announce-signal-secret` shared secret; Caddy passes only
+   `POST /v2/send`, so the secret never reaches the account endpoints).
 6. **Netlify scheduled/background function → `/tick`** (`src/core/tick-auth.ts` shared secret).
 
 ---
@@ -325,7 +327,36 @@ alert rather than silence.
 *Reviewer task:* grep every `console.*` and error path for interpolated config.
 
 **P38 — The app talks to Postgres over TLS against pinned root certificates, and fails loudly if they are
-unusable.** *Enforced:* `src/db/connect.ts`; *tested:* `test/db-connect.test.ts`, `test/db-tls.integration.test.ts`.
+unusable.** *Enforced:* `src/db/connect.ts`; on `DEPLOY_TARGET=netlify` the start guard
+(`src/core/production-guard.ts`) refuses to run unless `DATABASE_SSL_MODE=verify-full`, because `connect.ts`
+leaves TLS off when the variable is unset; the server refuses any network login without TLS (P44).
+*Tested:* `test/db-connect.test.ts`, `test/db-tls.integration.test.ts`, `test/production-guard.test.ts`.
+
+**P44 — The database superuser cannot log in from the internet, and no network login works without TLS.**
+The owner `announce` is the image's bootstrap superuser and cannot be demoted; a superuser can run
+`COPY ... FROM PROGRAM`, a shell in the `db` container. *Enforced:* `infra/postgres/pg_hba.conf`, read through
+`-c hba_file=` in `infra/docker-compose.split.yml`: `hostssl` only; `announce` only from the VM itself
+(`samenet`), the tailnet (`100.64.0.0/10`, owner scripts) and inside the container (socket and loopback, used
+by `cert-reload.sh.j2`); `announce_app` from any address, only to the `announce` database. *Scope of `samenet`:*
+it is wider than the backup job that needs it. It matches every compose service (also the internet-facing
+`caddy` and the unused `signal`) and, because Docker masquerades connections to the published port from other
+bridges and from the host, any container on any Docker network on the VM and any host process (checked
+2026-11-04 for a container on another bridge and for the host's `127.0.0.1`). It also carries most tailnet
+owner logins: Tailscale's default netfilter mode can masquerade forwarded traffic, so Postgres sees the bridge
+gateway, not the `100.x` address, and the `100.64.0.0/10` line may often go unused (not checked on the VM).
+All of these sources are on the VM or the tailnet, and each still needs the owner password; the property is
+that the internet cannot reach the superuser, not that only the backup job can. Narrowing `samenet` to the
+backup container's fixed address is a possible later step.
+No final `reject` line, so a refusal logs `no pg_hba.conf entry`, which the fail2ban filter counts (a `reject`
+line logs `pg_hba.conf rejects connection`, which it does not). *Evidence (2026-11-04, throwaway
+`postgres:16-alpine` with the exact compose command, not the VM):* every case checked with
+`pg_stat_activity.client_addr` and the log's `%h`; refused lines counted by `fail2ban-regex` 1.0.2, the `reject`
+line not counted; a data volume created before the change keeps its data. *Breaks if:* the port is published
+on IPv6 (Docker's proxy then hands the connection over from the bridge gateway, which is in `samenet`, so the
+owner gets in from the internet), the `db` service joins another network (`samenet` grows), a service on the
+VM that forwards connections from the internet to 5432 is added (it would arrive in `samenet`), a `host` (not
+`hostssl`) or wider `announce` line is added, or a final `reject` line is added (the jail stops counting
+these refusals).
 
 **P39 — The app's DB role is least-privilege** (`migrations/014_app_role.sql`) — no DDL, no ability to drop
 the audit log.
@@ -338,7 +369,8 @@ which carries a per-request nonce and so cannot be a static value.
 default, so the browser reports and blocks nothing. It becomes a control when `CSP_MODE=enforce` is set. See
 the end of this section.
 
-**P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd;
+**P41 — The VM exposes only what it must.** Postgres, the Signal sidecar and Caddy only; SSH ACL'd; the
+Postgres superuser reachable only from the tailnet and the VM itself (P44);
 a username cannot forge a banned address. *What holds now, and what enforces it:* a client-supplied value
 cannot make fail2ban ban an address the caller chose. Two independent layers hold this. First, the mirror
 (`infra/ansible/roles/fail2ban/templates/pg-auth-log.sh.j2`) keeps only lines that START as a real Postgres
@@ -370,10 +402,13 @@ and nothing else AND rejects a forged TAB continuation line, the ban is on the `
 mirror leaves a fresh state stamp (`infra/ansible/roles/fail2ban/tasks/verify.yml`); a real ban on the VM is
 proven by "Check that fail2ban bans" in `infra/DEPLOY.md`. Until that check has passed on a VM, treat the
 jail there as unproven.
-*The first deployment runs the jail in watch mode, and watch mode does not protect the port.* The role variable
-`announce_fail2ban_mode` defaults to `watch`: the jail counts and decides exactly as in ban mode, but its action is
-fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status, `/var/log/fail2ban.log`) and no
-firewall rule changes. The port has no rate limit from fail2ban until the variable is set to `ban`. Watch mode
+*This repository deploys the jail in ban mode. Watch mode, when it is asked for, does not protect the port.*
+`infra/ansible/group_vars/all.yml` sets `announce_fail2ban_mode: ban` for every inventory (since 2026-11-04,
+after a watch period from 2026-10-22); it overrides the role default, `watch`. A new VM or a rebuild therefore
+bans from its first run. A deployment that wants a watch period first must ask for it with
+`-e announce_fail2ban_mode=watch` on its first runs. In watch mode the jail counts and decides exactly as in ban
+mode, but its action is fail2ban's no-op `dummy`, so a would-be ban is only recorded (jail status,
+`/var/log/fail2ban.log`) and no firewall rule changes: the port has no rate limit from fail2ban. Watch mode
 exists so that real traffic shows, before any ban, that the application's Netlify addresses never appear among
 the would-be bans. The switch to `ban` clears the addresses recorded in watch mode first; without that,
 fail2ban restores each unexpired ban from its database at start and a watched address would be blocked at once

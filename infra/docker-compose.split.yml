@@ -5,13 +5,14 @@
 # (plus its keep-alive receive job), Caddy, and the nightly backup. There is
 # no `app`, `worker`, or `migrate` service here, and no Node runtime on this
 # VM at all: migrations and publisher-seeding are run from the operator's
-# own machine, against the exposed Postgres port, using the app's own
-# `npm run migrate` / `npm run seed:publisher` — not from this host, and not
-# reimplemented as shell against this container. See infra/DEPLOY.md steps 6
-# and 7. There is no tailnet here (see
-# infra/terraform/vm.tf), by design — Postgres (5432) and Caddy (443) are
-# exposed to the public internet, and TLS plus a least-privilege DB role
-# plus fail2ban are what protect them, not network isolation. See
+# own machine, over the tailnet, against the published Postgres port, using
+# the app's own `npm run migrate` / `npm run seed:publisher` — not from this
+# host, and not reimplemented as shell against this container. See
+# infra/DEPLOY.md steps 6 and 7. The tailnet carries operator traffic only
+# (SSH and owner logins); Netlify is not on it. Postgres (5432) and Caddy
+# (443) are exposed to the public internet for Netlify, and TLS, the
+# login rules in infra/postgres/pg_hba.conf, a least-privilege DB role and
+# fail2ban are what protect them, not network isolation. See
 # infra/README.md for the `announce_app` role and infra/Caddyfile.split for
 # the Signal proxy gate.
 #
@@ -41,6 +42,14 @@ services:
       # how the ongoing copy happens and why it must, not can, run
       # outside this compose file.
       - db-tls:/var/lib/postgresql/tls
+      # Login rules (pg_hba.conf), read through `-c hba_file=` in `command`
+      # below. A directory, not the single file: the deploy's rsync replaces
+      # a changed file with a new one (a new inode), and a single-file bind
+      # mount keeps showing the old one until the container is recreated
+      # (checked 2026-11-04). A directory mount shows the new file, so a
+      # `select pg_reload_conf()` is enough after a change. Read-only: the
+      # container has no reason to write its own login rules.
+      - ./repo/infra/postgres:/etc/postgresql/announce:ro
     # Bootstrap ordering note: `db-tls` starts empty on a fresh volume. The
     # cert-reload role (infra/ansible/roles/cert_reload) is what populates
     # it from Caddy's ACME-obtained cert, but that role's script itself
@@ -84,13 +93,20 @@ services:
     # protects this port, in the absence of a tailnet or IP allowlist, is:
     #   1. TLS with sslmode=verify-full enforced client-side (src/db/
     #      connect.ts refuses "require" — encrypted-but-unverified — and
-    #      refuses to start without DATABASE_SSL_ROOT_CERT). See the
-    #      cert-reload note above for how the serving cert stays current.
-    #   2. The `announce_app` role (migrations/014_app_role.sql,
+    #      refuses to start without DATABASE_SSL_ROOT_CERT; src/core/
+    #      production-guard.ts refuses to run on Netlify without
+    #      DATABASE_SSL_MODE=verify-full). See the cert-reload note above
+    #      for how the serving cert stays current.
+    #   2. The login rules in infra/postgres/pg_hba.conf, enforced
+    #      server-side: every network login must use TLS, and the owner
+    #      `announce` (the superuser) cannot log in from a public address at
+    #      all — only from the compose network (the backup job), from the
+    #      tailnet (owner scripts), or from inside this container.
+    #   3. The `announce_app` role (migrations/014_app_role.sql,
     #      infra/README.md): least-privilege, no DROP/TRUNCATE/ALTER, no
     #      DELETE on the two append-only audit tables. A leaked credential
     #      cannot do catastrophic damage.
-    #   3. fail2ban on this host (infra/ansible/roles/fail2ban), rate-
+    #   4. fail2ban on this host (infra/ansible/roles/fail2ban), rate-
     #      limiting repeated failed connection attempts against 5432 —
     #      without a tailnet, an unthrottled public Postgres port is a
     #      brute-force target.
@@ -112,9 +128,20 @@ services:
     # ban never sees. The result was an IPv6 attacker with no rate limit at
     # all (found in review 2026-10-08). Over IPv4 the kernel's own DNAT
     # preserves the real source address, so the jail both sees and can ban
-    # it. The terraform firewall still allows ::/0 to 5432 (infra/terraform/
-    # vm.tf), so the firewall rule is now WIDER than what listens; tightening
-    # it to IPv4 needs a terraform apply — see infra/README.md.
+    # it. Since infra/postgres/pg_hba.conf this binding matters a second
+    # way: the gateway address is in the `samenet` range that the owner
+    # `announce` may log in from, so an IPv6 publish would also let the
+    # superuser in from the internet. Checked 2026-11-04 on a throwaway
+    # copy: a client on 127.0.0.1 of the host arrives as the gateway
+    # (172.x.0.1); a host process that connects to another of the host's
+    # own addresses arrives with that address. Other sources do not all
+    # keep their address: a container on another Docker bridge arrives as
+    # this network's gateway (checked 2026-11-04), and so does a tailnet
+    # peer when Tailscale's netfilter rules masquerade the traffic they
+    # forward (not checked on the VM). Both are in `samenet`; see
+    # infra/postgres/pg_hba.conf. The terraform firewall allows 5432 on
+    # IPv4 only (infra/terraform/vm.tf); that change needs a terraform
+    # apply.
     ports:
       - "0.0.0.0:${DB_HOST_PORT:-5432}:5432"
     command:
@@ -132,6 +159,40 @@ services:
       - ssl_cert_file=/var/lib/postgresql/tls/server.crt
       - -c
       - ssl_key_file=/var/lib/postgresql/tls/server.key
+      # Login rules from the repository, not the stock file inside the data
+      # volume (`host all all all scram-sha-256`, which lets the superuser
+      # in from the internet and accepts plaintext). See
+      # infra/postgres/pg_hba.conf and the mount above. The stock file stays
+      # in the volume, unread. A data volume created before this setting
+      # starts with it unchanged (checked 2026-11-04).
+      - -c
+      - hba_file=/etc/postgresql/announce/pg_hba.conf
+      # A client that opens TCP to 5432 and then sends nothing (or stalls
+      # in the TLS handshake or the password exchange) holds a backend
+      # process and a connection slot until this timeout. The default is
+      # 60 s; 10 s is plenty for a real client (a TLS login from Netlify
+      # takes well under a second) and cuts by six the time a stalled
+      # client holds a slot. Checked 2026-11-04 on a throwaway container
+      # with this command: a raw TCP client that sends nothing is dropped
+      # after 10.0 s (60.0 s without this line), and a TLS login still
+      # works. Postgres logs nothing for a client that sent no bytes, so
+      # this is not visible to fail2ban; the timeout is the only limit.
+      #
+      # max_connections stays at the default 100 (3 kept for superusers
+      # by superuser_reserved_connections). Who connects: each warm
+      # Netlify instance of the web app holds a pool of up to 5
+      # (src/web/db.ts), each tick-background run up to 4
+      # (netlify/functions/tick-background.ts, closed at the end of the
+      # run), the backup job 1 at a time (scripts/backup.sh runs pg_dump
+      # and psql one after the other), cert-reload 1 (its loopback check),
+      # and an owner script or psql session 1 or 2. For a tool that posts
+      # a few announcements a month, that is far below 97, so a raise is
+      # not needed. A cut is not needed either: the limit has been 100
+      # since the first deploy, and a lower one would only bring the
+      # `too many clients` error closer for a burst of web traffic.
+      # Revisit if Postgres logs `sorry, too many clients already`.
+      - -c
+      - authentication_timeout=10s
       # log_line_prefix with %h (client host address) matters for
       # infra/ansible/roles/fail2ban's jail. It is not a cosmetic logging
       # preference. Verified directly against a real postgres:16-alpine
@@ -322,7 +383,8 @@ services:
     # Public-facing TLS terminator for this deployment. See
     # infra/Caddyfile.split for what it actually serves: it only obtains
     # and renews the Let's Encrypt cert for db.announce.aztec.network, and
-    # reverse-proxies to signal:8080 behind a shared-secret gate. It does
+    # reverse-proxies POST /v2/send (only) to signal:8080 behind a
+    # shared-secret gate. It does
     # not front the public site — Netlify serves that — and there is no
     # admin-404 guard here.
     #

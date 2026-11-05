@@ -8,7 +8,8 @@
 # aztec-observability sibling module also follows (decided 2026-08-31,
 # replacing the operator_ssh_cidrs-gated port-22 approach from 2026-08-27):
 # day-2 operator access is `tailscale ssh`, not a public SSH port. This does
-# NOT touch 443 or 5432 — those stay open to 0.0.0.0/0 and ::/0 because
+# NOT close 443 or 5432 — 443 stays open to 0.0.0.0/0 and ::/0, and 5432 to
+# 0.0.0.0/0 (IPv4 only, see the firewall comment below), because
 # Netlify's serverless functions reach Postgres and the Signal proxy from a
 # shifting IP pool that cannot join a tailnet (see the firewall comment
 # below and variables.tf `tailnet`/`tailscale_acl_tag`).
@@ -215,16 +216,20 @@ resource "hcloud_volume_attachment" "announce_data" {
 #              functions egress from a shifting pool of 80+ IPs with no
 #              stable range to allowlist, so an IP allowlist here is not a
 #              workable alternative to opening the port; connection auth
-#              (TLS + the least-privilege announce_app role, see
-#              infra/README.md) is the real control. UNCHANGED — same
-#              cannot-join-a-tailnet constraint as 443. Do not restrict this
-#              rule either.
-#              NOTE (2026-10-08): since the compose file publishes Postgres
+#              (TLS + the login rules in infra/postgres/pg_hba.conf + the
+#              least-privilege announce_app role, see infra/README.md) is
+#              the real control. Same cannot-join-a-tailnet constraint as
+#              443: do not restrict the IPv4 source either.
+#              IPv4 ONLY (2026-11-04): the compose file publishes Postgres
 #              on IPv4 only (docker-compose.split.yml, to close an IPv6 ban-
-#              evasion gap), the `::/0` half of this rule is now wider than
-#              what listens — nothing answers on IPv6. This rule is left
-#              as-is on purpose (a terraform change is out of scope for that
-#              fix); tightening it to IPv4 only is a safe follow-up apply.
+#              evasion gap, 2026-10-08), so nothing answers on IPv6 and
+#              `::/0` was removed from this rule. Do not add it back
+#              without first publishing on IPv6, and read the `ports:`
+#              comment on `db` before doing that: over IPv6 Docker's proxy
+#              rewrites the client address to the gateway, which the
+#              owner-login rule in pg_hba.conf (`samenet`) accepts. This
+#              change takes effect only with a `terraform apply`; the
+#              Ansible deploy does not apply Terraform.
 #   41641/udp — Tailscale's direct-path port (see var.tailnet /
 #              var.tailscale_acl_tag). Left open to 0.0.0.0/0 and ::/0, same
 #              as the aztec-observability sibling: this is how two tailnet
@@ -254,7 +259,7 @@ resource "hcloud_firewall" "announce" {
     direction  = "in"
     protocol   = "tcp"
     port       = "5432"
-    source_ips = ["0.0.0.0/0", "::/0"]
+    source_ips = ["0.0.0.0/0"]
   }
 
   rule {

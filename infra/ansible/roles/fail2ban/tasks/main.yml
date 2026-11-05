@@ -1,7 +1,8 @@
 # Rate-limits repeated failed connection attempts against the publicly
-# exposed Postgres port (5432). There is no tailnet on this deployment
-# (infra/terraform/vm.tf) — Postgres is reachable from anywhere, TLS +
-# the least-privilege `announce_app` role are what stop a stolen or
+# exposed Postgres port (5432). There is no tailnet in front of it for
+# Netlify (infra/terraform/vm.tf) — Postgres is reachable from anywhere, TLS
+# (required by infra/postgres/pg_hba.conf) + the least-privilege
+# `announce_app` role are what stop a stolen or
 # guessed credential from doing damage, but neither stops a brute-force
 # credential-stuffing run against the port itself. fail2ban is the layer
 # that does.
@@ -24,8 +25,11 @@
 # FAIL when the running jail is not live, so it cannot be silently inert
 # again.
 #
-# WATCH MODE FIRST. `announce_fail2ban_mode` (defaults/main.yml) is `watch`
-# unless set to `ban`. In watch mode the jail is the same in every setting
+# BAN OR WATCH. The role default (defaults/main.yml) is `watch`, but this
+# repository deploys `ban`: group_vars/all.yml sets announce_fail2ban_mode:
+# ban for every inventory. A new VM or a rebuild that wants a watch period
+# first must ask for it with -e announce_fail2ban_mode=watch on its first
+# runs. In watch mode the jail is the same in every setting
 # but its action, which is fail2ban's `dummy`: each would-be ban is recorded
 # (jail status, /var/log/fail2ban.log) and no firewall rule changes. The
 # application shares this port from Netlify's shared egress addresses, so
@@ -165,12 +169,13 @@
       #   - `no pg_hba.conf entry for host ...`: a connection whose
       #     (host, user, database, auth-method) tuple matches no line in
       #     pg_hba.conf, so Postgres refuses it before any password is
-      #     checked. In this image pg_hba.conf is a single wide line
-      #     (`host all all all scram-sha-256`), so this message is produced
-      #     by the connection shapes that line does not cover: a
-      #     `replication` connection (a different database class, not
-      #     covered by `all`). It is NOT "a connection without TLS": this image accepts
-      #     both TLS and non-TLS on the same line.
+      #     checked. The rules are infra/postgres/pg_hba.conf, so this
+      #     message is what a plaintext login of any role, and a login of
+      #     the owner `announce` from a public address, produce (checked
+      #     with real postgres:16-alpine + fail2ban-regex 1.0.2 on
+      #     2026-11-04). That file has NO final `reject` line on purpose:
+      #     a `reject` match logs `pg_hba.conf rejects connection for
+      #     host ...`, which this filter does not count.
       # A new alternative belongs here only if it is a refused login.
       #
       # WHAT THE REGEX SEES IS NOT THE WHOLE LINE. fail2ban finds the
@@ -408,8 +413,8 @@
       is in WATCH mode. It records would-be bans and blocks NOTHING: port 5432
       is NOT protected by fail2ban. Read the would-be bans as described in
       infra/DEPLOY.md, "Before the first run with the live jail", and switch
-      to ban mode (announce_fail2ban_mode: ban) only when none of them is the
-      application's.{% else %}fail2ban jail announce-postgres is in BAN mode.
+      to ban mode (drop -e announce_fail2ban_mode=watch; group_vars/all.yml
+      sets ban) only when none of them is the application's.{% else %}fail2ban jail announce-postgres is in BAN mode.
       Five failed logins in ten minutes block the address from port 5432 for
       ten minutes. Prove it once with "Check that fail2ban bans" in
       infra/DEPLOY.md.{% endif %}

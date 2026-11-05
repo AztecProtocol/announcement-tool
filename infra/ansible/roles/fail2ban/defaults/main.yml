@@ -15,8 +15,9 @@
 # jail would ban. The application connects to this port from Netlify's
 # shared egress addresses; switch to `ban` only after the would-be bans have
 # been read for two weeks and none is the application's. How: infra/DEPLOY.md,
-# "Before the first run with the live jail". Override in
-# group_vars/all.yml (or with `-e announce_fail2ban_mode=ban`).
+# "Before the first run with the live jail". This repository overrides it:
+# group_vars/all.yml sets `ban` for every inventory, so a watch period must
+# be asked for with `-e announce_fail2ban_mode=watch`.
 #
 # tasks/main.yml stops the play on any other value.
 announce_fail2ban_mode: watch

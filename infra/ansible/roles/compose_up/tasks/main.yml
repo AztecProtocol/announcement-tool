@@ -3,45 +3,142 @@
 # are never generated or templated by this role — see the note on
 # `stack_dir + /.env` below.
 #
-# Why the whole repo, not just the compose file and Caddyfile: `backup` and
-# `signal-receive` in docker-compose.split.yml build their images from
+# Why every tracked file, not just the compose file and Caddyfile: `backup`
+# and `signal-receive` in docker-compose.split.yml build their images from
 # `context: ./repo` (relative to {{ stack_dir }}, the project directory
 # `docker compose` is invoked from — see the "Start / converge the stack"
 # task below) plus Dockerfile.backup / Dockerfile.signal-receive /
 # scripts/backup.sh / scripts/signal-receive.sh, all of which live in the
 # repo, not in infra/. Copying only the two infra files here would leave
 # those `docker compose build` invocations with no build context on the
-# host at all. Syncing the full checkout keeps the build context identical
-# to what a developer has locally, so "it built here" and "it builds on
-# the VM" mean the same thing.
+# host at all.
+#
+# Only files tracked by git are shipped. Untracked and ignored files on the
+# control machine (`.env`, `*.tfvars`, `*.tfstate`, `inventory.yml`, ...)
+# never reach the host, so the host gets exactly one commit, recorded in
+# {{ stack_dir }}/repo/DEPLOYED_COMMIT. The checks on the control machine
+# (GNU rsync 3.x, no uncommitted changes to tracked files, tracked paths
+# the sync can ship, the branch and the commit) are in the `preflight`
+# role, which runs before any role that changes the host. This role uses
+# its results: preflight_repo_root, preflight_git_status,
+# preflight_git_head, preflight_branch, preflight_git_files and the
+# Foundation-main facts (preflight_foundation_remote, preflight_foundation_url,
+# preflight_main_ref, preflight_main_commit, preflight_main_problem).
 - name: Create the stack directory
   ansible.builtin.file:
     path: "{{ stack_dir }}"
     state: directory
     mode: "0755"
 
-# `{{ playbook_dir }}/../..` is the repo root (site.yml lives in
-# infra/ansible/). rsync, not copy + recursive, so re-runs are fast and
-# deletions on the source side (e.g. a removed script) are reflected on the
-# host instead of accumulating stale files forever. Excludes match
-# .gitignore's own intent: never ship node_modules/.next/build artifacts
-# to a host that doesn't need or want them, and never ship
-# infra/dev/certs — those are local dev-only fixtures, this deployment
-# gets its cert from Let's Encrypt via Caddy.
+- name: Create a temporary rsync filter file on the control machine
+  ansible.builtin.tempfile:
+    suffix: .rsync-filter
+  delegate_to: localhost
+  run_once: true
+  become: false
+  # Scratch file on the control machine, not a change to the host.
+  changed_when: false
+  register: compose_up_filter_file
+
+# rsync, not copy + recursive, so re-runs are fast. The filter file holds
+# one include line per tracked file and parent directory, then `- *`.
+# `--delete-excluded` (with `delete: true`) removes from the host every file
+# the filter does not include: files deleted in git, and untracked files an
+# older version of this task copied (it shipped the whole working tree).
+# Proven on 2026-11-04 that `--files-from=<list>` with `--delete`, with or
+# without `-r`, deletes nothing, so it is not used here.
+#
+# The five excludes are a second layer: they also match nothing tracked
+# today. The filter's first rule, `P /DEPLOYED_COMMIT`, protects the record
+# written below from the deletion. Nothing outside {{ stack_dir }}/repo is
+# touched; the secrets file {{ stack_dir }}/.env sits next to repo/, not in
+# it.
+#
+# synchronize also adds rsync's `-F` (because delay_updates defaults to
+# true), so a file named `.rsync-filter` anywhere in the source tree would
+# add filter rules of its own. The preflight role stops the play if git
+# tracks one; an untracked one is excluded by the filter above, but -F
+# reads it anyway, so do not leave one in the checkout.
+#
 # Notifies the "Restart caddy" handler on change — see
-# roles/compose_up/handlers/main.yml.
-- name: Sync the repository to the host
-  ansible.posix.synchronize:
-    src: "{{ playbook_dir }}/../../"
-    dest: "{{ stack_dir }}/repo"
-    delete: true
-    rsync_opts:
-      - "--exclude=.git"
-      - "--exclude=node_modules"
-      - "--exclude=.next"
-      - "--exclude=infra/dev/certs"
-      - "--exclude=infra/terraform/.terraform"
-  notify: Restart caddy
+# roles/compose_up/handlers/main.yml. site.yml sets force_handlers, so the
+# restart also runs when a later task or role fails.
+- name: Ship the tracked files to the host
+  block:
+    - name: Write the tracked-files rsync filter
+      ansible.builtin.template:
+        src: tracked-files.rsync-filter.j2
+        dest: "{{ compose_up_filter_file.path }}"
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+      become: false
+      # Scratch file on the control machine, not a change to the host.
+      changed_when: false
+
+    - name: Sync the repository to the host
+      ansible.posix.synchronize:
+        src: "{{ preflight_repo_root }}/"
+        dest: "{{ stack_dir }}/repo"
+        delete: true
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=node_modules"
+          - "--exclude=.next"
+          - "--exclude=infra/dev/certs"
+          - "--exclude=infra/terraform/.terraform"
+          # A merge file, not --include-from: --include-from reads every
+          # line as an include pattern, so the `P` (protect) rule in the
+          # file would not work. `merge_` is rsync's spelling of
+          # "merge " without a space; synchronize joins rsync_opts into one
+          # command line without quoting them, hence also `quote`.
+          - "--filter=merge_{{ compose_up_filter_file.path | quote }}"
+          - "--delete-excluded"
+          # Readable for every user on the host, whatever the umask of the
+          # operator's checkout: directories get go+rx, files go+r, and
+          # go+x only when the file already has an exec bit (X), so no
+          # file becomes executable that was not. Without it, a checkout
+          # made under umask 077 arrived as 0600/0700 on every run, the
+          # chmod task below opened infra/postgres again, and each run
+          # reported a change and restarted Caddy.
+          - "--chmod=Dgo+rx,Fgo+rX"
+      notify: Restart caddy
+  always:
+    - name: Remove the temporary rsync filter file
+      ansible.builtin.file:
+        path: "{{ compose_up_filter_file.path }}"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+      become: false
+      # Scratch file on the control machine, not a change to the host.
+      changed_when: false
+
+# Read on the host with `cat /opt/announce/repo/DEPLOYED_COMMIT`.
+- name: Record the deployed commit on the host
+  ansible.builtin.copy:
+    dest: "{{ stack_dir }}/repo/DEPLOYED_COMMIT"
+    mode: "0644"
+    content: |
+      commit: {{ preflight_git_head.stdout }}
+      branch: {{ preflight_branch }}
+      foundation remote: {{ (preflight_foundation_remote ~ ' ' ~ preflight_foundation_url) if preflight_foundation_remote | length > 0 else 'none (no remote points to AztecProtocol/announcement-tool)' }}
+      compared with: {{ (preflight_main_ref ~ ' ' ~ (preflight_main_commit if preflight_main_commit | length > 0 else 'unknown')) if preflight_main_ref | length > 0 else 'nothing' }} (as of the last git fetch on the control machine)
+      HEAD is that commit: {{ 'yes' if preflight_main_problem | length == 0 else 'no (deployed with announce_deploy_not_main=true)' }}
+      uncommitted changes to tracked files: {{ 'yes (deployed with announce_allow_dirty_deploy=true)' if preflight_git_status.stdout | length > 0 else 'no' }}
+
+# The db container reads infra/postgres/pg_hba.conf as uid 70 (postgres),
+# not as root, through a read-only bind mount (docker-compose.split.yml).
+# Without the sync's --chmod, a checkout made with umask 077 arrives as
+# 0600 root-readable only, and Postgres then refuses to start ("could not
+# open file .../pg_hba.conf: Permission denied", checked 2026-11-04). The
+# sync now makes the files readable; this task stays as a safety net and
+# reports no change when the sync did its job. The file holds no secret.
+- name: Let Postgres read its login rules
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/repo/infra/postgres"
+    mode: "u=rwX,go=rX"
+    recurse: true
 
 # Symlinks, not copies: `docker compose` resolves a relative build context
 # (docker-compose.split.yml's `backup`/`signal-receive` use `./repo`)
