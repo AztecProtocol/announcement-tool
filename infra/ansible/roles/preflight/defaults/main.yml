@@ -1,0 +1,7 @@
+# A line of `git remote -v` whose fetch URL points to the Foundation
+# repository, AztecProtocol/announcement-tool: https
+# (https://github.com/AztecProtocol/announcement-tool.git) or ssh
+# (git@github.com:AztecProtocol/announcement-tool.git,
+# ssh://git@github.com/AztecProtocol/announcement-tool), with or without
+# `.git`, any case. The tasks compare HEAD with `<that remote>/main`.
+preflight_foundation_url_regex: '(?i)^[^\t]+\t(.*[/:])?AztecProtocol/announcement-tool(\.git)?/? \(fetch\)$'

@@ -260,25 +260,48 @@ copy of `inventory.yml.example` carries a placeholder `data_mount` path,
 and a wrong mount path can send Postgres's data onto the root disk instead
 of the data volume.
 
-**Pre-flight, before every run:** deploy the current `main`, with no
-local changes. From the repo root:
+**Pre-flight, before every run:** deploy the current `main` of the
+Foundation repository, `AztecProtocol/announcement-tool`, with no local
+changes. From the repo root, first check the remotes:
 
 ```sh
-git switch main && git pull
+git remote -v
+```
+
+One remote must show `AztecProtocol/announcement-tool` (https or ssh form).
+Its name is `<remote>` below (for example `origin` or `foundation`). If no
+remote shows it, add one:
+`git remote add foundation https://github.com/AztecProtocol/announcement-tool.git`.
+Then:
+
+```sh
+git fetch <remote> && git switch main && git merge --ff-only <remote>/main
 git status --untracked-files=no
 ```
 
+To make `main` follow the Foundation repository for good, run
+`git branch -u <remote>/main main` once; after that, `git pull --ff-only`
+on `main` does the same as the first line.
+
 `git status --untracked-files=no` must show `nothing to commit, working
 tree clean` (untracked files such as `inventory.yml` are fine; they are
-never copied). The play does not run `git fetch` itself. When the checkout
-is on another branch, when `HEAD` differs from the remote-tracking `main`
-that git knows locally, or when git knows no remote-tracking `main`, it
-prints `WARNING: this deploy may not be the current main.` and then stops
-with `Deploy stopped: this checkout is not the current main.`, before any
-change to the VM. Both messages say what is different. To fix it, run
-`git switch main && git pull` and run the play again. To deploy another
-commit on purpose (a hotfix, a rollback), add
-`-e announce_deploy_not_main=true` to the `ansible-playbook` command.
+never copied). The play does not run `git fetch` itself. It finds the
+remote whose URL points to `AztecProtocol/announcement-tool` and compares
+`HEAD` with `<remote>/main` as of your last fetch. It does not use the
+branch that your local `main` tracks: in a checkout where `main` tracks a
+personal fork, that is the fork. When no remote points to the Foundation
+repository, when git knows no `<remote>/main`, or when `HEAD` differs from
+it, the play prints `WARNING: this deploy may not be the current main of
+AztecProtocol/announcement-tool.` and then stops with `Deploy stopped:
+this checkout is not the current main of AztecProtocol/announcement-tool.`,
+before any change to the VM. Both messages say what is different and give
+the fix commands with the real remote name. To deploy another commit on
+purpose (a hotfix, a rollback), add `-e announce_deploy_not_main=true` to
+the `ansible-playbook` command. `/opt/announce/repo/DEPLOYED_COMMIT` on the
+VM records the commit, the remote URL and the ref it was compared with.
+
+Run the whole play. Do not use `--tags` or `--start-at-task` to skip past
+`preflight`: `compose_up` needs the facts that `preflight` sets.
 
 ```sh
 cd infra/ansible
@@ -330,6 +353,22 @@ none), and whether the deploy included changes that were not committed (`yes` on
 > container on this play — a restart of Postgres of a few seconds, once. The
 > data volume is kept, so no data is lost; the site may see a brief
 > connection error during the restart. Later runs do not recreate it again.
+
+> **Note — the 5432 firewall rule is IPv4 only since 2026-11-04 (`::/0`
+> removed in `infra/terraform/vm.tf`).** The Ansible run does not apply
+> Terraform; this change needs its own `terraform apply`. Do it this way:
+>
+> 1. Run the plan first, and save it:
+>    `cd infra/terraform && terraform plan -out=firewall.tfplan`.
+> 2. Continue only if the plan changes `hcloud_firewall.announce` and
+>    nothing else: `Plan: 0 to add, 1 to change, 0 to destroy.`
+> 3. Stop if the plan replaces or destroys any server, volume or primary
+>    IP (`hcloud_server.announce`, `hcloud_volume.announce_data`,
+>    `hcloud_volume_attachment.announce_data`, `hcloud_primary_ip.announce`),
+>    or shows any other change. Do not apply; find the cause first (for
+>    example a changed variable or an expired tailnet key).
+> 4. Apply exactly the saved plan: `terraform apply firewall.tfplan`, then
+>    delete `firewall.tfplan`.
 
 > **Note — the first run after 2026-11-04 (database login rules) restarts
 > Postgres once. On a VM that already serves the site, do the pre-flight
@@ -590,6 +629,12 @@ banned from the database.
 
 **Pre-flight:**
 
+**Do this BEFORE you press Merge** on the pull request that adds the login
+rules. The merge starts the production Netlify build, and from that commit
+on the app refuses to start on Netlify unless `DATABASE_SSL_MODE` is
+`verify-full` (`src/core/production-guard.ts`). A wrong value takes the
+site down at that build, before any Ansible run.
+
 1. In the Netlify UI (Site configuration, Environment variables), check
    these values in every deploy context that sets `DEPLOY_TARGET=netlify`
    (Production, and Deploy Previews or Branch deploys if they use this
@@ -600,9 +645,7 @@ banned from the database.
    - `DATABASE_URL` logs in as `announce_app`, not `announce`, and has no
      `sslmode` or `sslrootcert` in it.
 
-   From this commit on, the app also refuses to start on Netlify without
-   `DATABASE_SSL_MODE=verify-full` (`src/core/production-guard.ts`), so
-   this check is needed before Netlify deploys the commit, too.
+   Fix a wrong value before the merge, not after it.
 2. On the VM, look at who is connected now. Run it a few times, and load
    `https://announce.aztec.network/archive` in between, because the site's
    connections are short:
@@ -615,10 +658,18 @@ banned from the database.
    A row with `announce` from a public address, or with `ssl` = `f`, is a
    client that the new rules refuse. Find it and move it first. Rows from a
    `172.` address are the VM's own containers and are fine.
-3. Know what restarts on this run: `db` is recreated once (a few seconds;
-   the site can show a brief database error). `fail2ban` restarts once,
-   because the text of its filter file changed. `caddy` restarts, as on
-   every run that changes a file. Nothing else restarts.
+3. Know what restarts on this run:
+   - `db` is recreated once for the login rules (a few seconds; the site
+     can show a brief database error).
+   - `fail2ban` restarts once, because the text of its filter file changed.
+   - `caddy` restarts, as on every run that changes a file.
+   - `backup` and `signal-receive` are recreated, as on every run: the play
+     rebuilds their images with `--no-cache`, so each run makes new images.
+   - `db`, `caddy` and `signal` are also recreated on any run where
+     `docker compose pull` finds a new upstream image for their floating
+     tags (`postgres:16-alpine`, `caddy:2-alpine`,
+     `signal-cli-rest-api:latest`). A `db` restart then shows as a brief
+     database error on the site.
 4. Set up [Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet)
    before you need it. After this run, `npm run migrate`,
    `npm run seed:publisher`, `npm run setup:channel` and `psql` as `announce`
@@ -1288,7 +1339,7 @@ step 3 is on the root disk and must be written again.
 | `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; the SSH key from "Before you start" does not help here — the Hetzner web console is a keyboard-and-screen session at a boot prompt, not an SSH endpoint, and a stock image has no root password set. Use Hetzner **rescue mode** instead: boot the rescue system from the Hetzner console, mount the VM's root disk, and inspect `cloud-init` / Tailscale logs or set a password from inside the mounted filesystem, then reboot normally. |
 | `tailscale ssh` hangs for you but works for a tailnet admin | You are not named in the ACL's `ssh` rule for `tag:announce` (`autogroup:admin` in `rpc.aztec.foundation/tailscale.tf`). Ask an admin to add you to the tailnet's admins, or extend the rule in code. Nothing on the VM is wrong. |
 | Ansible fails on "environment file exists" | Step 3 was skipped. |
-| Ansible stops with "Deploy stopped: this checkout is not the current main." | The checkout is on another branch, `HEAD` is not the remote-tracking `main`, or `main` has no upstream. The message says which. Run `git switch main && git pull` and run the play again. To deploy this commit on purpose (a hotfix, a rollback), add `-e announce_deploy_not_main=true`. Nothing on the VM changed. |
+| Ansible stops with "Deploy stopped: this checkout is not the current main of AztecProtocol/announcement-tool." | No git remote points to `AztecProtocol/announcement-tool` (`git remote -v`), git knows no `<remote>/main` (the remote was never fetched), or `HEAD` is not `<remote>/main`. The message says which, and gives the fix with the real remote name: `git fetch <remote> && git switch main && git merge --ff-only <remote>/main`, or once `git branch -u <remote>/main main` and then `git pull --ff-only`. With no Foundation remote, first `git remote add foundation https://github.com/AztecProtocol/announcement-tool.git`. A plain `git pull` is not the fix when `main` tracks a personal fork: it pulls the fork. Run the play again. To deploy this commit on purpose (a hotfix, a rollback), add `-e announce_deploy_not_main=true`. Nothing on the VM changed. |
 | Ansible stops with "Deploy stopped: these tracked files have changes that are not committed" | Your checkout has local changes to tracked files. Commit or discard them, or see step 4 for `announce_allow_dirty_deploy=true`. Nothing on the VM changed. |
 | Certificate is not from Let's Encrypt | The DNS record from step 2 had not propagated when step 4 ran. Fix the record, then run step 4 again. |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | `DATABASE_SSL_ROOT_CERT` holds the wrong certificate. It must be the Let's Encrypt root from step 5. |
@@ -1296,11 +1347,29 @@ step 3 is on the root disk and must be written again.
 | A login fails with `no pg_hba.conf entry for host` | The login is not one the database accepts (`infra/postgres/pg_hba.conf`). `... no encryption` at the end: the client did not use TLS; on Netlify, `DATABASE_SSL_MODE` is not `verify-full`. `user "announce"` from a public address: owner commands must run over the tailnet, see [Run owner commands over the tailnet](#run-owner-commands-over-the-tailnet). Each refusal counts as a failed login for `fail2ban`. |
 | The site cannot reach the database (connection refused or a timeout) right after a wrong `DATABASE_URL` or a wrong password was deployed | In ban mode, five failed logins in ten minutes make `fail2ban` block the address for ten minutes, and a Netlify address is treated like any other (in watch mode nothing is blocked, so the cause is the password alone). Correct the variable first. Then, on the VM, look at `sudo fail2ban-client status announce-postgres`: `Banned IP list:` shows the blocked addresses. Remove one with `sudo fail2ban-client set announce-postgres unbanip <address>`, or all of them with `sudo fail2ban-client unban --all` (this also clears the `sshd` jail, so an SSH address blocked for failed logins is unbanned at the same time). The same applies to your own machine after five mistyped passwords in `psql`. |
 | Ansible stops with "The fail2ban jail announce-postgres is NOT ..." or "does NOT put its ban ..." or "announce_fail2ban_mode is `watch`, but ..." or "The fail2ban filter announce-postgres is wrong" or "The fail2ban log mirror ..." | The jail for the database port is not live, or (watch mode) its action could change the firewall. The message says which check failed and where to look. The port is not protected by `fail2ban` until the run passes, and in watch mode not after it either. The stack itself is UP (the `db`, `signal` and `caddy` containers started before the `fail2ban` role runs); only the jail check stopped the play. The stopped play skipped the whole `cert_reload` role (the certificate-renewal job) that runs after `fail2ban`. A pending Caddy restart still ran at the end of the stopped play (`site.yml` sets `force_handlers`); look for `RUNNING HANDLER [compose_up : Restart caddy]` in the output. Run `sudo systemctl restart fail2ban`, then run the play again; the second run completes `cert_reload`. Only if the output shows that the Caddy handler failed, also run `sudo docker compose restart caddy` in `/opt/announce`. |
-| The alert "announce cert-reload failed" says the served certificate "expires in N days ... less than X days (one sixth of its ...-day lifetime ...)", or "does not verify against isrgrootx1.pem", or Ansible's last task "Run the cert-reload check now" fails with that text | `/usr/local/bin/announce-cert-reload.sh` checks, on every daily run and after every reload, what Postgres serves on `127.0.0.1:5432` (port 5432 only; the script does not read `DB_HOST_PORT`, which a real deployment never sets): it must verify against ISRG Root X1 only (`infra/certs/isrgrootx1.pem`, the same root Netlify trusts) for `db.announce.aztec.network`, and have at least one sixth of its own lifetime left (notAfter minus notBefore, plus 1 second; 15 days for a 90-day certificate, 7.5 for a 45-day one, never less than 3 days). Below that: Caddy has not renewed; read `docker compose logs caddy` for the ACME error. Does not verify: Netlify cannot connect either; compare the chain with step 5's `openssl s_client -starttls postgres` command. "CA file ... missing or changed": the repository copy of the root does not match the SHA-256 in the script; restore it from git, do not update the hash without checking the new file against https://letsencrypt.org/certs/isrgrootx1.pem. |
+| The alert "announce cert-reload failed" says the served certificate "expires in N days ... less than X days (one sixth of its ...-day lifetime ...)", or "does not verify against isrgrootx1.pem", or Ansible's last task "Run the cert-reload check now" fails with that text | `/usr/local/bin/announce-cert-reload.sh` checks, on every daily run and after every reload, what Postgres serves on `127.0.0.1:5432` (port 5432 only; the script does not read `DB_HOST_PORT`, which a real deployment never sets): it must verify against ISRG Root X1 only (`infra/certs/isrgrootx1.pem`, the same root Netlify trusts) for `db.announce.aztec.network`, and have at least one sixth of its own lifetime left (notAfter minus notBefore, plus 1 second; 15 days for a 90-day certificate, 7.5 for a 45-day one, never less than 3 days). Below that: Caddy has not renewed; read `docker compose logs caddy` for the ACME error. Does not verify: Netlify cannot connect either; compare the chain with step 5's `openssl s_client -starttls postgres` command. "CA file ... missing or changed": the repository copy of the root does not match the SHA-256 in the script; restore it from git, do not update the hash without checking the new file against https://letsencrypt.org/certs/isrgrootx1.pem. If Let's Encrypt changed its root, see [If Let's Encrypt changes its root](#if-lets-encrypt-changes-its-root). |
 | `DATABASE_URL` gives an opaque connection-string parse error | The password has an unencoded `/` or `+` in it. Percent-encode both in the userinfo section. |
 | The app refuses to start | A required variable is missing. The startup message names it. |
 | Every page shows `Internal Server Error` and the Netlify function log says `Failed to prepare server` | Trigger a deploy in Netlify (Deploys → Trigger deploy). A function whose start failed keeps failing until it is replaced. Since the start-check change this should only happen for a real misconfiguration; the log line names it. |
 | The rebuilt VM joined the tailnet as `<name>-1` | The old machine was not removed from the tailnet before the rebuild. Delete both entries in the Tailscale admin console and rebuild again, or address the `-1` name in `tailscale ssh` and in `ansible/inventory.yml` for this one deployment. |
+
+### If Let's Encrypt changes its root
+
+The alert "does not verify against isrgrootx1.pem" can also mean that Let's
+Encrypt now issues certificates that chain to a root other than ISRG Root
+X1. Then Netlify cannot connect either, because it trusts the same root.
+Update these three together: Netlify's `DATABASE_SSL_ROOT_CERT`, the root
+file `infra/certs/isrgrootx1.pem` (or a new root file next to it), and the
+pinned SHA-256 in `infra/ansible/roles/cert_reload/templates/cert-reload.sh.j2`
+(`ROOT_CA_SHA256`, and `ROOT_CA_FILE` for a new file name). Download the
+root only from https://letsencrypt.org/certificates/. Before you commit,
+compare the hashes: `openssl x509 -noout -fingerprint -sha256 -in <file>`
+must equal the SHA-256 of that root on the crt.sh page that
+https://letsencrypt.org/certificates/ links to, and `sha256sum <file>` is
+the value for `ROOT_CA_SHA256`. Also update the comment above
+`ROOT_CA_FILE` in that template (source, date, both hashes). Then paste
+the full PEM text into `DATABASE_SSL_ROOT_CERT` and redeploy Netlify, merge
+the commit, and run the play, which installs the new script on the VM.
 
 ## What has not been tested
 

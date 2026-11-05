@@ -21,7 +21,9 @@
 # the sync can ship, the branch and the commit) are in the `preflight`
 # role, which runs before any role that changes the host. This role uses
 # its results: preflight_repo_root, preflight_git_status,
-# preflight_git_head, preflight_branch and preflight_git_files.
+# preflight_git_head, preflight_branch, preflight_git_files and the
+# Foundation-main facts (preflight_foundation_remote, preflight_foundation_url,
+# preflight_main_ref, preflight_main_commit, preflight_main_problem).
 - name: Create the stack directory
   ansible.builtin.file:
     path: "{{ stack_dir }}"
@@ -92,6 +94,14 @@
           # command line without quoting them, hence also `quote`.
           - "--filter=merge_{{ compose_up_filter_file.path | quote }}"
           - "--delete-excluded"
+          # Readable for every user on the host, whatever the umask of the
+          # operator's checkout: directories get go+rx, files go+r, and
+          # go+x only when the file already has an exec bit (X), so no
+          # file becomes executable that was not. Without it, a checkout
+          # made under umask 077 arrived as 0600/0700 on every run, the
+          # chmod task below opened infra/postgres again, and each run
+          # reported a change and restarted Caddy.
+          - "--chmod=Dgo+rx,Fgo+rX"
       notify: Restart caddy
   always:
     - name: Remove the temporary rsync filter file
@@ -112,14 +122,18 @@
     content: |
       commit: {{ preflight_git_head.stdout }}
       branch: {{ preflight_branch }}
+      foundation remote: {{ (preflight_foundation_remote ~ ' ' ~ preflight_foundation_url) if preflight_foundation_remote | length > 0 else 'none (no remote points to AztecProtocol/announcement-tool)' }}
+      compared with: {{ (preflight_main_ref ~ ' ' ~ (preflight_main_commit if preflight_main_commit | length > 0 else 'unknown')) if preflight_main_ref | length > 0 else 'nothing' }} (as of the last git fetch on the control machine)
+      HEAD is that commit: {{ 'yes' if preflight_main_problem | length == 0 else 'no (deployed with announce_deploy_not_main=true)' }}
       uncommitted changes to tracked files: {{ 'yes (deployed with announce_allow_dirty_deploy=true)' if preflight_git_status.stdout | length > 0 else 'no' }}
 
 # The db container reads infra/postgres/pg_hba.conf as uid 70 (postgres),
 # not as root, through a read-only bind mount (docker-compose.split.yml).
-# The sync keeps the modes of the operator's checkout, so a checkout made
-# with umask 077 arrives as 0600 root-readable only, and Postgres then
-# refuses to start ("could not open file .../pg_hba.conf: Permission
-# denied", checked 2026-11-04). The file holds no secret.
+# Without the sync's --chmod, a checkout made with umask 077 arrives as
+# 0600 root-readable only, and Postgres then refuses to start ("could not
+# open file .../pg_hba.conf: Permission denied", checked 2026-11-04). The
+# sync now makes the files readable; this task stays as a safety net and
+# reports no change when the sync did its job. The file holds no secret.
 - name: Let Postgres read its login rules
   ansible.builtin.file:
     path: "{{ stack_dir }}/repo/infra/postgres"

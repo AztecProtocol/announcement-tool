@@ -11,17 +11,21 @@
 # exposed to the public internet on purpose, for Netlify; TLS + the login
 # rules in infra/postgres/pg_hba.conf + the least-privilege announce_app DB
 # role + fail2ban are what protect them (infra/README.md,
-# infra/docker-compose.split.yml's `db` comment). That's why `fail2ban` and `cert_reload` are real roles here and
-# not, as on the tailnet'd aztec-observability module, skipped entirely.
+# infra/docker-compose.split.yml's `db` comment). That's why `fail2ban` and
+# `cert_reload` are real roles here and not, as on the tailnet'd
+# aztec-observability module, skipped entirely.
 #
 # Role order matters:
 #   0. preflight      — checks on the control machine only: GNU rsync 3.x,
 #                        no uncommitted changes to tracked files, tracked
-#                        paths the sync can ship, and a stop when the
-#                        checkout is not the current main (override:
+#                        paths the sync can ship, and a stop when HEAD
+#                        is not main of the remote that points to
+#                        AztecProtocol/announcement-tool (override:
 #                        -e announce_deploy_not_main=true). First, so that a
 #                        failed check stops the play before anything on the
-#                        host changes.
+#                        host changes. compose_up needs the facts that
+#                        preflight sets: do not run the play with --tags or
+#                        --start-at-task past preflight.
 #   1. docker         — first confirms, on the host, that the Hetzner volume
 #                        is actually mounted at the path Terraform told us
 #                        about (findmnt), then installs Docker + the

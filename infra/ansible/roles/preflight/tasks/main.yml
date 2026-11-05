@@ -101,73 +101,124 @@
   failed_when: false
   register: preflight_git_branch
 
-# The remote-tracking branch that the local `main` follows, as git knows
-# it now (no `git fetch` here: the play must not change the checkout, and
-# must work offline). It does not exist when the checkout has no local
-# `main`, or `main` has no upstream; the warning below then says so.
-- name: Read the remote-tracking main that git knows locally
+# "The current main" is `main` of the Foundation repository
+# (AztecProtocol/announcement-tool), not whatever the local `main` tracks:
+# in a checkout where `main` tracks a personal fork, `main@{upstream}` is
+# the fork. The play finds the remote whose fetch URL points to the
+# Foundation repository (preflight_foundation_url_regex in
+# defaults/main.yml: https or ssh form, with or without `.git`, any case)
+# and compares HEAD with `<that remote>/main` as git knows it now. No
+# `git fetch` here: the play must not change the checkout, and must work
+# offline. The ref is only as new as the last `git fetch`; DEPLOY.md's
+# pre-flight fetches first.
+- name: List the git remotes
   ansible.builtin.command:
-    argv: [git, -C, "{{ preflight_repo_root }}", rev-parse, --verify, --quiet, --symbolic-full-name, "main@{upstream}"]
+    argv: [git, -C, "{{ preflight_repo_root }}", remote, -v]
   delegate_to: localhost
   run_once: true
   become: false
   changed_when: false
   check_mode: false
-  failed_when: false
-  register: preflight_git_main_ref
+  register: preflight_git_remotes
 
-- name: Read the commit of the remote-tracking main
+# `git remote -v` prints "<name><TAB><url> (fetch)". With more than one
+# Foundation remote, the first in git's order (by name) is used. A user
+# name or token in an https URL is cut before the URL is printed or
+# written to DEPLOYED_COMMIT.
+- name: Find the remote that points to the Foundation repository
+  ansible.builtin.set_fact:
+    preflight_foundation_remote_lines: >-
+      {{ preflight_git_remotes.stdout_lines
+         | select('search', preflight_foundation_url_regex) | list }}
+    preflight_remote_summary: >-
+      {{ preflight_git_remotes.stdout_lines
+         | select('search', ' \(fetch\)$')
+         | map('regex_replace', '^([^\t]*)\t(.*) \(fetch\)$', '\1 = \2')
+         | map('regex_replace', '//[^/@]*@', '//')
+         | join('; ') | default('none', true) }}
+
+- name: Record the Foundation remote
+  ansible.builtin.set_fact:
+    preflight_foundation_remote: >-
+      {{ (preflight_foundation_remote_lines | first) | regex_replace('\t.*$', '')
+         if preflight_foundation_remote_lines | length > 0 else '' }}
+    preflight_foundation_url: >-
+      {{ (preflight_foundation_remote_lines | first)
+         | regex_replace('^[^\t]*\t(.*) \(fetch\)$', '\1')
+         | regex_replace('//[^/@]*@', '//')
+         if preflight_foundation_remote_lines | length > 0 else '' }}
+
+- name: Read the commit of the Foundation main that git knows locally
   ansible.builtin.command:
-    argv: [git, -C, "{{ preflight_repo_root }}", rev-parse, --verify, --quiet, "main@{upstream}^{commit}"]
+    argv:
+      - git
+      - -C
+      - "{{ preflight_repo_root }}"
+      - rev-parse
+      - --verify
+      - --quiet
+      - "refs/remotes/{{ preflight_foundation_remote }}/main^{commit}"
   delegate_to: localhost
   run_once: true
   become: false
   changed_when: false
   check_mode: false
   failed_when: false
+  when: preflight_foundation_remote | length > 0
   register: preflight_git_main_head
 
-- name: Record the branch name
+- name: Record the branch name and the Foundation main
   ansible.builtin.set_fact:
     preflight_branch: "{{ preflight_git_branch.stdout if preflight_git_branch.rc == 0 else '(detached HEAD)' }}"
+    preflight_main_ref: "{{ (preflight_foundation_remote ~ '/main') if preflight_foundation_remote | length > 0 else '' }}"
+    preflight_main_commit: >-
+      {{ preflight_git_main_head.stdout
+         if (preflight_git_main_head.rc | default(1)) == 0 else '' }}
 
 # A stop, with an override: deploying another commit on purpose (a
 # hotfix, a rollback to an older commit) is allowed with
-# -e announce_deploy_not_main=true. The remote-tracking ref is only as new
-# as the last `git fetch` or `git pull`; DEPLOY.md's pre-flight says to run
-# `git switch main && git pull` first.
-- name: Compare the checkout with the remote-tracking main
+# -e announce_deploy_not_main=true. Each message names the fix commands
+# with the real remote name.
+- name: Compare the checkout with the Foundation main
   ansible.builtin.set_fact:
-    preflight_main_warnings: >-
-      {{ ([] if preflight_branch == 'main' else
-          ['The checkout is on ' ~ preflight_branch ~ ', not main.'])
-      + (['git knows no remote-tracking branch for main (no local main, or main has no upstream), so this play cannot check that HEAD is the current main.']
-          if preflight_git_main_head.rc != 0 else
-         (['HEAD ' ~ preflight_git_head.stdout[:12] ~ ' is not '
-           ~ (preflight_git_main_ref.stdout | regex_replace('^refs/remotes/', '')) ~ ' '
-           ~ preflight_git_main_head.stdout[:12] ~ ' (as of the last git fetch).']
-          if preflight_git_main_head.stdout != preflight_git_head.stdout else [])) }}
+    preflight_main_problem: >-
+      {{ ('No git remote points to AztecProtocol/announcement-tool (git remote -v: '
+          ~ preflight_remote_summary ~ ').')
+         if preflight_main_ref == '' else
+         (('git knows no ' ~ preflight_main_ref ~ ' (' ~ preflight_foundation_url
+           ~ '): that remote was never fetched, or has no main.')
+          if preflight_main_commit == '' else
+          (('HEAD ' ~ preflight_git_head.stdout[:12] ~ ' is not ' ~ preflight_main_ref
+            ~ ' ' ~ preflight_main_commit[:12] ~ ' (as of the last git fetch).')
+           if preflight_main_commit != preflight_git_head.stdout else '')) }}
+    preflight_main_fix: >-
+      {{ ('`git remote add foundation https://github.com/AztecProtocol/announcement-tool.git'
+          ~ ' && git fetch foundation && git switch main && git merge --ff-only foundation/main`')
+         if preflight_main_ref == '' else
+         ('`git fetch ' ~ preflight_foundation_remote ~ ' && git switch main && git merge --ff-only '
+          ~ preflight_main_ref ~ '` (or, to make main follow it for good: `git branch -u '
+          ~ preflight_main_ref ~ ' main`, then `git pull --ff-only`)') }}
 
 - name: Warn if the checkout may not be the current main
   ansible.builtin.debug:
     msg: >-
-      WARNING: this deploy may not be the current main.
-      {{ preflight_main_warnings | join(' ') }}
+      WARNING: this deploy may not be the current main of
+      AztecProtocol/announcement-tool. {{ preflight_main_problem }}
       If this is not on purpose, stop now (Ctrl-C), run
-      `git switch main && git pull`, and run the play again.
-  when: preflight_main_warnings | length > 0
+      {{ preflight_main_fix }}, and run the play again.
+  when: preflight_main_problem | length > 0
   run_once: true
 
 - name: Stop unless the checkout is the current main or the override is set
   ansible.builtin.fail:
     msg: >-
-      Deploy stopped: this checkout is not the current main.
-      {{ preflight_main_warnings | join(' ') }}
-      To deploy main: run `git switch main && git pull`, then run the play
+      Deploy stopped: this checkout is not the current main of
+      AztecProtocol/announcement-tool. {{ preflight_main_problem }}
+      To deploy main: run {{ preflight_main_fix }}, then run the play
       again. To deploy this commit on purpose (a hotfix, a rollback), add
       -e announce_deploy_not_main=true. Nothing was changed on the host.
   when:
-    - preflight_main_warnings | length > 0
+    - preflight_main_problem | length > 0
     - not (announce_deploy_not_main | default(false) | bool)
   run_once: true
 

@@ -284,11 +284,14 @@ The first role, `preflight`, changes nothing: on the machine running
 Ansible it checks for GNU rsync 3.x (macOS's `/usr/bin/rsync` is
 openrsync and is refused; see "Before you start" in `DEPLOY.md`), for
 uncommitted changes to tracked files and for a tracked `.rsync-filter`,
-and stops when the checkout is not the current `main` (unless
-`-e announce_deploy_not_main=true` is given). Only then do the roles that change the host run. `compose_up`
-copies only the files git tracks to `/opt/announce/repo`,
-deletes every other file there, and writes the deployed commit to
-`/opt/announce/repo/DEPLOYED_COMMIT` (commit and branch). The play
+and stops when `HEAD` is not `main` of the git remote that points to
+`AztecProtocol/announcement-tool`, as of the last fetch (unless
+`-e announce_deploy_not_main=true` is given). Only then do the roles that
+change the host run. `compose_up` copies only the files git tracks to
+`/opt/announce/repo` (readable for every user, whatever the umask of the
+checkout), deletes every other file there, and writes the deployed commit
+to `/opt/announce/repo/DEPLOYED_COMMIT` (commit, branch, the Foundation
+remote URL and the ref it was compared with). The play
 stops if a tracked file has uncommitted changes, unless
 `-e announce_allow_dirty_deploy=true` is given. See step 4 of `DEPLOY.md`.
 
