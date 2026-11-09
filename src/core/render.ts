@@ -87,9 +87,12 @@ export const HEADING_RE = /^(#{2,3})[ \t]+(.+?)[ \t]*$/;
  * of balanced parentheses (en.wikipedia.org/wiki/Foo_(bar)), so the closing
  * ")" of the link is not mistaken for part of the URL or left behind as
  * text. Anything else (javascript:, data:, unbalanced parentheses) does not
- * match and stays literal. Shared by every renderer and by the link-preview
- * summary so they agree on what is a link. The /g flag is safe to share:
- * it is only used with String.prototype.replace, which resets lastIndex.
+ * match and stays literal. Used by every renderer here and by the
+ * link-preview summary (src/web/link-preview.ts), so they agree on what is a
+ * link. app/admin/preview-render.ts cannot import it (client bundle boundary)
+ * and keeps a hand-made copy; test/preview-render.test.ts checks that the two
+ * sources are identical. The /g flag is safe to share: here it is only used
+ * with String.prototype.replace, which resets lastIndex.
  */
 export const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/(?:[^()\s]|\([^()\s]*\))+)\)/g;
 

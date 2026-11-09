@@ -6,7 +6,7 @@ import { testSql, resetDb, TEST_DB_URL } from './helpers.js';
 import { createDraft, requestPublish, confirmPublish } from '../src/core/announcements.js';
 import type { Announcement, AnnouncementInput, Severity } from '../src/core/types.js';
 import {
-  SEVERITY_EMBED_COLOR, announcementSummary, announcementMetadata, announcementViewport, SITE_NAME,
+  SEVERITY_EMBED_COLOR, announcementSummary, announcementMetadata, announcementViewport, siteName,
 } from '../src/web/link-preview.js';
 import { renderBodyHtml } from '../src/core/render.js';
 import { existsSync } from 'node:fs';
@@ -47,6 +47,19 @@ function pngSize(path: string): { w: number; h: number; colorType: number } {
   expect(b.subarray(1, 4).toString('latin1')).toBe('PNG');
   return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), colorType: b[25] };
 }
+
+describe('siteName', () => {
+  it('is the host of PUBLIC_BASE_URL', () => {
+    process.env.PUBLIC_BASE_URL = 'https://announce.example:8443/';
+    expect(siteName()).toBe('announce.example:8443');
+  });
+  it('falls back to the default host when PUBLIC_BASE_URL does not parse', () => {
+    process.env.PUBLIC_BASE_URL = '';
+    expect(siteName()).toBe('announce.aztec.network');
+    process.env.PUBLIC_BASE_URL = 'https://';
+    expect(siteName()).toBe('announce.aztec.network');
+  });
+});
 
 describe('severity embed colours', () => {
   it('are the dark-background embed colours, one per severity', () => {
@@ -113,6 +126,20 @@ describe('announcementSummary', () => {
     expect(announcementSummary('> quoted\n\nBody three.')).toBe('Body three.');
   });
 
+  it('a heading line inside a multi-line paragraph is page text, as renderBodyHtml shows it', () => {
+    const md = '## Why\nSequencers must upgrade.';
+    expect(renderBodyHtml(md)).toContain('## Why<br>');
+    expect(announcementSummary(md)).toBe('## Why Sequencers must upgrade.');
+    expect(announcementSummary(md)).toBe(pageText(md));
+  });
+
+  it('a code fence spanning a blank line contributes no text, before or after the gap', () => {
+    const md = '```\nline one\n\nline two\n```\n\nBody after the fence.';
+    expect(announcementSummary(md)).toBe('Body after the fence.');
+    expect(announcementSummary('Intro text.\n```\ncode\n\nmore code\n```')).toBe('Intro text.');
+    expect(announcementSummary('```\nunclosed\n\nstill code')).toBe('');
+  });
+
   it('matches the page text for ordinary prose with bold, code and links', () => {
     const md = 'Run `aztec --version` and **upgrade**; see [notes](https://x.test/n).';
     expect(announcementSummary(md)).toBe(pageText(md));
@@ -131,7 +158,7 @@ describe('announcementMetadata', () => {
         url: `https://announce.example/a/2026-11-upgrade-${sev}`,
         title: `Upgrade (${sev})`,
         description: 'Sequencers and provers must upgrade before the deadline.',
-        siteName: SITE_NAME,
+        siteName: 'announce.example',
       });
       expect(m.twitter).toMatchObject({ card: 'summary', title: `Upgrade (${sev})` });
       expect(m.openGraph).toMatchObject({ images: [ANN_IMG] });
@@ -151,7 +178,7 @@ describe('site-level preview (home, archive)', () => {
     const mod = await import('../app/layout.js');
     const m = mod.generateMetadata();
     expect(m.twitter).toMatchObject({ card: 'summary_large_image' });
-    expect(m.openGraph).toMatchObject({ type: 'website', siteName: SITE_NAME, images: [SITE_IMG] });
+    expect(m.openGraph).toMatchObject({ type: 'website', siteName: siteName(), images: [SITE_IMG] });
     expect(m.twitter).toMatchObject({ images: [SITE_IMG] });
     expect((mod as Record<string, unknown>).generateViewport).toBeUndefined();
     expect((mod as Record<string, unknown>).viewport).toBeUndefined();
@@ -161,15 +188,15 @@ describe('site-level preview (home, archive)', () => {
     process.env.PUBLIC_BASE_URL = 'https://announce.example';
     const home = await import('../app/page.js');
     const archive = await import('../app/archive/page.js');
-    expect(home.generateMetadata().openGraph).toMatchObject({ url: 'https://announce.example/', siteName: SITE_NAME });
-    expect(archive.generateMetadata().openGraph).toMatchObject({ url: 'https://announce.example/archive', siteName: SITE_NAME });
+    expect(home.generateMetadata().openGraph).toMatchObject({ url: 'https://announce.example/', siteName: 'announce.example' });
+    expect(archive.generateMetadata().openGraph).toMatchObject({ url: 'https://announce.example/archive', siteName: 'announce.example' });
     expect(home.generateMetadata().twitter).toMatchObject({ card: 'summary_large_image' });
     expect(archive.generateMetadata().twitter).toMatchObject({ card: 'summary_large_image' });
   });
 
-  // A page that sets its own openGraph replaces the layout's, and the root
-  // app/opengraph-image.png then no longer reaches it (seen on /archive), so
-  // the site image is named explicitly.
+  // A page that sets its own openGraph replaces the layout's openGraph, so
+  // every site-level page names the static site image (public/brand/og-site.png)
+  // itself rather than inheriting it.
   it('archive names the site image for og and twitter', async () => {
     const archive = await import('../app/archive/page.js');
     const m = archive.generateMetadata();

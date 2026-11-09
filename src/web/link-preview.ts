@@ -10,9 +10,16 @@
 import type { Metadata, Viewport } from 'next';
 import type { Announcement, Severity } from '../core/types.js';
 import { canonicalUrl, HEADING_RE, MD_LINK_RE } from '../core/render.js';
-import { publicBaseUrl } from '../core/public-base-url.js';
+import { DEFAULT_PUBLIC_BASE_URL, publicBaseUrl } from '../core/public-base-url.js';
 
-export const SITE_NAME = 'announce.aztec.network';
+/** og:site_name: the host the site is served from (PUBLIC_BASE_URL). */
+export function siteName(): string {
+  try {
+    return new URL(publicBaseUrl()).host;
+  } catch {
+    return new URL(DEFAULT_PUBLIC_BASE_URL).host;
+  }
+}
 export const SITE_TITLE = 'Aztec release announcements';
 export const SITE_DESCRIPTION = 'Upgrades, governance events and operational notices for Aztec operators.';
 
@@ -34,21 +41,33 @@ const ANNOUNCEMENT_IMAGE = { url: '/brand/og-announcement.png', width: 600, heig
 
 const SUMMARY_MAX = 200; // code points, ellipsis included
 
-// Paragraphs that are not prose for a preview: a code fence, an HTML comment
-// or a quote. (The page shows them as literal text; a preview should not
-// lead with them.)
-const NOT_PROSE = /^(```|<!--|>)/;
+// Paragraphs that are not prose for a preview: an HTML comment or a quote.
+// (The page shows them as literal text; a preview should not lead with them.)
+const NOT_PROSE = /^(<!--|>)/;
+const FENCE = /^\s*```/;
 
 /**
  * First prose paragraph of the markdown body as plain text, at most 200 code
- * points. Uses the renderer's own heading and link rules (HEADING_RE,
- * MD_LINK_RE), so the text matches what /a/<slug> shows: a link becomes its
- * label, a non-http link stays literal, a lone "#" line is text.
+ * points. Uses the renderer's own paragraph, heading and link rules
+ * (renderBodyHtml's blank-line split, HEADING_RE, MD_LINK_RE), so the text
+ * matches what /a/<slug> shows: a heading is skipped only when it is a whole
+ * paragraph on its own (inside a multi-line paragraph the page shows it as
+ * text), a link becomes its label, a non-http link stays literal. Code fences
+ * are tracked across paragraphs, so a fence with a blank line inside it
+ * contributes no text.
  */
 export function announcementSummary(md: string): string {
+  let inFence = false;
   for (const para of md.split(/\n{2,}/)) {
-    if (NOT_PROSE.test(para.trim())) continue;
-    const prose = para.split('\n').filter(l => !HEADING_RE.test(l)).join(' ');
+    const kept: string[] = [];
+    for (const line of para.split('\n')) {
+      if (FENCE.test(line)) { inFence = !inFence; continue; }
+      if (!inFence) kept.push(line);
+    }
+    const prose = kept.join('\n').trim();
+    if (!prose || NOT_PROSE.test(prose)) continue;
+    // renderBodyHtml: a paragraph that is one heading line becomes h2/h3.
+    if (!prose.includes('\n') && HEADING_RE.test(prose)) continue;
     const text = prose
       .replace(MD_LINK_RE, '$1')
       .replace(/\*\*([^*\n]+)\*\*/g, '$1')
@@ -77,7 +96,7 @@ export function announcementMetadata(a: Announcement): Metadata {
       url: canonicalUrl(a),
       title: a.title,
       description,
-      siteName: SITE_NAME,
+      siteName: siteName(),
       images: [ANNOUNCEMENT_IMAGE],
     },
     // `summary` = small square thumbnail on the right of the embed, so a
@@ -102,7 +121,7 @@ export function siteMetadata(path?: string): Pick<Metadata, 'openGraph' | 'twitt
       ...(path === undefined ? {} : { url: `${publicBaseUrl()}${path}` }),
       title: SITE_TITLE,
       description: SITE_DESCRIPTION,
-      siteName: SITE_NAME,
+      siteName: siteName(),
       ...image,
     },
     twitter: { card: 'summary_large_image', title: SITE_TITLE, description: SITE_DESCRIPTION, ...image },

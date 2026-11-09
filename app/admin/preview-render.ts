@@ -32,6 +32,13 @@ export type Block =
 const HEADING_RE = /^(#{2,3})[ \t]+(.+?)[ \t]*$/;
 const BULLET_RE = /^[-*][ \t]+(.*)$/;
 /**
+ * Mirrors MD_LINK_RE in src/core/render.ts (same reason as HEADING_RE above:
+ * no renderer import across the client boundary): an http(s) URL with at most
+ * one level of balanced parentheses. Keep it identical by hand; a test in
+ * test/preview-render.test.ts compares the two sources.
+ */
+const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/(?:[^()\s]|\([^()\s]*\))+)\)/g;
+/**
  * The tag line ([MAINNET] [CRITICAL] [UPGRADE]) can be preceded by the kind
  * prefix that renderMarkdown/renderTelegramHtml prepend for non-first
  * deliveries — kindPrefix() in src/core/render.ts returns 'UPDATED: ' or
@@ -43,7 +50,7 @@ const TAG_LINE_RE = /^(?:(?:UPDATED|REMINDER): )?(\[[A-Z0-9 _-]+\][ \t]*)+$/;
 
 /** Inline markdown → spans. Pair-wise like the renderer: an unmatched marker stays literal. */
 function markdownSpans(text: string): Inline[] {
-  const pattern = /\*\*([^*\n]+)\*\*|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  const pattern = new RegExp(`\\*\\*([^*\\n]+)\\*\\*|\`([^\`\\n]+)\`|${MD_LINK_RE.source}`, 'g');
   return collect(text, pattern, m => {
     if (m[1] !== undefined) return { kind: 'bold', text: m[1] };
     if (m[2] !== undefined) return { kind: 'code', text: m[2] };

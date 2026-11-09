@@ -4,7 +4,7 @@ import type { Announcement, AnnouncementInput, DeliveryKind, DiscordRole } from 
 import { renderPlain, renderMarkdown, renderTelegramHtml, renderEmail } from './render.js';
 import { rowToSetting, broadcastTargetsFor } from './outbox.js';
 import { makeSlug } from './ids.js';
-import { validateAnnouncement } from './validate.js';
+import { validateAnnouncement, validateStored } from './validate.js';
 import { composeMentionLine, parseDiscordRoles } from './discord-mentions.js';
 import { isChannelEnabled } from './enabled-channels.js';
 
@@ -130,11 +130,12 @@ export async function previewAnnouncement(
  *
  * A ZodError is deliberately not caught. Stored rows were validated when they
  * were saved, so a failure here is a real fault a reviewer must see, not an
- * empty preview pane.
+ * empty preview pane. The check is validateStored: the input-only body length
+ * cap (BODY_MAX) is left out, so a row saved before the cap still renders.
  */
 export async function previewStored(
   sql: Sql, a: Announcement, kind: DeliveryKind = 'publish',
 ): Promise<PreviewSet> {
-  const { warnings } = validateAnnouncement(a);
+  const { warnings } = validateStored(a);
   return renderPreviewSet(sql, a, kind, warnings);
 }
