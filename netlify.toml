@@ -42,6 +42,12 @@
   # Non-secret. Read by the app to distinguish "running on Netlify" (functions,
   # no long-lived worker process) from the VM deployment (persistent worker).
   DEPLOY_TARGET = "netlify"
+  # Secrets scanning matches the value of DATABASE_SSL_ROOT_CERT (a secret in
+  # the Netlify UI) in this file. The file is the public ISRG Root X1
+  # certificate that cert-reload verifies the Postgres chain against; it is not
+  # a secret. Only this one path is omitted; every other file and the build
+  # output are still scanned for every secret value.
+  SECRETS_SCAN_OMIT_PATHS = "infra/certs/isrgrootx1.pem"
 
 # -----------------------------------------------------------------------------
 # Scheduled function
