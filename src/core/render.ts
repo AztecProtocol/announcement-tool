@@ -291,15 +291,15 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
   // Inline styles + fixed light colors on purpose: email clients ignore <style>
   // blocks unpredictably and handle dark mode themselves.
   const html = [
-    `<div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1c2130;max-width:600px;margin:0 auto;padding:16px">`,
-    `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em;color:#6b7280;margin:0 0 12px">${escapeHtml(`${kindPrefix(kind)}${tagLine(a)}`)}</p>`,
+    `<div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#141900;max-width:600px;margin:0 auto;padding:16px">`,
+    `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em;color:#626554;margin:0 0 12px">${escapeHtml(`${kindPrefix(kind)}${tagLine(a)}`)}</p>`,
     `<h1 style="font-size:19px;line-height:1.35;margin:0 0 12px">${escapeHtml(a.title)}</h1>`,
     renderBodyHtml(a.bodyMd),
     actions,
     links,
     `<p style="margin:0 0 12px"><a href="${canonicalUrl(a)}">View this announcement</a></p>`,
-    `<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">`,
-    `<p style="font-size:12px;color:#6b7280;margin:0">You receive this because you subscribed to Aztec release announcements. <a href="{{UNSUBSCRIBE}}" style="color:#6b7280">Manage preferences or unsubscribe</a></p>`,
+    `<hr style="border:none;border-top:1px solid #e8e8e6;margin:16px 0">`,
+    `<p style="font-size:12px;color:#626554;margin:0">You receive this because you subscribed to Aztec release announcements. <a href="{{UNSUBSCRIBE}}" style="color:#626554">Manage preferences or unsubscribe</a></p>`,
     `</div>`,
   ].join('\n');
   return {

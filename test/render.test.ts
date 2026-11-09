@@ -336,3 +336,24 @@ describe('headings', () => {
     expect(stripMarkdown('# Top')).toBe('# Top');
   });
 });
+
+describe('renderEmail brand colours (2026 brand pack)', () => {
+  const { html } = renderEmail({ ...a, bodyMd: 'Body with ![alt](https://example.test/x.png) image syntax.' }, 'publish');
+
+  it('uses Ink text, Grey 300 meta/footer and a Grey 50 rule', () => {
+    expect(html).toContain('color:#141900;');
+    expect(html).toMatch(/letter-spacing:\.04em;color:#626554;/);
+    expect(html).toContain('border-top:1px solid #e8e8e6');
+    expect(html).toContain('<p style="font-size:12px;color:#626554;margin:0">');
+    expect(html).toContain('style="color:#626554">Manage preferences or unsubscribe</a>');
+  });
+
+  it('leaves none of the old wrapper colours', () => {
+    for (const hex of ['#1c2130', '#6b7280', '#e5e7eb']) expect(html).not.toContain(hex);
+  });
+
+  it('references no image (no <img>, no background image)', () => {
+    expect(html).not.toMatch(/<img\b/i);
+    expect(html).not.toMatch(/background(-image)?:\s*url\(/i);
+  });
+});
