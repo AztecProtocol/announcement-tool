@@ -298,6 +298,12 @@ const stored = (over: Partial<Announcement> = {}): Announcement => ({
 });
 
 describe('previewStored', () => {
+  it('renders a stored row longer than BODY_MAX instead of failing the review page', async () => {
+    const { BODY_MAX } = await import('../src/core/validate.js');
+    const preview = await previewStored(sql, stored({ bodyMd: 'a'.repeat(BODY_MAX + 5000) }));
+    expect(preview.webhook).toBeDefined();
+  });
+
   it('keeps the stored id, revision and slug in the webhook payload', async () => {
     const payload = JSON.parse((await previewStored(sql, stored())).webhook!);
 

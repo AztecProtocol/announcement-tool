@@ -206,8 +206,20 @@ describe('attribute injection', () => {
     // {{UNSUBSCRIBE}} is a placeholder the mail adapter substitutes, so the
     // template's own anchors are excluded from the href check by matching
     // only the part of the document the author controls.
-    const body = html.split('<hr')[0];
-    expect(violations(body, ['div', 'p', 'h1', 'br', 'ul', 'li', 'strong'])).toEqual([]);
+    // Only the author-controlled part: from the title to the footer rule. The
+    // word-mark header (the one <img>) sits before it and is not checked here.
+    const body = html.slice(html.indexOf('<h1'), html.indexOf('<hr'));
+    // The severity action block inside that range is template markup; each of
+    // its table tags must be exactly the template's, then the rest is held to
+    // the original allow-list.
+    const templateTags = new Set([
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">',
+      '<tr>', '<td style="border-left:4px solid #a8180f;padding:4px 0 4px 14px">', '<td height="12" style="font-size:0;line-height:0">',
+    ]);
+    const tableTags = body.match(/<(table|tr|td)\b[^>]*>/g) ?? [];
+    expect(tableTags.filter(t => !templateTags.has(t))).toEqual([]);
+    expect(violations(body.replace(/<\/?(table|tr|td)\b[^>]*>/g, ''), ['div', 'p', 'h1', 'br', 'ul', 'li', 'strong'])).toEqual([]);
+    expect(html.match(/<img\b/gi) ?? []).toHaveLength(1);
   });
 
   it('an apostrophe in the url does not become an undocumented entity', () => {
@@ -352,8 +364,97 @@ describe('renderEmail brand colours (2026 brand pack)', () => {
     for (const hex of ['#1c2130', '#6b7280', '#e5e7eb']) expect(html).not.toContain(hex);
   });
 
-  it('references no image (no <img>, no background image)', () => {
-    expect(html).not.toMatch(/<img\b/i);
+  // Deliberately replaces the earlier "no image in email" guard: the email now
+  // carries exactly one picture, the opaque word mark, and nothing else.
+  it('references exactly one image: the opaque word mark, absolute https, sized, with alt', () => {
+    const imgs = html.match(/<img\b[^>]*>/gi) ?? [];
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0]).toBe(
+      '<img src="https://announce.aztec.network/brand/email/aztec-wordmark-ink@2x.png" width="96" height="22" alt="Aztec" style="display:block;border:0">',
+    );
     expect(html).not.toMatch(/background(-image)?:\s*url\(/i);
+  });
+
+  it('puts the word mark first, in a one-cell Paper table', () => {
+    const start = html.indexOf('<table');
+    expect(start).toBeGreaterThan(-1);
+    expect(start).toBeLessThan(html.indexOf('<h1'));
+    expect(html).toMatch(/<table role="presentation"[^>]*>\s*<tr>\s*<td bgcolor="#fff9f2" style="background:#fff9f2;padding:14px 16px">\s*<img /);
+  });
+
+  it('the word-mark URL follows PUBLIC_BASE_URL', () => {
+    const saved = process.env.PUBLIC_BASE_URL;
+    process.env.PUBLIC_BASE_URL = 'https://mail.example/';
+    try {
+      expect(renderEmail(a, 'publish').html).toContain('src="https://mail.example/brand/email/aztec-wordmark-ink@2x.png"');
+    } finally {
+      if (saved === undefined) delete process.env.PUBLIC_BASE_URL; else process.env.PUBLIC_BASE_URL = saved;
+    }
+  });
+});
+
+describe('renderEmail severity line on the action block', () => {
+  const colours = { critical: '#a8180f', recommended: '#7a5a06', info: '#12405e' } as const;
+  for (const [sev, hex] of Object.entries(colours) as [keyof typeof colours, string][]) {
+    it(`${sev}: one-cell table, ${hex} left border on the td, uppercase label above "Action required:"`, () => {
+      const { html } = renderEmail({ ...a, severity: sev }, 'publish');
+      const td = `<td style="border-left:4px solid ${hex};padding:4px 0 4px 14px">`;
+      expect(html).toContain(td);
+      const block = html.slice(html.indexOf(td));
+      expect(block.indexOf(`>${sev.toUpperCase()}</p>`)).toBeGreaterThan(-1);
+      expect(block.indexOf(`>${sev.toUpperCase()}</p>`)).toBeLessThan(block.indexOf('<strong>Action required:</strong>'));
+      expect(block).toMatch(new RegExp(`<p style="margin:0 0 2px;font-size:12px;font-weight:700;letter-spacing:\\.06em;color:${hex}">${sev.toUpperCase()}</p>`));
+      expect(html.slice(0, html.indexOf(td))).toMatch(/<table role="presentation"[^>]*>\s*<tr>\s*$/);
+    });
+  }
+
+  it('escapes the severity label and falls back to the info colour for an unknown severity', () => {
+    const { html } = renderEmail({ ...a, severity: '<b>x' as never }, 'publish');
+    expect(html).toContain('border-left:4px solid #12405e');
+    expect(html).toContain('>&lt;B&gt;X</p>');
+    expect(html).not.toContain('<B>X');
+  });
+
+  it('uses spacer rows, not table margins (Outlook ignores margin on <table>)', () => {
+    const { html } = renderEmail(a, 'publish');
+    for (const t of html.match(/<table\b[^>]*>/g) ?? []) expect(t).not.toMatch(/margin/);
+    expect(html).toContain('<tr><td height="16" style="font-size:0;line-height:0">&nbsp;</td></tr>');
+    expect(html).toContain('<tr><td height="12" style="font-size:0;line-height:0">&nbsp;</td></tr>');
+  });
+
+  it('no actions: no severity block at all', () => {
+    const { html } = renderEmail({ ...a, actionsRequired: [] }, 'publish');
+    expect(html).not.toContain('border-left:4px');
+    expect(html).not.toContain('Action required');
+    expect((html.match(/<table/g) ?? []).length).toBe(1); // only the word-mark header
+  });
+
+  it('the plain-text part is unchanged', () => {
+    const { text } = renderEmail(a, 'publish');
+    expect(text).toBe(`${renderPlain(a, 'publish')}\n\n—\nYou receive this because you subscribed to Aztec release announcements.\nManage preferences or unsubscribe: {{UNSUBSCRIBE}}\n`);
+  });
+});
+
+describe('email word-mark file', () => {
+  it('is a 192 x 44 PNG with no alpha channel (colour type 2) on Paper', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const b = readFileSync(join(__dirname, '..', 'public', 'brand', 'email', 'aztec-wordmark-ink@2x.png'));
+    expect(b.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect([b.readUInt32BE(16), b.readUInt32BE(20)]).toEqual([192, 44]);
+    expect(b[25]).toBe(2);
+  });
+});
+
+describe('markdown links with balanced parentheses (shared MD_LINK_RE)', () => {
+  const md = 'Read [the wiki](https://en.wikipedia.org/wiki/Foo_(bar)) first.';
+  it('mdInlineHtml keeps the parentheses inside the href', () => {
+    expect(mdInlineHtml(md)).toBe('Read <a href="https://en.wikipedia.org/wiki/Foo_(bar)">the wiki</a> first.');
+  });
+  it('stripMarkdown keeps the whole URL', () => {
+    expect(stripMarkdown(md)).toBe('Read the wiki: https://en.wikipedia.org/wiki/Foo_(bar) first.');
+  });
+  it('a javascript: link still stays literal text', () => {
+    expect(mdInlineHtml('[click](javascript:alert(1))')).toBe('[click](javascript:alert(1))');
   });
 });

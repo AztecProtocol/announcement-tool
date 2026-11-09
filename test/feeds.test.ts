@@ -50,3 +50,52 @@ describe('feeds', () => {
     expect((buildJsonFeed([]) as { items: unknown[] }).items).toEqual([]);
   });
 });
+
+describe('feed icons', () => {
+  const ICON = 'https://announce.aztec.network/brand/feed-icon-512.png';
+  const FAVICON = 'https://announce.aztec.network/brand/feed-icon-64.png';
+
+  it('JSON Feed 1.1 carries top-level icon (512 px) and favicon (64 px) as absolute URLs', () => {
+    const feed = buildJsonFeed([ann]) as Record<string, unknown>;
+    expect(feed.icon).toBe(ICON);
+    expect(feed.favicon).toBe(FAVICON);
+    // JSON Feed 1.1 top-level keys only (no misspelt or 1.0-only fields)
+    const allowed = ['version', 'title', 'home_page_url', 'feed_url', 'description', 'user_comment',
+      'next_url', 'icon', 'favicon', 'authors', 'language', 'expired', 'hubs', 'items'];
+    expect(Object.keys(feed).filter(k => !allowed.includes(k))).toEqual([]);
+  });
+
+  it('Atom has exactly one <icon> and one <logo>, children of <feed> before the first <entry>', () => {
+    const xml = buildAtomFeed([ann]);
+    expect(xml.match(/<icon>/g)).toHaveLength(1);
+    expect(xml.match(/<logo>/g)).toHaveLength(1);
+    expect(xml).toContain(`  <icon>${FAVICON}</icon>`);
+    expect(xml).toContain(`  <logo>${ICON}</logo>`);
+    const firstEntry = xml.indexOf('<entry>');
+    expect(xml.indexOf('<icon>')).toBeLessThan(firstEntry);
+    expect(xml.indexOf('<logo>')).toBeLessThan(firstEntry);
+    expect(xml.indexOf('<icon>')).toBeGreaterThan(xml.indexOf('<feed '));
+  });
+
+  it('follows PUBLIC_BASE_URL', () => {
+    const saved = process.env.PUBLIC_BASE_URL;
+    process.env.PUBLIC_BASE_URL = 'https://feeds.example/';
+    try {
+      expect((buildJsonFeed([]) as Record<string, unknown>).icon).toBe('https://feeds.example/brand/feed-icon-512.png');
+      expect(buildAtomFeed([])).toContain('<icon>https://feeds.example/brand/feed-icon-64.png</icon>');
+    } finally {
+      if (saved === undefined) delete process.env.PUBLIC_BASE_URL; else process.env.PUBLIC_BASE_URL = saved;
+    }
+  });
+
+  it('icon files exist: square opaque PNGs of the stated size', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    for (const [f, n] of [['feed-icon-512.png', 512], ['feed-icon-64.png', 64]] as const) {
+      const b = readFileSync(join(__dirname, '..', 'public', 'brand', f));
+      expect(b.subarray(1, 4).toString('latin1')).toBe('PNG');
+      expect([b.readUInt32BE(16), b.readUInt32BE(20)]).toEqual([n, n]);
+      expect(b[25]).toBe(2); // colour type 2 = RGB, no alpha
+    }
+  });
+});

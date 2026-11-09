@@ -22,6 +22,23 @@ describe('ids', () => {
   });
 });
 
+describe('bodyMd length limit', () => {
+  it('accepts 20000 characters and refuses 20001 with a clear message', async () => {
+    const { ZodError } = await import('zod');
+    expect(() => validateAnnouncement({ ...base, bodyMd: 'a'.repeat(20000) })).not.toThrow();
+    let err: unknown;
+    try { validateAnnouncement({ ...base, bodyMd: 'a'.repeat(20001) }); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(ZodError);
+    const { safeErrorMessage } = await import('../app/admin/safe-error-message.js');
+    expect(safeErrorMessage(err, 'test')).toBe('The body is too long: at most 20,000 characters (this one has 20,001).');
+  });
+  it('a stored row over the limit still passes the stored-row check (review page does not crash)', async () => {
+    const { validateStored } = await import('../src/core/validate.js');
+    expect(() => validateStored({ ...base, bodyMd: 'a'.repeat(25000) })).not.toThrow();
+    expect(() => validateStored({ ...base, bodyMd: '' })).toThrow();
+  });
+});
+
 describe('validateAnnouncement', () => {
   it('accepts a valid input with no warnings', () => {
     expect(validateAnnouncement(base).warnings).toEqual([]);

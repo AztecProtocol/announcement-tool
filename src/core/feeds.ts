@@ -9,12 +9,20 @@ function baseUrl(): string {
   return publicBaseUrl();
 }
 
+// Feed-reader icons: Paper symbol on a full-bleed Ink square (opaque PNG).
+// 512 px = JSON Feed `icon` / Atom `<logo>`; 64 px = JSON Feed `favicon` /
+// Atom `<icon>`. PNG rather than the SVG favicon: many readers ignore SVG.
+const feedIcon = () => `${baseUrl()}/brand/feed-icon-512.png`;
+const feedFavicon = () => `${baseUrl()}/brand/feed-icon-64.png`;
+
 export function buildJsonFeed(items: Announcement[]): object {
   return {
     version: 'https://jsonfeed.org/version/1.1',
     title: 'Aztec release announcements',
     home_page_url: baseUrl(),
     feed_url: `${baseUrl()}/feed.json`,
+    icon: feedIcon(),
+    favicon: feedFavicon(),
     items: items.map(a => ({
       id: a.id,
       url: canonicalUrl(a),
@@ -44,6 +52,8 @@ export function buildAtomFeed(items: Announcement[]): string {
     `  <updated>${updated}</updated>`,
     `  <link href="${baseUrl()}/feed.atom" rel="self"/>`,
     `  <link href="${baseUrl()}/"/>`,
+    `  <icon>${xmlEscape(feedFavicon())}</icon>`,
+    `  <logo>${xmlEscape(feedIcon())}</logo>`,
     entries,
     '</feed>',
   ].join('\n');

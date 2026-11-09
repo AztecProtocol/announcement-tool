@@ -1,4 +1,4 @@
-import type { Announcement, DeliveryKind, Network } from './types.js';
+import type { Announcement, DeliveryKind, Network, Severity } from './types.js';
 import { publicBaseUrl } from './public-base-url.js';
 
 const NETWORK_ORDER: Network[] = ['mainnet', 'testnet'];
@@ -80,7 +80,21 @@ const escapeHtml = (s: string) => s
  * excluded: the compose toolbar only ever inserts "## ", so a lone "#" has no
  * canonical level to render as (see the round-trip regression tests).
  */
-const HEADING_RE = /^(#{2,3})[ \t]+(.+?)[ \t]*$/;
+export const HEADING_RE = /^(#{2,3})[ \t]+(.+?)[ \t]*$/;
+
+/**
+ * A markdown link we render: [label](http(s) URL). The URL may hold one level
+ * of balanced parentheses (en.wikipedia.org/wiki/Foo_(bar)), so the closing
+ * ")" of the link is not mistaken for part of the URL or left behind as
+ * text. Anything else (javascript:, data:, unbalanced parentheses) does not
+ * match and stays literal. Used by every renderer here and by the
+ * link-preview summary (src/web/link-preview.ts), so they agree on what is a
+ * link. app/admin/preview-render.ts cannot import it (client bundle boundary)
+ * and keeps a hand-made copy; test/preview-render.test.ts checks that the two
+ * sources are identical. The /g flag is safe to share: here it is only used
+ * with String.prototype.replace, which resets lastIndex.
+ */
+export const MD_LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/(?:[^()\s]|\([^()\s]*\))+)\)/g;
 
 /**
  * Strip the markdown we support (bold, inline code, links) for plain-text
@@ -97,7 +111,7 @@ export function stripMarkdown(md: string): string {
     .join('\n')
     .replace(/\*\*([^*\n]+)\*\*/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1')
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1: $2');
+    .replace(MD_LINK_RE, '$1: $2');
 }
 
 /**
@@ -173,7 +187,7 @@ export function mdInlineHtml(md: string): string {
     // later edit loosen the pattern above. The decode is required because the
     // escaped form hides the very characters both steps look for. A URL that
     // still fails is left as literal markdown text.
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (whole, label: string, url: string) => {
+    .replace(MD_LINK_RE, (whole, label: string, url: string) => {
       const href = escapeAttrUrl(unescapeHtml(url));
       return SAFE_URL_RE.test(href) ? `<a href="${escapeHtml(href)}">${label}</a>` : whole;
     });
@@ -273,10 +287,38 @@ export function renderMarkdown(a: Announcement, kind: DeliveryKind): string {
   ].join('\n');
 }
 
+/**
+ * Severity colours in email (all ≥ 6:1 on white). They mirror --critical,
+ * --recommended and --info in app/globals.css; email cannot read CSS custom
+ * properties, so the hexes are repeated here. Change both together.
+ */
+export const EMAIL_SEVERITY_COLOR: Readonly<Record<Severity, string>> = {
+  critical: '#a8180f',
+  recommended: '#7a5a06',
+  info: '#12405e',
+};
+
+// Opaque Paper-ground PNG (192 x 44, no alpha) shown at 96 x 22: a
+// transparent Ink mark would vanish in dark-mode mail clients, and Outlook
+// desktop does not render SVG. alt="Aztec" stands in when images are blocked.
+const emailWordmark = () =>
+  `<img src="${escapeHtml(`${publicBaseUrl()}/brand/email/aztec-wordmark-ink@2x.png`)}" width="96" height="22" alt="Aztec" style="display:block;border:0">`;
+
+// One-cell tables, not divs: Outlook desktop ignores background and
+// border-left on <div>. It also ignores margin on <table>, so the space below
+// each table is a spacer row of fixed height.
+const TABLE = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">';
+const spacerRow = (px: number) => `<tr><td height="${px}" style="font-size:0;line-height:0">&nbsp;</td></tr>`;
+
 export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: string; text: string; html: string } {
+  // Fallback for a severity outside the type (a stale row, a future value):
+  // the info colour, never an empty `border-left:4px solid undefined`.
+  const sev = EMAIL_SEVERITY_COLOR[a.severity] ?? EMAIL_SEVERITY_COLOR.info;
   const actions = a.actionsRequired.length
-    ? `<p style="margin:0 0 4px"><strong>Action required:</strong></p>`
-      + `<ul style="margin:0 0 12px;padding-left:20px">`
+    ? TABLE + `<tr><td style="border-left:4px solid ${sev};padding:4px 0 4px 14px">`
+      + `<p style="margin:0 0 2px;font-size:12px;font-weight:700;letter-spacing:.06em;color:${sev}">${escapeHtml(String(a.severity).toUpperCase())}</p>`
+      + `<p style="margin:0 0 4px"><strong>Action required:</strong></p>`
+      + `<ul style="margin:0;padding-left:20px">`
       + a.actionsRequired.map(act => {
           const parts = [escapeHtml(act.action)];
           if (act.deadline) parts.push(`by <strong>${escapeHtml(formatDeadline(act.deadline))}</strong>`);
@@ -284,6 +326,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
           return `<li style="margin:0 0 4px">${parts.join(' ')}</li>`;
         }).join('')
       + `</ul>`
+      + `</td></tr>${spacerRow(12)}</table>`
     : '';
   const links = a.links.length
     ? `<p style="margin:0 0 12px">${a.links.map(linkAnchor).join(' · ')}</p>`
@@ -292,6 +335,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
   // blocks unpredictably and handle dark mode themselves.
   const html = [
     `<div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#141900;max-width:600px;margin:0 auto;padding:16px">`,
+    `${TABLE}<tr><td bgcolor="#fff9f2" style="background:#fff9f2;padding:14px 16px">${emailWordmark()}</td></tr>${spacerRow(16)}</table>`,
     `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em;color:#626554;margin:0 0 12px">${escapeHtml(`${kindPrefix(kind)}${tagLine(a)}`)}</p>`,
     `<h1 style="font-size:19px;line-height:1.35;margin:0 0 12px">${escapeHtml(a.title)}</h1>`,
     renderBodyHtml(a.bodyMd),

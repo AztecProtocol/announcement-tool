@@ -245,3 +245,21 @@ describe('renderer output -> parser round trip', () => {
     });
   });
 });
+
+describe('link rule mirrors render.ts MD_LINK_RE', () => {
+  it('keeps balanced parentheses inside the href', () => {
+    const blocks = parseMarkdownBlocks('Read [x](https://en.wikipedia.org/wiki/Foo_(bar)) now.');
+    expect(blocks).toEqual([{ kind: 'para', spans: [
+      { kind: 'text', text: 'Read ' },
+      { kind: 'link', text: 'x', href: 'https://en.wikipedia.org/wiki/Foo_(bar)' },
+      { kind: 'text', text: ' now.' },
+    ] }]);
+  });
+  it('the source of the mirrored pattern is exactly the renderer\'s', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { MD_LINK_RE } = await import('../src/core/render.js');
+    const src = readFileSync(join(__dirname, '..', 'app', 'admin', 'preview-render.ts'), 'utf8');
+    expect(src).toContain(`/${MD_LINK_RE.source}/`);
+  });
+});
