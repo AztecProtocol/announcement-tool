@@ -17,7 +17,7 @@ type Props = { params: Promise<{ slug: string }> };
 const load = cache((slug: string) => getPublishedBySlug(getDb(), slug));
 
 // Link preview: title, summary, canonical og:url, `summary` card. The square
-// image is the opengraph-image.png next to this file.
+// image is public/brand/og-announcement.png, named in announcementMetadata.
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const a = await load((await params).slug);
   return a ? announcementMetadata(a) : {};

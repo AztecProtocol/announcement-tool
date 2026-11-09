@@ -8,6 +8,20 @@ import type { Announcement, AnnouncementInput, Severity } from '../src/core/type
 import {
   SEVERITY_EMBED_COLOR, announcementSummary, announcementMetadata, announcementViewport, SITE_NAME,
 } from '../src/web/link-preview.js';
+import { renderBodyHtml } from '../src/core/render.js';
+import { existsSync } from 'node:fs';
+
+const SITE_IMG = { url: '/brand/og-site.png', width: 1200, height: 630, type: 'image/png' };
+const ANN_IMG = { url: '/brand/og-announcement.png', width: 600, height: 600, type: 'image/png' };
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+// Visible text of the first paragraph as the page renders it.
+function pageText(md: string): string {
+  const first = renderBodyHtml(md).split('\n').find(l => l.startsWith('<p')) ?? '';
+  return first.replace(/<br>/g, ' ').replace(/<[^>]+>/g, '')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ').trim();
+}
 
 // Link previews (Open Graph / Twitter card) and the severity-coloured embed
 // bar (theme-color) that Discord and other chat clients draw from them.
@@ -57,6 +71,52 @@ describe('announcementSummary', () => {
   it('is empty for an empty body', () => {
     expect(announcementSummary('')).toBe('');
   });
+
+  it('counts code points: 150 emoji stay whole, 250 are cut without a lone surrogate', () => {
+    const e150 = '🚀'.repeat(150);
+    expect(announcementSummary(e150)).toBe(e150);
+    const cut = announcementSummary('🚀'.repeat(250));
+    expect(Array.from(cut)).toHaveLength(200);
+    expect(cut.endsWith('…')).toBe(true);
+    expect(LONE_SURROGATE.test(cut)).toBe(false);
+  });
+
+  it('cuts long CJK text without spaces at 200 code points, astral characters intact', () => {
+    const bmp = announcementSummary('漢'.repeat(300));
+    expect(Array.from(bmp)).toHaveLength(200);
+    expect(bmp).toBe(`${'漢'.repeat(199)}…`);
+    const astral = announcementSummary('𠀀'.repeat(300));
+    expect(Array.from(astral)).toHaveLength(200);
+    expect(LONE_SURROGATE.test(astral)).toBe(false);
+  });
+
+  it('a javascript: link stays literal, as on the page (no stray "click)")', () => {
+    const md = 'See [click](javascript:alert(1)) now.';
+    expect(announcementSummary(md)).not.toContain('click)');
+    expect(announcementSummary(md)).toBe(pageText(md));
+  });
+
+  it('a URL with balanced parentheses becomes just its label, as on the page', () => {
+    const md = 'Read [the wiki](https://en.wikipedia.org/wiki/Foo_(bar)) first.';
+    expect(announcementSummary(md)).toBe('Read the wiki first.');
+    expect(pageText(md)).toBe('Read the wiki first.');
+  });
+
+  it('uses the page heading rule: ## and ### are skipped, a lone # line is page text', () => {
+    expect(announcementSummary('### Why\n\nBody.')).toBe('Body.');
+    expect(announcementSummary('# Not a heading here\n\nBody.')).toBe(pageText('# Not a heading here\n\nBody.'));
+  });
+
+  it('skips paragraphs that start with a code fence, an HTML comment or a quote', () => {
+    expect(announcementSummary('```\ncode\n```\n\nBody one.')).toBe('Body one.');
+    expect(announcementSummary('<!-- note -->\n\nBody two.')).toBe('Body two.');
+    expect(announcementSummary('> quoted\n\nBody three.')).toBe('Body three.');
+  });
+
+  it('matches the page text for ordinary prose with bold, code and links', () => {
+    const md = 'Run `aztec --version` and **upgrade**; see [notes](https://x.test/n).';
+    expect(announcementSummary(md)).toBe(pageText(md));
+  });
 });
 
 describe('announcementMetadata', () => {
@@ -74,6 +134,8 @@ describe('announcementMetadata', () => {
         siteName: SITE_NAME,
       });
       expect(m.twitter).toMatchObject({ card: 'summary', title: `Upgrade (${sev})` });
+      expect(m.openGraph).toMatchObject({ images: [ANN_IMG] });
+      expect(m.twitter).toMatchObject({ images: [ANN_IMG] });
       expect(announcementViewport(ann(sev))).toEqual({ themeColor: SEVERITY_EMBED_COLOR[sev] });
     });
   }
@@ -89,7 +151,8 @@ describe('site-level preview (home, archive)', () => {
     const mod = await import('../app/layout.js');
     const m = mod.generateMetadata();
     expect(m.twitter).toMatchObject({ card: 'summary_large_image' });
-    expect(m.openGraph).toMatchObject({ type: 'website', siteName: SITE_NAME });
+    expect(m.openGraph).toMatchObject({ type: 'website', siteName: SITE_NAME, images: [SITE_IMG] });
+    expect(m.twitter).toMatchObject({ images: [SITE_IMG] });
     expect((mod as Record<string, unknown>).generateViewport).toBeUndefined();
     expect((mod as Record<string, unknown>).viewport).toBeUndefined();
   });
@@ -110,20 +173,27 @@ describe('site-level preview (home, archive)', () => {
   it('archive names the site image for og and twitter', async () => {
     const archive = await import('../app/archive/page.js');
     const m = archive.generateMetadata();
-    const img = { url: '/opengraph-image.png', width: 1200, height: 630, type: 'image/png' };
-    expect(m.openGraph).toMatchObject({ images: [img] });
-    expect(m.twitter).toMatchObject({ images: [img] });
+    expect(m.openGraph).toMatchObject({ images: [SITE_IMG] });
+    expect(m.twitter).toMatchObject({ images: [SITE_IMG] });
   });
 });
 
+// Plain static files under public/, named explicitly in metadata: no image
+// depends on Next's opengraph-image file convention (a prerendered route under
+// a dynamic segment is served from the runtime's own manifest).
 describe('preview image files', () => {
-  it('site image is 1200 x 630 PNG next to the root layout', () => {
-    const s = pngSize(join(ROOT, 'app', 'opengraph-image.png'));
-    expect([s.w, s.h]).toEqual([1200, 630]);
+  it('site image is a 1200 x 630 opaque PNG in public/brand', () => {
+    const s = pngSize(join(ROOT, 'public', 'brand', 'og-site.png'));
+    expect([s.w, s.h, s.colorType]).toEqual([1200, 630, 2]);
   });
-  it('announcement image is 600 x 600 PNG in the /a/[slug] route', () => {
-    const s = pngSize(join(ROOT, 'app', 'a', '[slug]', 'opengraph-image.png'));
-    expect([s.w, s.h]).toEqual([600, 600]);
+  it('announcement image is a 600 x 600 opaque PNG in public/brand', () => {
+    const s = pngSize(join(ROOT, 'public', 'brand', 'og-announcement.png'));
+    expect([s.w, s.h, s.colorType]).toEqual([600, 600, 2]);
+  });
+  it('no opengraph-image / twitter-image file convention is left in app/', () => {
+    for (const f of ['opengraph-image.png', 'twitter-image.png', 'a/[slug]/opengraph-image.png', 'a/[slug]/twitter-image.png']) {
+      expect(existsSync(join(ROOT, 'app', f)), f).toBe(false);
+    }
   });
 });
 

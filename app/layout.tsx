@@ -8,7 +8,7 @@ import './globals.css';
 // layout (app/icon.svg, app/apple-icon.png); no `icons` override here, or it
 // would replace them. metadataBase is read per request so that any absolute
 // metadata URL Next writes points at PUBLIC_BASE_URL, not the request host.
-// The site link-preview image is app/opengraph-image.png (file convention);
+// The site link-preview image is public/brand/og-site.png (siteMetadata);
 // /a/[slug] replaces it with its own square image and a severity theme-color.
 // No theme-color here: only announcement pages carry one.
 export function generateMetadata(): Metadata {

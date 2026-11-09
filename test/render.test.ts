@@ -206,10 +206,20 @@ describe('attribute injection', () => {
     // {{UNSUBSCRIBE}} is a placeholder the mail adapter substitutes, so the
     // template's own anchors are excluded from the href check by matching
     // only the part of the document the author controls.
-    const body = html.split('<hr')[0];
-    // table/tr/td/img come from the template (word-mark header, severity
-    // action block), not from author content.
-    expect(violations(body, ['div', 'p', 'h1', 'br', 'ul', 'li', 'strong', 'table', 'tr', 'td', 'img'])).toEqual([]);
+    // Only the author-controlled part: from the title to the footer rule. The
+    // word-mark header (the one <img>) sits before it and is not checked here.
+    const body = html.slice(html.indexOf('<h1'), html.indexOf('<hr'));
+    // The severity action block inside that range is template markup; each of
+    // its table tags must be exactly the template's, then the rest is held to
+    // the original allow-list.
+    const templateTags = new Set([
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">',
+      '<tr>', '<td style="border-left:4px solid #a8180f;padding:4px 0 4px 14px">', '<td height="12" style="font-size:0;line-height:0">',
+    ]);
+    const tableTags = body.match(/<(table|tr|td)\b[^>]*>/g) ?? [];
+    expect(tableTags.filter(t => !templateTags.has(t))).toEqual([]);
+    expect(violations(body.replace(/<\/?(table|tr|td)\b[^>]*>/g, ''), ['div', 'p', 'h1', 'br', 'ul', 'li', 'strong'])).toEqual([]);
+    expect(html.match(/<img\b/gi) ?? []).toHaveLength(1);
   });
 
   it('an apostrophe in the url does not become an undocumented entity', () => {
@@ -398,6 +408,20 @@ describe('renderEmail severity line on the action block', () => {
     });
   }
 
+  it('escapes the severity label and falls back to the info colour for an unknown severity', () => {
+    const { html } = renderEmail({ ...a, severity: '<b>x' as never }, 'publish');
+    expect(html).toContain('border-left:4px solid #12405e');
+    expect(html).toContain('>&lt;B&gt;X</p>');
+    expect(html).not.toContain('<B>X');
+  });
+
+  it('uses spacer rows, not table margins (Outlook ignores margin on <table>)', () => {
+    const { html } = renderEmail(a, 'publish');
+    for (const t of html.match(/<table\b[^>]*>/g) ?? []) expect(t).not.toMatch(/margin/);
+    expect(html).toContain('<tr><td height="16" style="font-size:0;line-height:0">&nbsp;</td></tr>');
+    expect(html).toContain('<tr><td height="12" style="font-size:0;line-height:0">&nbsp;</td></tr>');
+  });
+
   it('no actions: no severity block at all', () => {
     const { html } = renderEmail({ ...a, actionsRequired: [] }, 'publish');
     expect(html).not.toContain('border-left:4px');
@@ -419,5 +443,18 @@ describe('email word-mark file', () => {
     expect(b.subarray(1, 4).toString('latin1')).toBe('PNG');
     expect([b.readUInt32BE(16), b.readUInt32BE(20)]).toEqual([192, 44]);
     expect(b[25]).toBe(2);
+  });
+});
+
+describe('markdown links with balanced parentheses (shared MD_LINK_RE)', () => {
+  const md = 'Read [the wiki](https://en.wikipedia.org/wiki/Foo_(bar)) first.';
+  it('mdInlineHtml keeps the parentheses inside the href', () => {
+    expect(mdInlineHtml(md)).toBe('Read <a href="https://en.wikipedia.org/wiki/Foo_(bar)">the wiki</a> first.');
+  });
+  it('stripMarkdown keeps the whole URL', () => {
+    expect(stripMarkdown(md)).toBe('Read the wiki: https://en.wikipedia.org/wiki/Foo_(bar) first.');
+  });
+  it('a javascript: link still stays literal text', () => {
+    expect(mdInlineHtml('[click](javascript:alert(1))')).toBe('[click](javascript:alert(1))');
   });
 });

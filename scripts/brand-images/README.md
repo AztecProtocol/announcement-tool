@@ -14,8 +14,8 @@ shot 2 600,315 /tmp/og-site.png og-site.html
 shot 1 600,600 /tmp/og-announcement.png 'symbol-tile.html#52'
 
 # Flatten to opaque 8-bit RGB and strip metadata
-convert /tmp/og-site.png         -strip -background '#141900' -alpha remove -alpha off -define png:color-type=2 ../../app/opengraph-image.png
-convert /tmp/og-announcement.png -strip -background '#141900' -alpha remove -alpha off -define png:color-type=2 '../../app/a/[slug]/opengraph-image.png'
+convert /tmp/og-site.png         -strip -background '#141900' -alpha remove -alpha off -define png:color-type=2 ../../public/brand/og-site.png
+convert /tmp/og-announcement.png -strip -background '#141900' -alpha remove -alpha off -define png:color-type=2 ../../public/brand/og-announcement.png
 ```
 
 Feed-reader icons (Paper symbol at 60 %):

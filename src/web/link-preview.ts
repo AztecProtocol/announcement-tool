@@ -1,15 +1,15 @@
 // Link-preview metadata (Open Graph / Twitter card) and the severity-coloured
 // embed bar that chat clients (Discord, Slack, …) draw from <meta name="theme-color">.
 //
-// The images themselves are static files picked up through Next's file
-// convention: app/opengraph-image.png (site, 1200 x 630) and
-// app/a/[slug]/opengraph-image.png (every announcement, 600 x 600 square).
-// Next turns them into absolute og:image URLs through the root layout's
-// metadataBase (PUBLIC_BASE_URL).
+// The images are plain static files in public/brand, named explicitly here
+// (not Next's opengraph-image file convention, whose route under the dynamic
+// /a/[slug] segment is a prerendered entry the hosting runtime must resolve
+// from its own manifest). Next makes the relative URLs absolute through the
+// root layout's metadataBase (PUBLIC_BASE_URL).
 
 import type { Metadata, Viewport } from 'next';
 import type { Announcement, Severity } from '../core/types.js';
-import { canonicalUrl } from '../core/render.js';
+import { canonicalUrl, HEADING_RE, MD_LINK_RE } from '../core/render.js';
 import { publicBaseUrl } from '../core/public-base-url.js';
 
 export const SITE_NAME = 'announce.aztec.network';
@@ -28,23 +28,39 @@ export const SEVERITY_EMBED_COLOR: Readonly<Record<Severity, string>> = {
   info: '#3b82c4',
 };
 
-const SUMMARY_MAX = 200;
-const HEADING = /^\s{0,3}#{1,6}\s/;
+// Static images in public/brand (made by scripts/brand-images/).
+const SITE_IMAGE = { url: '/brand/og-site.png', width: 1200, height: 630, type: 'image/png' };
+const ANNOUNCEMENT_IMAGE = { url: '/brand/og-announcement.png', width: 600, height: 600, type: 'image/png' };
 
-/** First prose paragraph of the markdown body as plain text, at most 200 chars. */
+const SUMMARY_MAX = 200; // code points, ellipsis included
+
+// Paragraphs that are not prose for a preview: a code fence, an HTML comment
+// or a quote. (The page shows them as literal text; a preview should not
+// lead with them.)
+const NOT_PROSE = /^(```|<!--|>)/;
+
+/**
+ * First prose paragraph of the markdown body as plain text, at most 200 code
+ * points. Uses the renderer's own heading and link rules (HEADING_RE,
+ * MD_LINK_RE), so the text matches what /a/<slug> shows: a link becomes its
+ * label, a non-http link stays literal, a lone "#" line is text.
+ */
 export function announcementSummary(md: string): string {
-  const paragraphs = md.split(/\n\s*\n/);
-  for (const para of paragraphs) {
-    const prose = para.split('\n').filter(l => !HEADING.test(l)).join(' ');
+  for (const para of md.split(/\n{2,}/)) {
+    if (NOT_PROSE.test(para.trim())) continue;
+    const prose = para.split('\n').filter(l => !HEADING_RE.test(l)).join(' ');
     const text = prose
-      .replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1')
+      .replace(MD_LINK_RE, '$1')
       .replace(/\*\*([^*\n]+)\*\*/g, '$1')
       .replace(/`([^`\n]+)`/g, '$1')
       .replace(/\s+/g, ' ')
       .trim();
     if (!text) continue;
-    if (text.length <= SUMMARY_MAX) return text;
-    const cut = text.slice(0, SUMMARY_MAX - 1);
+    // Cut by code points, not UTF-16 units, so an emoji or an astral CJK
+    // character is never split into a lone surrogate.
+    const chars = Array.from(text);
+    if (chars.length <= SUMMARY_MAX) return text;
+    const cut = chars.slice(0, SUMMARY_MAX - 1).join('');
     const sp = cut.lastIndexOf(' ');
     return `${(sp > 0 ? cut.slice(0, sp) : cut).trimEnd()}…`;
   }
@@ -62,10 +78,11 @@ export function announcementMetadata(a: Announcement): Metadata {
       title: a.title,
       description,
       siteName: SITE_NAME,
+      images: [ANNOUNCEMENT_IMAGE],
     },
     // `summary` = small square thumbnail on the right of the embed, so a
     // role-pinged critical post does not get a large picture under it.
-    twitter: { card: 'summary', title: a.title, description },
+    twitter: { card: 'summary', title: a.title, description, images: [ANNOUNCEMENT_IMAGE] },
   };
 }
 
@@ -73,17 +90,12 @@ export function announcementViewport(a: Announcement): Viewport {
   return { themeColor: SEVERITY_EMBED_COLOR[a.severity] };
 }
 
-// The root app/opengraph-image.png, named explicitly. A page that sets its own
-// openGraph/twitter replaces the layout's, and the file-convention image of
-// the root segment then no longer reaches it (it did not on /archive).
-const SITE_IMAGE = { url: '/opengraph-image.png', width: 1200, height: 630, type: 'image/png' };
-
 /**
- * Site-level preview. Without a path (root layout) the image comes from the
- * file convention; with a path (a page's own og:url) the image is named.
+ * Site-level preview: home, archive, and (through the root layout) every page
+ * without its own, the 404 page included. Pass a path for a page's own og:url.
  */
 export function siteMetadata(path?: string): Pick<Metadata, 'openGraph' | 'twitter'> {
-  const image = path === undefined ? {} : { images: [SITE_IMAGE] };
+  const image = { images: [SITE_IMAGE] };
   return {
     openGraph: {
       type: 'website',
