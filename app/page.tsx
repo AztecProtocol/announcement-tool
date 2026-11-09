@@ -2,12 +2,18 @@ import { subscribeEmail } from './actions.js';
 import WebhookForm from './webhook-form.js';
 import SubmitButton from './submit-button.js';
 import { broadcastLinks } from '../src/web/broadcast-links.js';
+import { siteMetadata } from '../src/web/link-preview.js';
 import type { AnnouncementType, Audience, Network, Severity } from '../src/core/types.js';
 
 const NETWORKS: Network[] = ['mainnet', 'testnet'];
 const TYPES: AnnouncementType[] = ['upgrade', 'governance', 'info'];
 const SEVERITIES: Severity[] = ['critical', 'recommended', 'info'];
 const AUDIENCES: Audience[] = ['operators', 'ecosystem'];
+
+// og:url for the home page; the image and the rest come from the layout.
+export function generateMetadata() {
+  return siteMetadata('/');
+}
 
 const box = (name: string, value: string, checked: boolean) => (
   <label className="check" key={value}>

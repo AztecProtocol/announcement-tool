@@ -2,10 +2,15 @@ import { getDb } from '../../src/web/db.js';
 import { listPublished } from '../../src/core/queries.js';
 import { formatDeadline } from '../../src/core/render.js';
 import type { Network } from '../../src/core/types.js';
+import { siteMetadata } from '../../src/web/link-preview.js';
 
 export const dynamic = 'force-dynamic';
 
 const NETWORK_ORDER: Network[] = ['mainnet', 'testnet'];
+
+export function generateMetadata() {
+  return siteMetadata('/archive');
+}
 
 export default async function ArchivePage() {
   const announcements = await listPublished(getDb(), 100);

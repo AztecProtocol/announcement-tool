@@ -1,5 +1,8 @@
+import { cache } from 'react';
+import type { Metadata, Viewport } from 'next';
 import { notFound } from 'next/navigation';
 import { getDb } from '../../../src/web/db.js';
+import { announcementMetadata, announcementViewport } from '../../../src/web/link-preview.js';
 import { getPublishedBySlug } from '../../../src/core/queries.js';
 import { renderBodyHtml, formatDeadline } from '../../../src/core/render.js';
 import type { Network } from '../../../src/core/types.js';
@@ -8,9 +11,27 @@ export const dynamic = 'force-dynamic';
 
 const NETWORK_ORDER: Network[] = ['mainnet', 'testnet'];
 
-export default async function AnnouncementPage({ params }: { params: Promise<{ slug: string }> }) {
+type Props = { params: Promise<{ slug: string }> };
+
+// One query per request for page, metadata and viewport.
+const load = cache((slug: string) => getPublishedBySlug(getDb(), slug));
+
+// Link preview: title, summary, canonical og:url, `summary` card. The square
+// image is the opengraph-image.png next to this file.
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const a = await load((await params).slug);
+  return a ? announcementMetadata(a) : {};
+}
+
+// theme-color = the embed bar colour chat clients draw next to the preview.
+export async function generateViewport({ params }: Props): Promise<Viewport> {
+  const a = await load((await params).slug);
+  return a ? announcementViewport(a) : {};
+}
+
+export default async function AnnouncementPage({ params }: Props) {
   const { slug } = await params;
-  const a = await getPublishedBySlug(getDb(), slug);
+  const a = await load(slug);
   if (!a) notFound();
 
   // The action box takes the announcement's severity, so "must act tonight"

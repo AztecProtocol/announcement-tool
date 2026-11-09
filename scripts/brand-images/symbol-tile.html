@@ -1,0 +1,13 @@
+<!doctype html>
+<!-- Paper symbol centred on a full-bleed Ink square. The symbol's share of the
+     side comes from the URL fragment (#52 = 52 %, default 52). Source of
+     app/a/[slug]/opengraph-image.png and the feed icons; the square size is the
+     window size. Command: see scripts/brand-images/README.md. -->
+<html lang="en"><head><meta charset="utf-8"><style>
+  html, body { margin: 0; width: 100vw; height: 100vh; overflow: hidden; background: #141900; }
+  body { display: flex; align-items: center; justify-content: center; }
+  img { width: var(--s, 52vmin); height: var(--s, 52vmin); display: block; }
+</style></head><body>
+  <img src="../../public/brand/aztec-symbol-paper.svg" alt="">
+  <script>var p = parseFloat(location.hash.slice(1)); if (p > 0) document.querySelector('img').style.setProperty('--s', p + 'vmin');</script>
+</body></html>

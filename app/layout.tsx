@@ -1,17 +1,22 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { DEFAULT_PUBLIC_BASE_URL, publicBaseUrl } from '../src/core/public-base-url.js';
+import { SITE_DESCRIPTION, SITE_TITLE, siteMetadata } from '../src/web/link-preview.js';
 import './globals.css';
 
 // Favicon and apple-touch icon come from the file conventions next to this
 // layout (app/icon.svg, app/apple-icon.png); no `icons` override here, or it
 // would replace them. metadataBase is read per request so that any absolute
 // metadata URL Next writes points at PUBLIC_BASE_URL, not the request host.
+// The site link-preview image is app/opengraph-image.png (file convention);
+// /a/[slug] replaces it with its own square image and a severity theme-color.
+// No theme-color here: only announcement pages carry one.
 export function generateMetadata(): Metadata {
   return {
     metadataBase: metadataBase(),
-    title: 'Aztec release announcements',
-    description: 'Upgrades, governance events and operational notices for Aztec operators.',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    ...siteMetadata(),
   };
 }
 
