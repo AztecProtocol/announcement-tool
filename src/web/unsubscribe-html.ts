@@ -19,15 +19,16 @@ export function escapeHtml(s: string): string {
 
 // Minimal inline styles mirroring app/globals.css so this route-handler page
 // (see route.ts for why it can't be a page.tsx) looks intentional rather than
-// bare. Not the real stylesheet — just enough to match the site's look.
+// bare. Not the real stylesheet — just enough to match the site's look:
+// Paper ground, Ink text and links, Grey 100 rule, Lime-on-Ink button.
 const INLINE_STYLE = `
   *,*::before,*::after{box-sizing:border-box}
-  body{margin:0;background:#faf9f7;color:#22201d;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{margin:0;background:#fff9f2;color:#141900;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   main{max-width:720px;margin:0 auto;padding:32px 20px 80px}
-  .site-header{max-width:720px;margin:0 auto;padding:20px;border-bottom:1px solid #e0dcd5;font-weight:700}
+  .site-header{max-width:720px;margin:0 auto;padding:20px;border-bottom:1px solid #b6b8b0;font-weight:700}
   h1{font-size:26px;line-height:1.2;letter-spacing:-0.01em}
-  a{color:#3a5a78}
-  button{font:inherit;font-weight:600;padding:9px 18px;border-radius:7px;border:1px solid #3a5a78;background:#3a5a78;color:#fff;cursor:pointer}
+  a{color:#141900}
+  button{font:inherit;font-weight:600;padding:9px 18px;border-radius:7px;border:1px solid #141900;background:#141900;color:#c8fa00;cursor:pointer}
 `;
 
 /**

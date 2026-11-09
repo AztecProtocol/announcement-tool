@@ -62,3 +62,28 @@ describe('isOneClickBody', () => {
     expect(isOneClickBody('')).toBe(false);
   });
 });
+
+describe('unsubscribe pages use the 2026 brand palette', () => {
+  const pages = {
+    confirm: renderConfirmPage('a'.repeat(32)),
+    invalid: renderInvalidTokenPage(),
+  };
+
+  for (const [name, html] of Object.entries(pages)) {
+    it(`${name}: Paper ground, Ink text, Grey 100 rule, Ink links`, () => {
+      expect(html).toContain('background:#fff9f2;color:#141900;');
+      expect(html).toContain('border-bottom:1px solid #b6b8b0');
+      expect(html).toContain('a{color:#141900}');
+    });
+
+    it(`${name}: primary button is Lime text on Ink`, () => {
+      expect(html).toMatch(/button\{[^}]*border:1px solid #141900;background:#141900;color:#c8fa00;/);
+    });
+
+    it(`${name}: no old palette and no image`, () => {
+      for (const hex of ['#faf9f7', '#22201d', '#e0dcd5', '#3a5a78']) expect(html).not.toContain(hex);
+      expect(html).not.toMatch(/<img\b/i);
+      expect(html).not.toMatch(/url\(/i);
+    });
+  }
+});

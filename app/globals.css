@@ -1,25 +1,35 @@
 /* ─────────────────────────────────────────────────────────────
    Aztec announcements — design tokens
 
-   Brand (aztec.network/media) carries identity: Parchment ground,
-   Ink text, Chartreuse for interactive elements only.
+   Brand (2026 brand pack) carries identity: Paper ground, Ink text,
+   Lime only as text on an Ink fill (buttons, active tabs, network tag) —
+   never as text, a fill, or the only signal on Paper (1.17:1).
+   Raised surfaces (cards, fields) stay Paper and are told apart by a
+   Grey 100 / Grey 300 border, not by a second near-white.
 
    Severity has its OWN functional palette, deliberately outside the
    brand: an operator must see at a glance whether they have to act
    tonight, and brand accents can't carry that meaning reliably.
-   Chartreuse stays meaningful precisely because it only ever means
+   Lime stays meaningful precisely because it only ever means
    "you can click this".
    ───────────────────────────────────────────────────────────── */
 :root {
-  /* brand */
-  --parchment: #f2eee1;
-  --parchment-raised: #faf8f1;
-  --ink: #1a1400;
-  --ink-2: #5f5642;
-  --ink-3: #8a8069;
-  --chartreuse: #d4ff28;
-  --line: #ddd6c2;
-  --line-soft: #e8e2d2;
+  /* brand — values from the brand pack's colours.txt */
+  --paper: #fff9f2;          /* Paper (White 500) */
+  --ink: #141900;            /* Ink (Black 500) */
+  --grey-50: #e8e8e6;        /* Black 50 */
+  --grey-100: #b6b8b0;       /* Black 100 */
+  --grey-200: #93958a;       /* Black 200 — non-text only (2.91:1 on Paper) */
+  --grey-300: #626554;       /* Black 300 — smallest text colour allowed */
+  --lime: #c8fa00;           /* Green 500 — only on Ink */
+
+  /* roles */
+  --ink-2: var(--grey-300);  /* secondary and tertiary text (hints, footer, placeholders): 5.72:1 on Paper.
+                                There is one grey text step only: the old lighter step failed WCAG (3.37:1).
+                                Hierarchy now comes from size and the mono face, not colour. */
+  --line: var(--grey-100);   /* card / fieldset / header rules (decorative) */
+  --line-soft: var(--grey-50); /* row separators, hover fills */
+  --field-border: var(--grey-300); /* input boundary: 5.89:1, meets 1.4.11 */
 
   /* severity — functional, not brand */
   --critical: #a8180f;
@@ -32,7 +42,8 @@
   --info-bg: #e6eff5;
   --info-line: rgba(18, 64, 94, 0.28);
 
-  --link: #1f4d6b;
+  --link: var(--ink);        /* links are Ink + underline; blue is reserved for severity info */
+  --focus: var(--ink);
   --serif: Georgia, "Times New Roman", serif;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -43,7 +54,7 @@
 
 body {
   margin: 0;
-  background: var(--parchment);
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--sans);
   font-size: 16.5px;
@@ -67,23 +78,24 @@ main > * + * { margin-top: 0; }
   border-bottom: 1px solid var(--line);
 }
 .site-header .brand { display: inline-flex; align-items: center; }
-.site-header .brand img { display: block; height: 26px; width: auto; }
+.site-header .brand img { display: block; height: 24px; width: auto; } /* new wordmark 4.34:1 → 104×24 */
 .site-header nav { display: flex; gap: 20px; }
 .site-header nav a {
   color: var(--ink-2);
   text-decoration: none;
   font-size: 14px;
-  padding-bottom: 2px;
-  border-bottom: 1px solid transparent;
+  padding: 1px 4px;
+  margin: 0 -4px;
+  border-radius: 3px;
 }
-.site-header nav a:hover { color: var(--ink); border-bottom-color: var(--chartreuse); }
+.site-header nav a:hover { color: var(--ink); background: var(--line-soft); } /* Ink on Grey 50 14.64:1; no Lime on Paper */
 
 .site-footer {
   max-width: 760px;
   margin: 0 auto;
   padding: 20px 22px 40px;
   border-top: 1px solid var(--line);
-  color: var(--ink-3);
+  color: var(--ink-2);
   font-size: 13.5px;
 }
 .site-footer p { margin: 0; }
@@ -107,9 +119,10 @@ h2 {
   text-wrap: balance;
 }
 p { margin: 0 0 13px; max-width: var(--measure); }
-a { color: var(--link); text-underline-offset: 3px; }
+a { color: var(--link); text-decoration-color: var(--grey-300); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--ink); text-decoration-thickness: 2px; }
 a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
-  outline: 2px solid var(--link);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 .muted { color: var(--ink-2); font-size: 14.5px; }
@@ -132,11 +145,11 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
   text-transform: uppercase;
   padding: 3px 8px;
   border-radius: 4px;
-  background: var(--info-bg);
-  color: var(--info);
+  background: var(--grey-50);   /* type tag is neutral now: it no longer copies severity "info" */
+  color: var(--ink);
 }
-.tag-network { background: var(--ink); color: var(--chartreuse); }
-.tag-critical { background: var(--critical); color: #fff; }
+.tag-network { background: var(--ink); color: var(--lime); }
+.tag-critical { background: var(--critical); color: var(--paper); }
 .tag-recommended { background: var(--recommended-bg); color: var(--recommended); }
 .tag-info { background: var(--info-bg); color: var(--info); }
 
@@ -172,14 +185,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
 
 /* ── cards, notices, lists ──────────────────────────────── */
 .card {
-  background: var(--parchment-raised);
+  background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 20px 22px;
   margin: 18px 0;
 }
 .notice {
-  border-left: 3px solid var(--link);
+  border-left: 3px solid var(--info);
   background: var(--info-bg);
   padding: 11px 15px;
   border-radius: 0 8px 8px 0;
@@ -190,8 +203,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
 .notice + .notice { margin-top: 10px; }
 
 ul.plain { list-style: none; padding: 0; margin: 0; }
-ul.plain li { padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
-ul.plain li:last-child { border-bottom: none; }
+/* `>` added: without it these rules also hit the nested .tags <li>, which
+   strips the tag's horizontal padding and makes archive tags 44 px tall. */
+ul.plain > li { padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+ul.plain > li:last-child { border-bottom: none; }
 ul.plain a { font-family: var(--serif); font-size: 17.5px; text-decoration: none; color: var(--ink); }
 ul.plain a:hover { text-decoration: underline; }
 
@@ -223,12 +238,12 @@ input[type="email"], input[type="url"] {
   font: inherit;
   font-size: 15px;
   color: var(--ink);
-  background: var(--parchment-raised);
-  border: 1px solid var(--line);
+  background: var(--paper);
+  border: 1px solid var(--field-border);
   border-radius: 7px;
   margin-bottom: 14px;
 }
-input[type="email"]::placeholder, input[type="url"]::placeholder { color: var(--ink-3); }
+input[type="email"]::placeholder, input[type="url"]::placeholder { color: var(--ink-2); }
 input[type="email"]:focus, input[type="url"]:focus { border-color: var(--ink); }
 
 button {
@@ -239,10 +254,10 @@ button {
   border-radius: 6px;
   border: 1px solid var(--ink);
   background: var(--ink);
-  color: var(--chartreuse);
+  color: var(--lime);
   cursor: pointer;
 }
-button:hover:not(:disabled) { background: #2a2100; }
+button:hover:not(:disabled) { background: #2c3214; } /* Lime on it: 10.89:1 */
 button:disabled { opacity: 0.55; cursor: default; }
 button.secondary { background: transparent; color: var(--ink); }
 button.secondary:hover:not(:disabled) { background: var(--line-soft); }
@@ -267,7 +282,7 @@ code { font-family: var(--mono); font-size: 0.88em; }
 pre {
   font-family: var(--mono);
   background: var(--ink);
-  color: var(--parchment);
+  color: var(--paper);
   padding: 14px 16px;
   border-radius: 8px;
   overflow-x: auto;
@@ -322,13 +337,13 @@ textarea {
   font: inherit;
   font-size: 15px;
   color: var(--ink);
-  background: var(--parchment-raised);
-  border: 1px solid var(--line);
+  background: var(--paper);
+  border: 1px solid var(--field-border);
   border-radius: 7px;
   margin-bottom: 14px;
   resize: vertical;
 }
-textarea::placeholder { color: var(--ink-3); }
+textarea::placeholder { color: var(--ink-2); }
 textarea:focus { border-color: var(--ink); }
 
 input[type="text"], input[type="datetime-local"] {
@@ -338,12 +353,12 @@ input[type="text"], input[type="datetime-local"] {
   font: inherit;
   font-size: 15px;
   color: var(--ink);
-  background: var(--parchment-raised);
-  border: 1px solid var(--line);
+  background: var(--paper);
+  border: 1px solid var(--field-border);
   border-radius: 7px;
   margin-bottom: 14px;
 }
-input[type="text"]::placeholder { color: var(--ink-3); }
+input[type="text"]::placeholder { color: var(--ink-2); }
 input[type="text"]:focus, input[type="datetime-local"]:focus { border-color: var(--ink); }
 input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 
@@ -359,7 +374,7 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   padding: 5px 10px;
   border-radius: 5px;
   border: 1px solid var(--line);
-  background: var(--parchment-raised);
+  background: var(--paper);
   color: var(--ink-2);
 }
 .toolbar button:hover { background: var(--line-soft); color: var(--ink); }
@@ -388,25 +403,25 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   padding: 5px 10px;
   border-radius: 5px;
   border: 1px solid var(--line);
-  background: var(--parchment-raised);
+  background: var(--paper);
   color: var(--ink-2);
 }
 .preview-tabs button:hover { background: var(--line-soft); color: var(--ink); }
-.preview-tabs button[aria-selected="true"] { background: var(--ink); color: var(--chartreuse); border-color: var(--ink); }
+.preview-tabs button[aria-selected="true"] { background: var(--ink); color: var(--lime); border-color: var(--ink); }
 
 .preview-panel {
   font-family: var(--mono);
   font-size: 13px;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--parchment-raised);
+  background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px;
   min-height: 220px;
   color: var(--ink);
 }
-.preview-empty { color: var(--ink-3); }
+.preview-empty { color: var(--ink-2); }
 .preview-discord-entry + .preview-discord-entry { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 .preview-discord-target { font-size: 11.5px; color: var(--ink-2); margin: 0 0 6px; }
 
@@ -431,17 +446,17 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   font-family: var(--sans);
   font-size: 14.5px;
   color: var(--ink);
-  background-color: var(--parchment-raised);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%235f5642' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-color: var(--paper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23626554' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
-  border: 1px solid var(--line);
+  border: 1px solid var(--field-border);
   border-radius: 6px;
   padding: 8px 34px 8px 11px;
   width: 100%;
   max-width: 420px;
 }
-.select-styled:hover { border-color: var(--ink-3); }
+.select-styled:hover { border-color: var(--ink-2); }
 .select-styled:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
 /* ── Form field row and hint ──────────────────────────────────────── */
@@ -456,7 +471,7 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 .field-row input[type="datetime-local"] { margin-bottom: 0; }
 .hint {
   font-size: 13.5px;
-  color: var(--ink-3);
+  color: var(--ink-2);
   margin: 0;
 }
 .hint-inline {
@@ -473,13 +488,20 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border-radius: 999px;
   border: 1px solid var(--line);
   background: transparent;
-  color: var(--ink-3);
+  color: var(--ink-2);
   cursor: pointer;
 }
-.role-tag:hover { border-color: var(--ink-3); color: var(--ink); }
+/* :not(:disabled) and :not([aria-pressed]) lift this above the base
+   `button:hover:not(:disabled)` (0,2,1), whose Ink-family fill would put Ink
+   text on #2c3214 (1.35:1). A pressed tag is filled and keeps that hover. */
+.role-tag:hover:not(:disabled):not([aria-pressed="true"]) {
+  border-color: var(--ink-2);
+  background: var(--line-soft);
+  color: var(--ink);
+}
 .role-tag[aria-pressed="true"] {
   background: var(--ink);
-  color: var(--chartreuse);
+  color: var(--lime);
   border-color: var(--ink);
 }
 
@@ -493,18 +515,23 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border-radius: 5px;
   border: 1px solid var(--line);
   background: transparent;
-  color: var(--ink-3);
+  color: var(--ink-2);
+}
+/* Beats the base filled-button hover (Grey 300 on #2c3214 is 2.23:1). */
+.preview-mode button:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--line-soft);
+  color: var(--ink);
 }
 .preview-mode button[aria-pressed="true"] {
   background: var(--line-soft);
   color: var(--ink);
-  border-color: var(--ink-3);
+  border-color: var(--ink-2);
 }
 
 /* The raw view keeps the monospace, whitespace-preserving treatment the
    preview panel had before the rendered view existed. */
 .pv-raw { font-family: var(--mono); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-.pv-rawnote { font-size: 11.5px; color: var(--ink-3); margin: 0 0 8px; font-family: var(--mono); }
+.pv-rawnote { font-size: 11.5px; color: var(--ink-2); margin: 0 0 8px; font-family: var(--mono); }
 
 /* Rendered surfaces opt out of the panel's pre-wrap so blocks flow normally. */
 .pv-surface {
@@ -526,7 +553,7 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   font-family: var(--mono);
   font-size: 11.5px;
   letter-spacing: .04em;
-  color: var(--ink-3);
+  color: var(--ink-2);
   margin: 0 0 10px;
 }
 .pv-bullet { padding-left: 16px; text-indent: -16px; }
@@ -538,14 +565,18 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border-radius: 4px;
   padding: 1px 5px;
 }
-.pv-link { color: var(--link); }
+/* #0b57d0 is a literal client-like link blue (6.39:1 on the white preview
+   surface), deliberately outside the token system: like .pv-mention below,
+   the preview mimics how Discord / Telegram / mail clients show links, not
+   this app's theme, where --link is Ink. Do not swap it for a token. */
+.pv-link { color: #0b57d0; }
 .pv-plain { white-space: pre-wrap; font-family: var(--sans); }
 
 /* Discord role mentions render as pills, matching how Discord displays them.
    The raw view is the authoritative byte-for-byte record. */
 .pv-prefix { margin: 0 0 10px; }
 .pv-mention {
-  /* #5865F2 is Discord's brand "blurple". Deliberately outside the parchment
+  /* #5865F2 is Discord's brand "blurple". Deliberately outside the paper
      token system — this pill mimics Discord's own mention styling, not this
      app's theme — so do not swap it for a design token. */
   background: rgba(88, 101, 242, 0.15);
@@ -563,7 +594,7 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 .pv-signal { background: #fff; }
 .pv-email { padding: 0; overflow: hidden; }
 .pv-emailhtml { padding: 4px; }
-.pv-emailhtml a { color: var(--link); }
+.pv-emailhtml a { color: #0b57d0; } /* client-like link blue; see .pv-link */
 
 /* ── Pending confirmation queue ───────────────────────────────────── */
 .pending-queue {
@@ -593,14 +624,14 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border-radius: 6px;
   border: 1px solid var(--ink);
   background: var(--ink);
-  color: var(--chartreuse);
+  color: var(--lime);
   text-decoration: none;
   flex: none;
 }
 
 /* ── Withdraw and reject ──────────────────────────────────────────── */
 /* border-left-color is restated explicitly (not left to win on declaration
-   order against .notice's `border-left: 3px solid var(--link)`) so this rule
+   order against .notice's `border-left: 3px solid var(--info)`) so this rule
    stays correct even if a .notice-adjacent rule is later inserted between
    the two in this file. Matches the .actions.sev-recommended pattern above. */
 .notice-reject {
@@ -656,7 +687,7 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
    queue's call to action. */
 .drafts-list {
   border: 1px solid var(--line);
-  background: var(--parchment-raised);
+  background: var(--paper);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 22px;
@@ -675,9 +706,11 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
 .drafts-title { font-weight: 600; }
 .drafts-meta { font-size: 12.5px; color: var(--ink-2); }
 .drafts-controls { display: flex; align-items: center; gap: 8px; flex: none; }
-/* .draft-discard-cancel: a plain button element carries no framework base
-   styles here (there is no bare `button` rule in this file), so this rule's
-   specificity (0,0,1,0) is the only thing painting it — nothing to override. */
+/* .draft-discard-cancel is an outline button. The bare `button` rules above
+   give every button an Ink fill and a #2c3214 hover; this rule's transparent
+   ground wins at rest (later, higher specificity than `button`), and its
+   hover carries :not(:disabled) so it also beats `button:hover:not(:disabled)`
+   (0,2,1) — otherwise Grey 300 text would sit on #2c3214 at 2.23:1. */
 .draft-discard { display: flex; align-items: center; gap: 6px; }
 .draft-discard button.destructive { font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 6px; }
 .draft-discard-cancel {
@@ -689,7 +722,7 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
   background: transparent;
   color: var(--ink-2);
 }
-.draft-discard-cancel:hover { background: var(--line-soft); }
+.draft-discard-cancel:hover:not(:disabled) { background: var(--line-soft); color: var(--ink); }
 
 /* Kept at the end of the file, where a media query conventionally belongs —
    it was previously stranded mid-file with sections appended after it,
