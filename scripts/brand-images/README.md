@@ -26,6 +26,14 @@ convert /tmp/feed-512.png -strip -background '#141900' -alpha remove -alpha off 
 convert ../../public/brand/feed-icon-512.png -strip -resize 64x64 -define png:color-type=2 ../../public/brand/feed-icon-64.png
 ```
 
+Email word mark (opaque Paper ground, no alpha; shown at 96 x 22):
+
+```sh
+shot 2 96,22 /tmp/email-wm.png email-wordmark.html
+convert /tmp/email-wm.png -strip -background '#fff9f2' -alpha remove -alpha off -define png:color-type=2 '../../public/brand/email/aztec-wordmark-ink@2x.png'
+identify -verbose '../../public/brand/email/aztec-wordmark-ink@2x.png' | grep -E 'Type:|color_type'   # TrueColor, 2
+```
+
 Fonts: the title asks for Georgia. Where Georgia is not installed the stack
 falls back to C059 (URW Century Schoolbook); record which one was used in the
 commit that changes the PNG.

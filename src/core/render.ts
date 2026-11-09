@@ -1,4 +1,4 @@
-import type { Announcement, DeliveryKind, Network } from './types.js';
+import type { Announcement, DeliveryKind, Network, Severity } from './types.js';
 import { publicBaseUrl } from './public-base-url.js';
 
 const NETWORK_ORDER: Network[] = ['mainnet', 'testnet'];
@@ -273,10 +273,31 @@ export function renderMarkdown(a: Announcement, kind: DeliveryKind): string {
   ].join('\n');
 }
 
+/** Severity colours in email: the site's severity tokens (all ≥ 6:1 on white). */
+export const EMAIL_SEVERITY_COLOR: Readonly<Record<Severity, string>> = {
+  critical: '#a8180f',
+  recommended: '#7a5a06',
+  info: '#12405e',
+};
+
+// Opaque Paper-ground PNG (192 x 44, no alpha) shown at 96 x 22: a
+// transparent Ink mark would vanish in dark-mode mail clients, and Outlook
+// desktop does not render SVG. alt="Aztec" stands in when images are blocked.
+const emailWordmark = () =>
+  `<img src="${escapeHtml(`${publicBaseUrl()}/brand/email/aztec-wordmark-ink@2x.png`)}" width="96" height="22" alt="Aztec" style="display:block;border:0">`;
+
+// One-cell tables, not divs: Outlook desktop ignores background and
+// border-left on <div>.
+const TABLE = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 16px">';
+const ACTION_TABLE = '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 12px">';
+
 export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: string; text: string; html: string } {
+  const sev = EMAIL_SEVERITY_COLOR[a.severity];
   const actions = a.actionsRequired.length
-    ? `<p style="margin:0 0 4px"><strong>Action required:</strong></p>`
-      + `<ul style="margin:0 0 12px;padding-left:20px">`
+    ? ACTION_TABLE + `<tr><td style="border-left:4px solid ${sev};padding:4px 0 4px 14px">`
+      + `<p style="margin:0 0 2px;font-size:12px;font-weight:700;letter-spacing:.06em;color:${sev}">${a.severity.toUpperCase()}</p>`
+      + `<p style="margin:0 0 4px"><strong>Action required:</strong></p>`
+      + `<ul style="margin:0;padding-left:20px">`
       + a.actionsRequired.map(act => {
           const parts = [escapeHtml(act.action)];
           if (act.deadline) parts.push(`by <strong>${escapeHtml(formatDeadline(act.deadline))}</strong>`);
@@ -284,6 +305,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
           return `<li style="margin:0 0 4px">${parts.join(' ')}</li>`;
         }).join('')
       + `</ul>`
+      + `</td></tr></table>`
     : '';
   const links = a.links.length
     ? `<p style="margin:0 0 12px">${a.links.map(linkAnchor).join(' · ')}</p>`
@@ -292,6 +314,7 @@ export function renderEmail(a: Announcement, kind: DeliveryKind): { subject: str
   // blocks unpredictably and handle dark mode themselves.
   const html = [
     `<div style="font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#141900;max-width:600px;margin:0 auto;padding:16px">`,
+    `${TABLE}<tr><td bgcolor="#fff9f2" style="background:#fff9f2;padding:14px 16px">${emailWordmark()}</td></tr></table>`,
     `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.04em;color:#626554;margin:0 0 12px">${escapeHtml(`${kindPrefix(kind)}${tagLine(a)}`)}</p>`,
     `<h1 style="font-size:19px;line-height:1.35;margin:0 0 12px">${escapeHtml(a.title)}</h1>`,
     renderBodyHtml(a.bodyMd),
