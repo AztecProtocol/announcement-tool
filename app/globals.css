@@ -491,7 +491,14 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   color: var(--ink-2);
   cursor: pointer;
 }
-.role-tag:hover { border-color: var(--ink-2); color: var(--ink); }
+/* :not(:disabled) and :not([aria-pressed]) lift this above the base
+   `button:hover:not(:disabled)` (0,2,1), whose Ink-family fill would put Ink
+   text on #2c3214 (1.35:1). A pressed tag is filled and keeps that hover. */
+.role-tag:hover:not(:disabled):not([aria-pressed="true"]) {
+  border-color: var(--ink-2);
+  background: var(--line-soft);
+  color: var(--ink);
+}
 .role-tag[aria-pressed="true"] {
   background: var(--ink);
   color: var(--lime);
@@ -509,6 +516,11 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border: 1px solid var(--line);
   background: transparent;
   color: var(--ink-2);
+}
+/* Beats the base filled-button hover (Grey 300 on #2c3214 is 2.23:1). */
+.preview-mode button:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: var(--line-soft);
+  color: var(--ink);
 }
 .preview-mode button[aria-pressed="true"] {
   background: var(--line-soft);
@@ -553,7 +565,11 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
   border-radius: 4px;
   padding: 1px 5px;
 }
-.pv-link { color: var(--link); }
+/* #0b57d0 is a literal client-like link blue (6.39:1 on the white preview
+   surface), deliberately outside the token system: like .pv-mention below,
+   the preview mimics how Discord / Telegram / mail clients show links, not
+   this app's theme, where --link is Ink. Do not swap it for a token. */
+.pv-link { color: #0b57d0; }
 .pv-plain { white-space: pre-wrap; font-family: var(--sans); }
 
 /* Discord role mentions render as pills, matching how Discord displays them.
@@ -578,7 +594,7 @@ input[type="radio"] { accent-color: var(--ink); width: 15px; height: 15px; }
 .pv-signal { background: #fff; }
 .pv-email { padding: 0; overflow: hidden; }
 .pv-emailhtml { padding: 4px; }
-.pv-emailhtml a { color: var(--link); }
+.pv-emailhtml a { color: #0b57d0; } /* client-like link blue; see .pv-link */
 
 /* ── Pending confirmation queue ───────────────────────────────────── */
 .pending-queue {
@@ -690,9 +706,11 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
 .drafts-title { font-weight: 600; }
 .drafts-meta { font-size: 12.5px; color: var(--ink-2); }
 .drafts-controls { display: flex; align-items: center; gap: 8px; flex: none; }
-/* .draft-discard-cancel: a plain button element carries no framework base
-   styles here (there is no bare `button` rule in this file), so this rule's
-   specificity (0,0,1,0) is the only thing painting it — nothing to override. */
+/* .draft-discard-cancel is an outline button. The bare `button` rules above
+   give every button an Ink fill and a #2c3214 hover; this rule's transparent
+   ground wins at rest (later, higher specificity than `button`), and its
+   hover carries :not(:disabled) so it also beats `button:hover:not(:disabled)`
+   (0,2,1) — otherwise Grey 300 text would sit on #2c3214 at 2.23:1. */
 .draft-discard { display: flex; align-items: center; gap: 6px; }
 .draft-discard button.destructive { font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 6px; }
 .draft-discard-cancel {
@@ -704,7 +722,7 @@ button.destructive:hover:not(:disabled) { background: var(--critical-bg); }
   background: transparent;
   color: var(--ink-2);
 }
-.draft-discard-cancel:hover { background: var(--line-soft); }
+.draft-discard-cancel:hover:not(:disabled) { background: var(--line-soft); color: var(--ink); }
 
 /* Kept at the end of the file, where a media query conventionally belongs —
    it was previously stranded mid-file with sections appended after it,

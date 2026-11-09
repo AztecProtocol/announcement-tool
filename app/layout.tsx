@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import { publicBaseUrl } from '../src/core/public-base-url.js';
+import { DEFAULT_PUBLIC_BASE_URL, publicBaseUrl } from '../src/core/public-base-url.js';
 import './globals.css';
 
 // Favicon and apple-touch icon come from the file conventions next to this
@@ -9,10 +9,22 @@ import './globals.css';
 // metadata URL Next writes points at PUBLIC_BASE_URL, not the request host.
 export function generateMetadata(): Metadata {
   return {
-    metadataBase: new URL(publicBaseUrl()),
+    metadataBase: metadataBase(),
     title: 'Aztec release announcements',
     description: 'Upgrades, governance events and operational notices for Aztec operators.',
   };
+}
+
+// A PUBLIC_BASE_URL that does not parse ('' or 'https://') must not take
+// every page down with a TypeError from `new URL`; fall back to the default
+// host for metadata only. publicBaseUrl() itself is unchanged for its other
+// callers, and the production checks still refuse a missing or non-https value.
+function metadataBase(): URL {
+  try {
+    return new URL(publicBaseUrl());
+  } catch {
+    return new URL(DEFAULT_PUBLIC_BASE_URL);
+  }
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

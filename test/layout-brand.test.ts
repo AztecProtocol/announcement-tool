@@ -33,6 +33,14 @@ describe('root layout branding', () => {
     expect(meta.metadataBase?.href).toBe('https://brand-test.example/');
   });
 
+  for (const bad of ['', 'https://', 'not a url']) {
+    it(`falls back to the default host when PUBLIC_BASE_URL is ${JSON.stringify(bad)}`, async () => {
+      process.env.PUBLIC_BASE_URL = bad;
+      const meta = await loadMetadata();
+      expect(meta.metadataBase?.href).toBe('https://announce.aztec.network/');
+    });
+  }
+
   it('declares no icons override (file conventions supply them)', async () => {
     const meta = await loadMetadata();
     expect(meta.icons).toBeUndefined();
