@@ -18,6 +18,14 @@ convert /tmp/og-site.png         -strip -background '#141900' -alpha remove -alp
 convert /tmp/og-announcement.png -strip -background '#141900' -alpha remove -alpha off -define png:color-type=2 '../../app/a/[slug]/opengraph-image.png'
 ```
 
+Feed-reader icons (Paper symbol at 60 %):
+
+```sh
+shot 1 512,512 /tmp/feed-512.png 'symbol-tile.html#60'
+convert /tmp/feed-512.png -strip -background '#141900' -alpha remove -alpha off -define png:color-type=2 ../../public/brand/feed-icon-512.png
+convert ../../public/brand/feed-icon-512.png -strip -resize 64x64 -define png:color-type=2 ../../public/brand/feed-icon-64.png
+```
+
 Fonts: the title asks for Georgia. Where Georgia is not installed the stack
 falls back to C059 (URW Century Schoolbook); record which one was used in the
 commit that changes the PNG.
