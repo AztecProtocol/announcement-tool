@@ -110,10 +110,18 @@ never created.
 
 ```sh
 terraform init
+terraform apply -var bootstrap_tailnet_key=true
 terraform apply
 ```
 
-**Check:** the apply prints the VM's public address and its tailnet name.
+The first apply mints a single-use tailnet auth key that expires after one
+hour, and creates the server with it. Type `yes` soon after its plan. The
+second apply removes the spent key from state: its plan must show only
+`tailscale_tailnet_key.announce[0]` destroyed. Without
+`-var bootstrap_tailnet_key=true` the server gets no key and never joins
+the tailnet (see `variables.tf`).
+
+**Check:** the first apply prints the VM's public address and its tailnet name.
 Write both down. Step 2 needs the address, step 3 and step 4 need the name.
 
 The address is a reserved Hetzner primary IP (`hcloud_primary_ip.announce`).
@@ -1261,7 +1269,12 @@ Do not use `terraform destroy`. The data volume has `prevent_destroy = true`,
 so destroy refuses the whole plan, and untracking the volume to get past
 that leaves it orphaned and billing. `-replace` recreates the server and
 its volume attachment and keeps everything else: the reserved IP, the
-volume and its data, the firewall, and the tailnet auth key.
+volume and its data, and the firewall.
+
+In normal operation no tailnet auth key exists. A rebuild mints one in the
+same apply with `-var bootstrap_tailnet_key=true`: single use, valid for
+one hour. Never rebuild without that variable: the new server boots with
+an empty auth key and `tailscale up` fails.
 
 ### Adopting an existing server's address
 
@@ -1300,19 +1313,43 @@ fresh reserved address.
 
 ### Later rebuilds (steady state)
 
+First make sure no old key is in state. This must print nothing:
+
 ```sh
 cd infra/terraform
-terraform apply -replace=hcloud_server.announce
+terraform state list | grep tailscale_tailnet_key
+```
+
+If it prints a line, run a plain `terraform apply` first: its plan removes
+the old key and must change nothing else. An old key in state is spent, and
+Terraform does not mint a new one while it is there.
+
+Then rebuild:
+
+```sh
+terraform apply \
+  -var bootstrap_tailnet_key=true \
+  -replace=hcloud_server.announce
 ```
 
 **Check:** before typing `yes`, read the plan by what it protects, not by
 its digit count alone. It must NOT destroy `hcloud_primary_ip.announce` or
 `hcloud_volume.announce_data` — those two must appear unchanged or not at
-all. `hcloud_server.announce` and `hcloud_volume_attachment.announce_data`
-are expected to be replaced. The summary normally reads `2 to add, 0 to
-change, 2 to destroy`. A different count is a reason to read the plan; a
-destroy of either protected resource is the reason to answer `no` and find
-out why.
+all. `tailscale_tailnet_key.announce[0]` is created;
+`hcloud_server.announce` and `hcloud_volume_attachment.announce_data` are
+replaced. The summary normally reads `3 to add, 0 to change, 2 to
+destroy`. A different count is a reason to read the plan; a destroy of
+either protected resource is the reason to answer `no` and find out why.
+
+The new key is valid for one hour. Type `yes` soon after the plan, and do
+not interrupt the apply. If the server comes up more than an hour after the
+key was created (for example, a Hetzner error and a retry later), run a
+plain `terraform apply` to drop the spent key, then the rebuild command
+again.
+
+When the server answers (below), run a plain `terraform apply` to remove
+the spent key from state. Its plan must show only
+`tailscale_tailnet_key.announce[0]` destroyed.
 
 After the apply, wait about three minutes for cloud-init, then:
 
@@ -1335,6 +1372,7 @@ step 3 is on the root disk and must be written again.
 | Terraform refuses to plan | `tailnet` is not set. It has no default. |
 | `terraform apply` fails creating `tailscale_tailnet_key.announce` with an authentication error (401, "unauthorized", or similar) | `tailscale_api_key` is missing, wrong, or expired — not the ACL tag. Check `TF_VAR_tailscale_api_key` is actually set in the shell that ran `terraform apply`. This is the more common of the two `tailscale_tailnet_key.announce` failures; check this first before assuming the ACL tag is the problem. |
 | `terraform apply` fails creating `tailscale_tailnet_key.announce` with an unknown-tag or "requested tags are invalid" error | `tag:announce` does not exist yet in the tailnet's ACL. It must be added in `rpc.aztec.foundation/tailscale.tf` (`AztecProtocol/foundation-iac`) and that module applied first — see "Before you start". A console-only edit does not survive that module's next apply. In both this row and the credential row above, the server is never created — `hcloud_server.announce` depends on the key resource, so the apply stops before Hetzner is touched at all. |
+| A new or rebuilt server never appears in `tailscale status`, and the apply did not create `tailscale_tailnet_key.announce[0]` | The apply ran without `-var bootstrap_tailnet_key=true`, or an old spent key was still in state. The server booted with an empty or spent auth key. Run a plain `terraform apply` to remove any old key, then the rebuild command from "Rebuilding the VM" again. Delete the half-joined machine (if any) in the Tailscale admin console first. |
 | The VM boots (the apply succeeded) but it never appears in `tailscale status`, or appears but stays `Offline`/unreachable | Rarer than the two rows above, because it means the key itself was minted successfully. Check `cloud-init` logs on the VM (via Hetzner rescue mode — see the next row) for the `tailscale up` line's own error. If the tailnet has device approval enabled and something changed `preauthorized` away from `true` on the key, the node joins in a PENDING state and needs approving by hand in the Tailscale admin console before it is routable — indistinguishable from a broken join until you check there. |
 | `tailscale ssh root@<name>` hangs, no response, or the name is not found | You are not on the same tailnet as `var.tailnet` — check with `tailscale status`. Or the VM's tailnet join itself failed; the SSH key from "Before you start" does not help here — the Hetzner web console is a keyboard-and-screen session at a boot prompt, not an SSH endpoint, and a stock image has no root password set. Use Hetzner **rescue mode** instead: boot the rescue system from the Hetzner console, mount the VM's root disk, and inspect `cloud-init` / Tailscale logs or set a password from inside the mounted filesystem, then reboot normally. |
 | `tailscale ssh` hangs for you but works for a tailnet admin | You are not named in the ACL's `ssh` rule for `tag:announce` (`autogroup:admin` in `rpc.aztec.foundation/tailscale.tf`). Ask an admin to add you to the tailnet's admins, or extend the rule in code. Nothing on the VM is wrong. |
