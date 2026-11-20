@@ -61,16 +61,43 @@ resource "hcloud_ssh_key" "announce" {
 #
 # ⚠️ SECRET IN STATE: this key's plaintext value is stored in Terraform
 # state (see versions.tf and infra/README.md's "Prerequisites" section, both
-# of which now flag that the state bucket holds credential-bearing
-# material, not just outputs). Reusable + pre-authorized + tagged mirrors
-# the aztec-observability sibling's key exactly, for the same reason: a
-# one-shot ephemeral key would force a manual re-auth step on every rebuild.
+# of which flag that the state bucket holds credential-bearing material,
+# not just outputs).
+#
+# Bootstrap-only key. Only the first boot of a server needs it: cloud-init
+# runs `tailscale up --authkey=…` once, and hcloud_server.announce ignores
+# later changes to user_data. A key that stays valid after that only adds
+# risk: anyone who reads it (from state or the VM's cloud-init data) could
+# join the tailnet as tag:announce. So:
+#   - count: the key exists only while var.bootstrap_tailnet_key is true,
+#     i.e. on the apply that creates the server (first deployment or a
+#     rebuild). In normal operation there is no key and none in state.
+#   - reusable = false: Tailscale revokes the key after its first use.
+#   - expiry = 3600 (seconds): an unused key dies one hour after creation.
+#     A fresh server reaches `tailscale up` within minutes of the apply that
+#     creates both.
+#   - recreate_if_invalid = "never": if a bootstrap apply is followed by a
+#     second one with the variable still true, the spent key stays in state
+#     as `invalid` and no new key is planned (tailscale provider 0.29.2,
+#     resource_tailnet_key.go, shouldRecreateIfInvalid; the provider's
+#     default for single-use keys is the same, this pins it).
+# Revoking or expiring an auth key does not deauthorize a node that already
+# joined with it, and a tagged node has key expiry disabled by default
+# (tailscale.com/kb/1085/auth-keys, kb/1068/tags).
+#
+# Rebuild: `terraform apply -var bootstrap_tailnet_key=true
+# -replace=hcloud_server.announce`, then a plain `terraform apply` to drop
+# the spent key from state. See infra/DEPLOY.md, "Rebuilding the VM".
 resource "tailscale_tailnet_key" "announce" {
-  reusable      = true
-  ephemeral     = false
-  preauthorized = true
-  tags          = [var.tailscale_acl_tag]
-  description   = "aztec-announce vm bootstrap"
+  count = var.bootstrap_tailnet_key ? 1 : 0
+
+  reusable            = false
+  ephemeral           = false
+  preauthorized       = true
+  tags                = [var.tailscale_acl_tag]
+  expiry              = 3600
+  recreate_if_invalid = "never"
+  description         = "aztec-announce vm bootstrap"
 }
 
 # The VM's public IPv4, reserved separately from the server so a rebuild
@@ -155,8 +182,12 @@ resource "hcloud_server" "announce" {
   }
 
   user_data = templatefile("${path.module}/cloud-init/announce.yaml.tftpl", {
+    # tailscale_auth_key is empty when var.bootstrap_tailnet_key is false.
+    # That only matters for a server created in that apply, which then
+    # cannot join the tailnet; an existing server ignores user_data changes
+    # (ignore_changes below).
     hostname           = "aztec-announce-${var.hcloud_location}"
-    tailscale_auth_key = tailscale_tailnet_key.announce.key
+    tailscale_auth_key = var.bootstrap_tailnet_key ? tailscale_tailnet_key.announce[0].key : ""
   })
 
   lifecycle {

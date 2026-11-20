@@ -57,6 +57,12 @@ variable "tailscale_acl_tag" {
   description = "The ACL tag applied to this VM's tailnet auth key, and therefore to the node once it joins. PREREQUISITE, decided by the owner, and NOT something this module can satisfy on its own: `tag:announce` must already exist in the tailnet's ACL policy before this module is applied. That ACL is a singleton owned by a different repository and module — `rpc.aztec.foundation/tailscale.tf` in AztecProtocol/foundation-iac, applied with `overwrite_existing_content = true` — so the tag has to be added there, in code, and that module applied, before this one runs; it cannot be added by hand in the Tailscale admin console, because the next apply of that module treats the console edit as drift and reverts it. If the tag is missing when this module applies, `tailscale_tailnet_key` creation (or the `tailscale up` call in cloud-init, depending on where Tailscale rejects it) fails with an unknown-tag error, and if that failure is somehow missed, the VM boots with no reachable path in at all — no SSH port, and no working tailnet join. Do not attempt to create this tag from this repository; it is owned elsewhere."
 }
 
+variable "bootstrap_tailnet_key" {
+  type        = bool
+  default     = false
+  description = "Mint a single-use, one-hour tailnet auth key for a server that is about to be created. Only the first boot of a server uses the key (cloud-init `tailscale up --authkey=…`); after that a valid key only adds risk, because anyone who reads it from Terraform state can join the tailnet as tag:announce. So the default is false: in normal operation no key exists and none is in state. Set it to true only on the apply that creates the server: the first deployment, or a rebuild (`terraform apply -var bootstrap_tailnet_key=true -replace=hcloud_server.announce`, see infra/DEPLOY.md). Run the next plain `terraform apply` afterwards to drop the spent key from state. A server created with this false boots with an empty auth key and never joins the tailnet."
+}
+
 # --- application context (used only in output/inventory text, not to configure the VM directly) ---
 
 variable "domain" {
